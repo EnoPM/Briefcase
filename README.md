@@ -1,0 +1,116 @@
+# Briefcase
+
+Briefcase is a Deceive Inc. mod loader with a small native bootstrap and a
+managed .NET mod runtime. Open `Briefcase.slnx` in Rider. No driver, WDK, UE4SS,
+or system-wide .NET installation is required at runtime.
+
+## Installed layout
+
+```text
+DeceiveInc/Binaries/Win64/
+|-- version.dll
+`-- Briefcase/
+    |-- loader.json
+    |-- settings.json
+    |-- Briefcase.log
+    |-- Core/
+    |   |-- Briefcase.ManagedHost.dll
+    |   |-- Briefcase.ModApi.dll
+    |   |-- Briefcase.SdkEmitter.dll
+    |   |-- BuiltIns/
+    |   |-- DotNet/
+    |   |-- Sdk/
+    |   `-- Cache/
+    `-- Mods/
+```
+
+`version.dll` forwards the Windows Version API, starts the bundled CoreCLR, and
+passes a versioned native service table to `Briefcase.ManagedHost`. The managed
+host generates or loads the SDK for the current executable and then loads C# mod
+DLLs from `Briefcase/Mods` into collectible `AssemblyLoadContext` instances.
+F1 opens the managed Briefcase menu. A top switch selects the local **Client**
+configuration or remote **Server** administration. The Client view uses vertical
+tabs for Briefcase and each configurable user mod.
+
+The dedicated-server package uses a separate headless managed host. It keeps
+the same mod lifecycle and generated SDK, but contains no rendering backend,
+ImGui dependency, input hook, or F1 configuration window. Server settings are
+still persisted in `Briefcase/settings.json`.
+
+## Build
+
+With Visual Studio Build Tools and the .NET 10 SDK installed:
+
+```bat
+scripts\build\build_framework.bat Release
+```
+
+The complete, portable package is written to `dist/Briefcase`. The command does
+not modify the game installation. Framework packages intentionally contain an
+empty `Briefcase/Mods` directory; user mods have their own build and release
+lifecycles.
+
+To install the built package with the game closed:
+
+```bat
+scripts\deploy_framework.bat Release
+```
+
+The deploy script overlays Briefcase-owned runtime files and preserves existing
+mod configuration files.
+
+After Briefcase has generated a server SDK once, build the headless package with:
+
+```bat
+scripts\build\build_server_framework.bat Release
+```
+
+The portable server package is written to `dist/Briefcase.Server`. Server
+administration and vanilla community balancing live in `Core/BuiltIns`; its
+`Mods` directory is reserved for user-installed server mods.
+
+Install it after stopping the dedicated server:
+
+```bat
+scripts\deploy_server_framework.bat Release
+```
+
+The deployment also installs `StartBriefcaseServer.bat` in the dedicated-server
+installation root. Run that script instead of `DeceiveIncServer.exe`: it reads
+the game and query ports from `TripwireServer.ini`, launches the Shipping server
+directly in the current terminal, and refuses to create a duplicate instance.
+The official graphical configuration launcher is therefore bypassed while the
+INI remains editable through Briefcase Server Administration.
+
+The same deployment installs `StartBriefcaseServerNoUI.bat` directly in
+`DeceiveInc/Binaries/Win64`. It provides identical console-only behavior with
+paths resolved relative to the Shipping executable.
+
+## Projects
+
+- `loader/Briefcase.VersionProxy`: `version.dll` bootstrap and Windows export forwarding.
+- `runtime/Briefcase.UnrealRuntime`: native Unreal, patching, and hosting services.
+- `managed/Briefcase.Rendering`: managed ImGui.NET, Direct3D 11, DirectComposition, and input backend.
+- `managed/Briefcase.ModApi`: stable C# API used by mods.
+- `managed/Briefcase.ManagedHost`: SDK and managed mod lifecycle.
+- `managed/Briefcase.SdkEmitter`: persisted build-specific SDK emitter.
+- `managed/Briefcase.SdkGenerator`: source-based validation oracle used by repository tests.
+- `managed/builtins/Briefcase.ServerBrowser.Client`: persistent community-server
+  directory and game-thread-safe quick connection from the F1 menu.
+- `samples/Briefcase.HotReloadSample`: reload lifecycle sample.
+- `samples/Briefcase.HelloSample`: minimal C# sample.
+- `managed/builtins/ServerAdminControl.Client`: Core client view for balancing,
+  server control, and player mod compatibility.
+- `managed/builtins/ServerAdminControl.Server`: Core headless administration,
+  balancing, and public mod-handshake channels on one TCP endpoint.
+
+Game-specific user mods and historical experiments live in a separate private
+repository. The public solution and release pipeline contain no references to
+those projects.
+
+See `docs/BriefcaseArchitecture.md`, `docs/CSharpRuntime.md`, `docs/ModConfiguration.md`,
+`docs/AutomaticSdkGeneration.md`, `docs/Patching.md`, and
+`docs/Versioning.md` for the internal model. Dependency declarations and lifecycle
+ordering are documented in `docs/ModDependencies.md`; the player/server manifest
+exchange is documented in `docs/ModHandshake.md`.
+The paused driver project remains separate at `D:\KernelProjects\EnoMemoryLab`.

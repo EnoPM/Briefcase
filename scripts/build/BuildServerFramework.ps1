@@ -1,0 +1,138 @@
+[CmdletBinding()]
+param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+
+. (Join-Path $PSScriptRoot '..\Common.ps1')
+
+function Remove-SafeDirectory([string]$Path, [string]$AllowedRoot) {
+    if(-not (Test-Path -LiteralPath $Path)) { return }
+    $resolved=[IO.Path]::GetFullPath($Path)
+    $prefix=[IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\') + '\'
+    if(-not $resolved.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe cleanup path: $resolved"
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+}
+
+try {
+    $root=Get-ModRoot
+    $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    $install=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+    if($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }
+    $msbuild=Join-Path $install[0] 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+
+    Write-Host "Building Briefcase server proxy | $Configuration | x64"
+    $nativeProject=Join-Path $root 'loader\Briefcase.VersionProxy\Briefcase.VersionProxy.vcxproj'
+    $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
+        $nativeProject,"/p:Configuration=$Configuration",'/p:Platform=x64','/m','/nologo','/verbosity:minimal','/nr:false')
+    if($result -ne 0){ exit $result }
+
+    $artifactRoot=Join-Path $root 'artifacts'
+    $publishCore=Join-Path $artifactRoot 'publish-server\Core'
+    Remove-SafeDirectory $publishCore $artifactRoot
+    Write-Host "Publishing Briefcase headless host | $Configuration"
+    $managedHost=Join-Path $root 'managed\Briefcase.ManagedHost\Briefcase.ManagedHost.csproj'
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        'publish',$managedHost,'-c',$Configuration,'--self-contained','false',
+        '-p:BriefcaseHeadless=true','--output',$publishCore)
+    if($result -ne 0){ exit $result }
+
+    $build='6A966107-05B60000'
+    $serverWin64='D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64'
+    $snapshotSource=Join-Path $serverWin64 "Briefcase\Core\Sdk\Metadata\DeceiveInc.Server.$build.json"
+    if(-not (Test-Path -LiteralPath $snapshotSource)) {
+        throw "The generated server snapshot is missing: $snapshotSource"
+    }
+
+    $serverBuildCore=Join-Path $artifactRoot 'server-sdk\Core'
+    Remove-SafeDirectory $serverBuildCore $artifactRoot
+    $snapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.json"
+    New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($snapshot)) -Force | Out-Null
+    [IO.File]::WriteAllText(
+        $snapshot,
+        [IO.File]::ReadAllText($snapshotSource),
+        [Text.UTF8Encoding]::new($false))
+    $sdkEmitter=Join-Path $publishCore 'Briefcase.SdkEmitter.dll'
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        $sdkEmitter,'production',$snapshot,$serverBuildCore)
+    if($result -ne 0){ exit $result }
+    $generatedProps=Join-Path $serverBuildCore 'Sdk\Generated\Server\Current.props'
+    if(-not (Test-Path -LiteralPath $generatedProps)) {
+        throw "Generated server SDK reference was not published: $generatedProps"
+    }
+
+    Write-Host "Building ServerAdminControl.Server | $Configuration"
+    $serverModProject=Join-Path $root 'managed\builtins\ServerAdminControl.Server\ServerAdminControl.Server.csproj'
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        'build',$serverModProject,'-c',$Configuration,
+        "-p:BriefcaseGeneratedServerProps=$generatedProps")
+    if($result -ne 0){ exit $result }
+
+    $distribution=Join-Path $root 'dist\Briefcase.Server'
+    Remove-SafeDirectory $distribution (Join-Path $root 'dist')
+    $framework=Join-Path $distribution 'Briefcase'
+    $core=Join-Path $framework 'Core'
+    $builtIns=Join-Path $core 'BuiltIns'
+    $mods=Join-Path $framework 'Mods'
+    $dotnetDistribution=Join-Path $core 'DotNet'
+    New-Item -ItemType Directory -Path $core,$builtIns,$mods -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
+        -Destination (Join-Path $distribution 'version.dll')
+    Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServer.bat') `
+        -Destination (Join-Path $distribution 'StartBriefcaseServer.bat')
+    Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServerNoUI.bat') `
+        -Destination (Join-Path $distribution 'StartBriefcaseServerNoUI.bat')
+    Copy-Item -Path (Join-Path $publishCore '*') -Destination $core -Recurse -Force
+    @(
+        'Briefcase.SdkEmitter.exe',
+        'Briefcase.SdkEmitter.deps.json',
+        'Briefcase.SdkEmitter.runtimeconfig.json'
+    ) | ForEach-Object {
+        $cliArtifact=Join-Path $core $_
+        if(Test-Path -LiteralPath $cliArtifact) { Remove-Item -LiteralPath $cliArtifact -Force }
+    }
+    Copy-Item -LiteralPath (Join-Path $serverBuildCore 'Sdk') -Destination $core -Recurse
+
+    $dotnetRoot=Join-Path $env:ProgramFiles 'dotnet'
+    $hostFxrRoot=Join-Path $dotnetRoot 'host\fxr'
+    $sharedRoot=Join-Path $dotnetRoot 'shared\Microsoft.NETCore.App'
+    $runtimeVersions=Get-ChildItem -LiteralPath $hostFxrRoot -Directory |
+        Where-Object {
+            (Test-Path -LiteralPath (Join-Path $_.FullName 'hostfxr.dll')) -and
+            (Test-Path -LiteralPath (Join-Path $sharedRoot $_.Name))
+        } |
+        Sort-Object { [version]$_.Name } -Descending
+    if($runtimeVersions.Count -eq 0) { throw 'A matching x64 .NET runtime was not found.' }
+    $runtimeVersion=$runtimeVersions[0].Name
+    $bundledFxr=Join-Path $dotnetDistribution "host\fxr\$runtimeVersion"
+    $bundledShared=Join-Path $dotnetDistribution "shared\Microsoft.NETCore.App\$runtimeVersion"
+    New-Item -ItemType Directory -Path $bundledFxr,$bundledShared -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $runtimeVersions[0].FullName 'hostfxr.dll') -Destination $bundledFxr
+    Copy-Item -Path (Join-Path $sharedRoot "$runtimeVersion\*") -Destination $bundledShared -Recurse -Force
+
+    $modOutput=Join-Path $root "managed\builtins\ServerAdminControl.Server\bin\$Configuration\net10.0"
+    Copy-Item -LiteralPath (Join-Path $modOutput 'ServerAdminControl.Server.dll') -Destination $builtIns
+    $symbols=Join-Path $modOutput 'ServerAdminControl.Server.pdb'
+    if(Test-Path -LiteralPath $symbols) { Copy-Item -LiteralPath $symbols -Destination $builtIns }
+    # Server mods are built and distributed independently from Briefcase Core.
+    [IO.File]::WriteAllText(
+        (Join-Path $framework 'loader.json'),
+        "{`n  `"schemaVersion`": 1`n}`n",
+        [Text.UTF8Encoding]::new($false))
+
+    $forbidden=@(Get-ChildItem -LiteralPath $framework -File -Recurse | Where-Object {
+        $_.Name -match '^(ImGui|cimgui|Briefcase\.Rendering|Vortice\.|SharpGen\.)'
+    })
+    if($forbidden.Count -ne 0) {
+        throw "The server package contains rendering files: $($forbidden.Name -join ', ')"
+    }
+
+    Write-Host "[OK] Headless server package: $distribution"
+    Write-Host "[OK] Generated server SDK: $generatedProps"
+    Write-Host "[OK] Bundled .NET ${runtimeVersion}: $dotnetDistribution"
+    Write-Host '[OK] No ImGui, rendering, Vortice, or SharpGen binary is present.'
+    exit 0
+} catch {
+    Write-Host "[ERROR] $($_.Exception.Message)"
+    Write-Host $_.ScriptStackTrace
+    exit 1
+}

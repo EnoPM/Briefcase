@@ -1,0 +1,54 @@
+.code
+extern mProcs:QWORD
+f0 proc
+  jmp mProcs[8*0]
+f0 endp
+f1 proc
+  jmp mProcs[8*1]
+f1 endp
+f2 proc
+  jmp mProcs[8*2]
+f2 endp
+f3 proc
+  jmp mProcs[8*3]
+f3 endp
+f4 proc
+  jmp mProcs[8*4]
+f4 endp
+f5 proc
+  jmp mProcs[8*5]
+f5 endp
+f6 proc
+  jmp mProcs[8*6]
+f6 endp
+f7 proc
+  jmp mProcs[8*7]
+f7 endp
+f8 proc
+  jmp mProcs[8*8]
+f8 endp
+f9 proc
+  jmp mProcs[8*9]
+f9 endp
+f10 proc
+  jmp mProcs[8*10]
+f10 endp
+f11 proc
+  jmp mProcs[8*11]
+f11 endp
+f12 proc
+  jmp mProcs[8*12]
+f12 endp
+f13 proc
+  jmp mProcs[8*13]
+f13 endp
+f14 proc
+  jmp mProcs[8*14]
+f14 endp
+f15 proc
+  jmp mProcs[8*15]
+f15 endp
+f16 proc
+  jmp mProcs[8*16]
+f16 endp
+end

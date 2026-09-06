@@ -1,0 +1,12 @@
+<Project>
+  <Target Name="RequireBriefcaseGeneratedClientSdk"
+          BeforeTargets="ResolveReferences"
+          Condition="'$(BriefcaseRequiresGeneratedClientSdk)' == 'true' And !Exists('$(BriefcaseGeneratedClientProps)')">
+    <Error Text="The generated Briefcase client SDK is missing. Run scripts\build\build_framework.bat Release, or launch an installed Briefcase build once to generate it." />
+  </Target>
+  <Target Name="RequireBriefcaseGeneratedServerSdk"
+          BeforeTargets="ResolveReferences"
+          Condition="'$(BriefcaseRequiresGeneratedServerSdk)' == 'true' And !Exists('$(BriefcaseGeneratedServerProps)')">
+    <Error Text="The generated Briefcase server SDK is missing. Install Briefcase on the dedicated server and launch it once before building this project." />
+  </Target>
+</Project>

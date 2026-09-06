@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Briefcase.ManagedHost</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(BriefcaseHeadless)' == 'true'">
+    <DefineConstants>$(DefineConstants);BRIEFCASE_HEADLESS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Briefcase.ModApi\Briefcase.ModApi.csproj" />
+    <ProjectReference Include="..\Briefcase.Rendering\Briefcase.Rendering.csproj"
+                      Condition="'$(BriefcaseHeadless)' != 'true'" />
+    <ProjectReference Include="..\Briefcase.SdkEmitter\Briefcase.SdkEmitter.csproj" />
+  </ItemGroup>
+</Project>

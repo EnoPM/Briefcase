@@ -1,0 +1,37 @@
+<Solution>
+  <Configurations><Platform Name="x64" /></Configurations>
+
+  <Folder Name="/Core/Client/">
+    <Project Path="managed/Briefcase.Rendering/Briefcase.Rendering.csproj" />
+    <Project Path="managed/builtins/Briefcase.ServerBrowser.Client/Briefcase.ServerBrowser.Client.csproj" />
+    <Project Path="managed/builtins/ServerAdminControl.Client/ServerAdminControl.Client.csproj" />
+  </Folder>
+
+  <Folder Name="/Core/Hybrid/Managed/">
+    <Project Path="managed/Briefcase.ModApi/Briefcase.ModApi.csproj" />
+    <Project Path="managed/Briefcase.ManagedHost/Briefcase.ManagedHost.csproj" />
+    <Project Path="managed/Briefcase.SdkEmitter/Briefcase.SdkEmitter.csproj" />
+    <File Path="managed/builtins/ServerAdminControl.Shared/ServerAdminProtocol.cs" />
+    <File Path="managed/builtins/ServerAdminControl.Shared/ServerAdminAuthentication.cs" />
+    <File Path="managed/builtins/ServerAdminControl.Shared/ModHandshakeProtocol.cs" />
+  </Folder>
+
+  <Folder Name="/Core/Server/">
+    <Project Path="managed/builtins/ServerAdminControl.Server/ServerAdminControl.Server.csproj" />
+  </Folder>
+
+  <Folder Name="/Core/Hybrid/Native/">
+    <Project Path="runtime/Briefcase.UnrealRuntime/Briefcase.UnrealRuntime.vcxproj" />
+    <Project Path="loader/Briefcase.VersionProxy/Briefcase.VersionProxy.vcxproj" />
+  </Folder>
+
+  <Folder Name="/Core/Tooling/">
+    <Project Path="managed/Briefcase.SdkGenerator/Briefcase.SdkGenerator.csproj" />
+    <Project Path="validation/Briefcase.ServerAdministration.Validation/Briefcase.ServerAdministration.Validation.csproj" />
+  </Folder>
+
+  <Folder Name="/Samples/">
+    <Project Path="samples/Briefcase.HelloSample/Briefcase.HelloSample.csproj" />
+    <Project Path="samples/Briefcase.HotReloadSample/Briefcase.HotReloadSample.csproj" />
+  </Folder>
+</Solution>

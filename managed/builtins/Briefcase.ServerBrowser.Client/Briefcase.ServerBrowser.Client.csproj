@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Briefcase.ServerBrowser.Client</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <BriefcaseRequiresGeneratedClientSdk>true</BriefcaseRequiresGeneratedClientSdk>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Briefcase.ModApi\Briefcase.ModApi.csproj" Private="false" />
+    <Compile Include="..\CommunityServerConnection.cs"
+             Link="ClientSupport\CommunityServerConnection.cs" />
+  </ItemGroup>
+  <Import Project="$(BriefcaseGeneratedClientProps)" Condition="Exists('$(BriefcaseGeneratedClientProps)')" />
+</Project>

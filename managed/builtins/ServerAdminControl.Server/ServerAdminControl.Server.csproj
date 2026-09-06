@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>ServerAdminControl.Server</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <BriefcaseRequiresGeneratedServerSdk>true</BriefcaseRequiresGeneratedServerSdk>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Briefcase.ModApi\Briefcase.ModApi.csproj" Private="false" />
+    <Compile Include="..\ServerAdminControl.Shared\ServerAdminProtocol.cs"
+             Link="Protocol\ServerAdminProtocol.cs" />
+    <Compile Include="..\ServerAdminControl.Shared\ServerAdminAuthentication.cs"
+             Link="Protocol\ServerAdminAuthentication.cs" />
+    <Compile Include="..\ServerAdminControl.Shared\ModHandshakeProtocol.cs"
+             Link="Protocol\ModHandshakeProtocol.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Briefcase.ServerAdministration.Validation" />
+  </ItemGroup>
+  <Import Project="$(BriefcaseGeneratedServerProps)" Condition="Exists('$(BriefcaseGeneratedServerProps)')" />
+</Project>

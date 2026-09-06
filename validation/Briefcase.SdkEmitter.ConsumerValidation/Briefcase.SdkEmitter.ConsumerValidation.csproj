@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\Briefcase.ModApi\Briefcase.ModApi.csproj" />
+    <Reference Include="Briefcase.DeceiveInc.Client.Sdk.EmitPrototype">
+      <HintPath>$(EmittedSdkPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="RequireEmittedSdk"
+          BeforeTargets="ResolveReferences"
+          Condition="'$(EmittedSdkPath)' == '' Or !Exists('$(EmittedSdkPath)')">
+    <Error Text="Set EmittedSdkPath to the persisted SDK prototype DLL." />
+  </Target>
+</Project>

@@ -1,0 +1,11 @@
+.idea/
+.vs/
+artifacts/
+dist/
+**/bin/
+**/obj/
+*.suo
+*.user
+*.DotSettings.user
+third_party/*.zip
+
