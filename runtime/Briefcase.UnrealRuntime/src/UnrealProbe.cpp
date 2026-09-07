@@ -1,7 +1,9 @@
 #include "UnrealProbe.h"
 
 #include "Log.h"
+#include "PeImageView.h"
 #include "RuntimeProfile.h"
+#include "RuntimeSymbolResolver.h"
 #include "UnrealLayout.h"
 
 #include <Briefcase/BriefcaseModApi.h>
@@ -22,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -47,6 +50,26 @@ bool readable(const void* address, std::size_t size) {
     const auto begin = reinterpret_cast<std::uintptr_t>(address);
     const auto regionEnd = reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize;
     return begin <= regionEnd && size <= regionEnd - begin;
+}
+
+bool readableRange(const void* address, std::size_t size) {
+    if (!address || size == 0) return false;
+    auto cursor = reinterpret_cast<std::uintptr_t>(address);
+    if (size > std::numeric_limits<std::uintptr_t>::max() - cursor) return false;
+    const auto end = cursor + size;
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION memory{};
+        if (!VirtualQuery(reinterpret_cast<const void*>(cursor), &memory, sizeof(memory)) ||
+            memory.State != MEM_COMMIT || (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+            return false;
+        const auto region = reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+        if (memory.RegionSize > std::numeric_limits<std::uintptr_t>::max() - region)
+            return false;
+        const auto regionEnd = region + memory.RegionSize;
+        if (regionEnd <= cursor) return false;
+        cursor = std::min(end, regionEnd);
+    }
+    return true;
 }
 
 bool writable(void* address, std::size_t size) {
@@ -2636,16 +2659,32 @@ void runUnrealProbe(HMODULE self) {
         return;
     }
 
-    auto* nameFunctionAddress = base + runtimeProfile->FNameToStringRva;
-    if (!readable(nameFunctionAddress, runtimeProfile->FNameToStringPrefix.size()) ||
-        !std::equal(runtimeProfile->FNameToStringPrefix.begin(),
-                    runtimeProfile->FNameToStringPrefix.end(), nameFunctionAddress)) {
-        log(L"FName::ToString fingerprint mismatch; profile refused");
+    const auto image = discovery::PeImageView::create(
+        std::span<const std::byte>(base, nt->OptionalHeader.SizeOfImage));
+    if (!image) {
+        log(L"mapped PE image failed bounded section validation");
+        return;
+    }
+    const auto text = image->section(".text");
+    if (!text || !readableRange(text->Bytes.data(), text->Bytes.size())) {
+        log(L"executable .text section is not fully readable");
+        return;
+    }
+    const auto symbolResolution = discovery::resolveRuntimeSymbols(*image);
+    if (!symbolResolution.succeeded()) {
+        const auto failure = discovery::runtimeSymbolFailureName(symbolResolution.Failure);
+        log(L"runtime signature resolution refused: " +
+            std::wstring(failure.begin(), failure.end()));
+        return;
+    }
+    auto* nameFunctionAddress = base + symbolResolution.Symbols.FNameToStringRva;
+    const auto* objects = reinterpret_cast<const FUObjectArray*>(
+        base + symbolResolution.Symbols.GUObjectArrayRva);
+    if (!executable(nameFunctionAddress) || !readable(objects, sizeof(FUObjectArray))) {
+        log(L"resolved Unreal symbols have incompatible memory protection");
         return;
     }
     const auto convert = reinterpret_cast<FNameToString>(nameFunctionAddress);
-    const auto* objects = reinterpret_cast<const FUObjectArray*>(
-        base + runtimeProfile->GUObjectArrayRva);
 
     for (unsigned attempt = 0; attempt < 120 && !saneObjectArray(objects); ++attempt) Sleep(250);
     if (!saneObjectArray(objects)) {
@@ -2679,7 +2718,11 @@ void runUnrealProbe(HMODULE self) {
     log(L"GUObjectArray=" + hexadecimal(reinterpret_cast<std::uintptr_t>(objects)) +
         L" objects=" + std::to_wstring(objectCountSnapshot) +
         L" chunks=" + std::to_wstring(objects->ObjObjects.NumChunks));
-    log(L"FName::ToString=" + hexadecimal(reinterpret_cast<std::uintptr_t>(nameFunctionAddress)));
+    log(L"FName::ToString=" + hexadecimal(reinterpret_cast<std::uintptr_t>(nameFunctionAddress)) +
+        L" signatureMatches=" + std::to_wstring(symbolResolution.Symbols.FNameMatchCount));
+    log(L"GUObjectArray signature references=" +
+        std::to_wstring(symbolResolution.Symbols.GUObjectReferenceCount) +
+        L" unanimousTarget=true");
     // SDK extraction is automatic for every supported executable profile. The
     // snapshot is build-specific and address-free, so client and server output
     // can coexist and be consumed by the same managed generator.

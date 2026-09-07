@@ -21,10 +21,38 @@ function Invoke-Checked(
     }
 }
 
+function Find-MSBuild {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} `
+        'Microsoft Visual Studio\Installer\vswhere.exe'
+    $installation = @(& $vswhere -latest -products '*' `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath)
+    if ($installation.Count -ne 1) {
+        throw 'MSVC v143 x64 build tools are required for native unit tests.'
+    }
+    return Join-Path $installation[0] 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+}
+
 try {
     $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 
     if (-not $SkipUnit) {
+        $msbuild = Find-MSBuild
+        $nativeProject = Join-Path $root `
+            'tests\Briefcase.Native.Tests\Briefcase.Native.Tests.vcxproj'
+        Invoke-Checked $msbuild @(
+            $nativeProject,
+            "/p:Configuration=$Configuration",
+            '/p:Platform=x64',
+            '/m',
+            '/nologo',
+            '/verbosity:minimal',
+            '/nr:false') `
+            'Briefcase native unit-test build'
+        $nativeTests = Join-Path $root `
+            "tests\Briefcase.Native.Tests\bin\$Configuration\Briefcase.Native.Tests.exe"
+        Invoke-Checked $nativeTests @() 'Briefcase native unit tests'
+
         $artifactRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts'))
         $results = [IO.Path]::GetFullPath((Join-Path $artifactRoot 'test-results'))
         $artifactPrefix = $artifactRoot.TrimEnd('\') + '\'

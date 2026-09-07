@@ -31,6 +31,7 @@
 
   <Folder Name="/Tests/Unit/">
     <Project Path="tests/Briefcase.Core.Tests/Briefcase.Core.Tests.csproj" />
+    <Project Path="tests/Briefcase.Native.Tests/Briefcase.Native.Tests.vcxproj" />
   </Folder>
 
   <Folder Name="/Tests/Integration/">

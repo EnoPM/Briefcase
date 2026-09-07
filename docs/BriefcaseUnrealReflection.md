@@ -31,16 +31,18 @@ remain stable for one exact executable build:
 runtime address = executable image base + RVA
 ```
 
-For the current build the profile contains an RVA for `GUObjectArray` and one
-for `FName::ToString`. Before using either address, the runtime validates:
+The client and server profiles contain the expected PE timestamp and
+`SizeOfImage`, but no Unreal symbol addresses. After selecting the profile, the
+runtime validates the mapped PE section table and scans only `.text`:
 
-- the PE timestamp;
-- `SizeOfImage`;
-- the first 16 machine-code bytes of `FName::ToString`;
-- structural invariants of `GUObjectArray`.
+- `FName::ToString` must match one masked function signature;
+- every matching UE 4.27 chunked-object lookup decodes a RIP-relative address;
+- all decoded lookups must agree on one `GUObjectArray` address inside `.data`;
+- the resolved function must be executable;
+- the resolved object array must pass its existing structural invariants.
 
-If a game update changes these facts, the runtime logs an error and stops. It
-does not guess and does not dereference the old addresses.
+If a game update changes these facts, the runtime logs the failed stage and
+stops before publishing the Unreal API. It never falls back to a stale RVA.
 
 ## 3. The global UObject registry
 
@@ -131,8 +133,10 @@ lookup before any controlled mutation is reintroduced.
 ## 7. Current source map
 
 - `loader/Briefcase.VersionProxy`: Windows export forwarding and runtime entry point.
-- `runtime/Briefcase.UnrealRuntime/src/RuntimeProfile.h`: exact-build addresses and
-  fingerprints.
+- `runtime/Briefcase.UnrealRuntime/src/RuntimeProfile.h`: executable identities.
+- `runtime/Briefcase.UnrealRuntime/src/PeImageView.*`: bounded mapped-PE section reader.
+- `runtime/Briefcase.UnrealRuntime/src/SignatureScanner.*`: masked scanning and RIP decoding.
+- `runtime/Briefcase.UnrealRuntime/src/RuntimeSymbolResolver.*`: fail-closed Unreal symbol discovery.
 - `runtime/Briefcase.UnrealRuntime/src/UnrealLayout.h`: minimal UE 4.27 memory views.
 - `runtime/Briefcase.UnrealRuntime/src/UnrealProbe.cpp`: validation, registry traversal
   and metadata inventory.
@@ -142,6 +146,5 @@ The complete package is produced under `dist/Briefcase`. Its `version.dll` is
 placed beside the game executable, while `Briefcase.UnrealRuntime.dll` is stored
 under `Briefcase/Core/Native`; the rest of the `Briefcase` directory remains intact.
 
-The next milestone should resolve globals by byte signatures bounded to PE
-sections, then decode reflected property subclasses. That removes the two hard
-coded RVAs while keeping the same fail-closed validation.
+The next reflection milestone can now focus on additional property subclasses
+and containers because critical symbol addresses no longer come from fixed RVAs.
