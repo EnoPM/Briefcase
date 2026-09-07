@@ -31,7 +31,7 @@ internal static class Program
             var snapshot = JsonSerializer.Deserialize(
                 snapshotStream, SnapshotJsonContext.Default.SdkSnapshot) ??
                 throw new InvalidDataException("The SDK snapshot is empty.");
-            if (snapshot.SchemaVersion is not (1 or 2))
+            if (snapshot.SchemaVersion is not (1 or 2 or 3))
                 throw new InvalidDataException(
                     $"Unsupported SDK snapshot schema {snapshot.SchemaVersion}.");
 

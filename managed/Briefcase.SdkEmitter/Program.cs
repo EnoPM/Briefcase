@@ -29,6 +29,9 @@ internal static class Program
                 $"[OK] Emitted {result.TypeCount} types, {result.PropertyCount} properties/fields, " +
                 $"and {result.FunctionCount} functions.");
             Console.WriteLine(
+                $"[OK] Described {result.Plan.DescribedPropertyCount} properties/fields and " +
+                $"{result.Plan.DescribedFunctionCount} functions in reflection metadata.");
+            Console.WriteLine(
                 $"[INFO] Skipped {result.Plan.SkippedTypeCount} types, " +
                 $"{result.Plan.SkippedPropertyCount} properties/fields, and " +
                 $"{result.Plan.SkippedFunctionCount} functions not covered by the current ABI.");

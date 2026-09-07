@@ -43,6 +43,13 @@ internal sealed class EmissionTypeSystem : IDisposable
     public Type IUnrealObject => typeof(IUnrealObject<>);
     public Type UnrealClass => typeof(UnrealClass<>);
     public Type UnrealProperty => typeof(UnrealProperty<>);
+    public Type UnrealReflectedType => typeof(UnrealReflectedType);
+    public Type UnrealReflectedProperty => typeof(UnrealReflectedProperty);
+    public Type UnrealReflectedFunction => typeof(UnrealReflectedFunction);
+    public Type UnrealReflectedParameter => typeof(UnrealReflectedParameter);
+    public Type UnrealTypeMetadata => typeof(UnrealTypeMetadata);
+    public Type UnrealBooleanLayout => typeof(UnrealBooleanLayout);
+    public Type UnrealTypePathAttribute => typeof(UnrealTypePathAttribute);
     public Type Nullable => typeof(Nullable<>);
     public Type ByteArray => typeof(byte[]);
 

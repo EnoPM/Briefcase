@@ -26,6 +26,7 @@ internal sealed class TypeSnapshot
     [JsonPropertyName("size")] public int Size { get; init; }
     [JsonPropertyName("properties")] public List<PropertySnapshot> Properties { get; init; } = [];
     [JsonPropertyName("functions")] public List<FunctionSnapshot> Functions { get; init; } = [];
+    [JsonPropertyName("values")] public List<EnumValueSnapshot> Values { get; init; } = [];
 }
 
 internal sealed class PropertySnapshot
@@ -36,8 +37,52 @@ internal sealed class PropertySnapshot
     [JsonPropertyName("elementSize")] public int ElementSize { get; init; }
     [JsonPropertyName("arrayDimension")] public int ArrayDimension { get; init; }
     [JsonPropertyName("flags")] public ulong Flags { get; init; }
+
+    // Schema 2 compatibility. Schema 3 writes the complete recursive Type node.
     [JsonPropertyName("referencedTypePath")] public string? ReferencedTypePath { get; init; }
     [JsonPropertyName("innerUnrealType")] public string? InnerUnrealType { get; init; }
+    [JsonPropertyName("type")] public UnrealTypeSnapshot? Type { get; init; }
+
+    [JsonIgnore]
+    public UnrealTypeSnapshot EffectiveType => Type ?? UnrealTypeSnapshot.FromLegacy(this);
+}
+
+internal sealed class UnrealTypeSnapshot
+{
+    [JsonPropertyName("unrealType")] public string UnrealType { get; init; } = "UnknownProperty";
+    [JsonPropertyName("elementSize")] public int ElementSize { get; init; }
+    [JsonPropertyName("referencedTypePath")] public string? ReferencedTypePath { get; init; }
+    [JsonPropertyName("innerType")] public UnrealTypeSnapshot? InnerType { get; init; }
+    [JsonPropertyName("keyType")] public UnrealTypeSnapshot? KeyType { get; init; }
+    [JsonPropertyName("valueType")] public UnrealTypeSnapshot? ValueType { get; init; }
+    [JsonPropertyName("underlyingType")] public UnrealTypeSnapshot? UnderlyingType { get; init; }
+    [JsonPropertyName("booleanLayout")] public BooleanLayoutSnapshot? BooleanLayout { get; init; }
+
+    public static UnrealTypeSnapshot FromLegacy(PropertySnapshot property) => new()
+    {
+        UnrealType = string.IsNullOrEmpty(property.UnrealType)
+            ? "UnknownProperty"
+            : property.UnrealType,
+        ElementSize = property.ElementSize,
+        ReferencedTypePath = property.ReferencedTypePath,
+        InnerType = property.InnerUnrealType is { Length: > 0 } inner
+            ? new UnrealTypeSnapshot { UnrealType = inner }
+            : null
+    };
+}
+
+internal sealed class BooleanLayoutSnapshot
+{
+    [JsonPropertyName("fieldSize")] public byte FieldSize { get; init; }
+    [JsonPropertyName("byteOffset")] public byte ByteOffset { get; init; }
+    [JsonPropertyName("byteMask")] public byte ByteMask { get; init; }
+    [JsonPropertyName("fieldMask")] public byte FieldMask { get; init; }
+}
+
+internal sealed class EnumValueSnapshot
+{
+    [JsonPropertyName("name")] public string Name { get; init; } = "";
+    [JsonPropertyName("value")] public long Value { get; init; }
 }
 
 internal sealed class FunctionSnapshot

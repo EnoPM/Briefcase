@@ -50,9 +50,13 @@ Both inputs pass through the same `Briefcase.SdkEmitter`; no hand-written or
 static game SDK participates in compilation.
 
 Snapshots intentionally contain no UObject, UClass, UFunction or property
-addresses. They store stable names, inheritance, sizes, offsets, property kinds,
-referenced struct paths, function flags and parameter layouts. Runtime operations resolve and validate
-the live reflected object again before use.
+addresses. Schema 3 stores stable names, inheritance, sizes, offsets, function
+flags, parameter layouts and UEnum values. Every FProperty also has an
+address-free recursive type tree: referenced type paths, array/set elements,
+map keys and values, enum storage types and packed-boolean masks. Runtime
+operations resolve and validate the live reflected object again before use.
+Schema 2 snapshots remain readable so a packaged fallback SDK can still be
+built before a process has produced its first schema 3 snapshot.
 
 ## Role of System.Reflection.Metadata
 
@@ -73,8 +77,27 @@ emit game types under `Briefcase.DeceiveInc` and engine types under
 `Briefcase.Unreal.<Module>`. A source file using APIs available on both sides can
 therefore compile against either SDK without conditional namespace imports.
 
-Generated UObject types are classes with inheritance and typed methods:
+Every generated class and structure exposes the complete reflected description,
+even when a value does not yet have a safe managed transport contract:
 
+```csharp
+var type = Spy.Reflection;
+var property = Spy.Metadata.Properties.Inventory;
+var function = Spy.Metadata.Functions.GetEquippedWeapon;
+
+Console.WriteLine(type.Path);
+Console.WriteLine(property.Type);       // for example TArray<InventoryEntry>
+Console.WriteLine(function.Parameters[0].IsOutput);
+```
+
+`Properties` and `Functions` on a generated class are the executable ABI
+surface. `Metadata.Properties` and `Metadata.Functions` are the complete,
+read-only reflection surface. A `TMap`, delegate or writable `out` parameter can
+therefore be inspected accurately without exposing a getter or method that
+would copy engine-owned memory incorrectly. Generated enums are real CLR enums
+with an `UnrealTypePathAttribute`; `FName` is represented by `UnrealName`.
+
+Generated UObject types are classes with inheritance and typed methods:
 ```csharp
 using Briefcase.DeceiveInc;
 using Briefcase.ModApi;
@@ -90,11 +113,11 @@ private static void OnCoverRatioUpdatePostfix(Spy __instance)
 Calling the same patched function from its own postfix would create reentrancy,
 so the example deliberately calls a different generated method.
 
-The current generator covers UObject classes, reflected inheritance,
-scalar/object properties, `ScriptStruct` value types, primitive enum storage,
-ordinary inputs, a single return value, `FString` parameters, and bounded
-`TArray<uint8>` parameters. It also exposes object `TextProperty` values and
-`FText` function inputs/returns as `UnrealText`:
+The callable ABI currently covers UObject classes, reflected inheritance,
+scalar and object properties, `FName`, `ScriptStruct` value types, ordinary
+inputs, a single return value, `FString`, bounded `TArray<uint8>` inputs and
+object `TextProperty` values. It also transports `FText` function inputs and
+returns as `UnrealText`:
 
 ```csharp
 // Implicit string conversion keeps common calls concise.
@@ -110,13 +133,15 @@ code. The native bridge converts UTF-16 through `KismetTextLibrary`, constructs
 the owning engine value immediately before `ProcessEvent`, converts outputs
 back to UTF-16, and destroys every temporary with the reflected `FProperty`.
 This preserves Unreal's reference-counted lifetime rules. `FText` nested inside
-a copied `ScriptStruct` remains excluded until field-by-field struct marshalling
-can provide the same ownership guarantee.
+a copied `ScriptStruct` remains metadata-only until field-by-field struct
+marshalling can provide the same ownership guarantee.
 
-Generated structs use explicit offsets and native
-size, including opaque structs whose native fields are not reflected. Other
-containers, delegates and additional out/ref results still need dedicated ABI
-contracts and will be added incrementally.
+Generated structs use explicit offsets and native size, including opaque
+structs whose native fields are not reflected. Arrays, sets, maps, delegates,
+interfaces, weak/lazy/soft references, field paths and all parameter directions
+are already described recursively. A dedicated ABI contract is still required
+before most of those values become directly readable or callable from managed
+code.
 
 ## Development and runtime use
 
@@ -167,9 +192,10 @@ Its code is split into four explicit stages:
 4. `FullSurfaceValidator` compares every emitted type and supported member with
    an SDK produced by the established source generator from the same snapshot.
 
-Unsupported containers, strings, delegates, extra out/ref parameters and
-invalid reflected layouts are counted and reported. They are never represented
-as a guessed CLR type.
+Members outside the callable ABI are counted and reported, but remain available
+through their exact metadata descriptors. Invalid structure layouts are omitted
+from the copied CLR struct surface instead of being represented with a guessed
+type or offset.
 
 Run `scripts\build\validate_persisted_sdk_emitter.bat Release` to emit an
 isolated SDK, build a source-generated reference from the same snapshot, compare
@@ -180,9 +206,13 @@ the game. The consumer exercises the intended mod syntax with `typeof`,
 `nameof`, patch attributes, generated method calls, a generated value struct,
 and a generic `T.FromObject` constraint.
 
-On the current client snapshot this covers 5,463 types, 17,694 properties or
-fields, and 6,963 functions. One invalid type, 5,094 unsupported properties or
-fields, and 3,215 unsupported functions are reported explicitly.
+On the current schema 2 fallback snapshots, the client SDK describes 22,784
+properties or fields and 10,179 functions across 5,463 types. Its callable ABI
+surface contains 18,673 properties or fields and 8,751 functions. The server
+SDK describes 22,718 properties or fields and 10,120 functions across 5,452
+types; 18,613 properties or fields and 8,699 functions are callable. Schema 3
+adds richer nested type and enum information when the updated runtime next
+captures either executable.
 
 At startup, `GeneratedSdkLoader` finds the snapshot for the current validated
 game build, invokes this same emitter synchronously, and loads the resulting SDK

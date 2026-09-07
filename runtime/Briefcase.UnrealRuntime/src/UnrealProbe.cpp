@@ -1253,6 +1253,9 @@ BriefcasePropertyKind propertyKind(const FProperty* property) {
     if (!property || !readable(property->ClassPrivate, sizeof(FFieldClass))) return BRIEFCASE_PROPERTY_UNKNOWN;
     const auto* fieldClass = reinterpret_cast<const FFieldClass*>(property->ClassPrivate);
     const auto type = nameToString(fieldClass->Name, RuntimeNameConverter);
+    if (type == L"Int8Property") return BRIEFCASE_PROPERTY_INT8;
+    if (type == L"Int16Property") return BRIEFCASE_PROPERTY_INT16;
+    if (type == L"UInt16Property") return BRIEFCASE_PROPERTY_UINT16;
     if (type == L"IntProperty") return BRIEFCASE_PROPERTY_INT32;
     if (type == L"UInt32Property") return BRIEFCASE_PROPERTY_UINT32;
     if (type == L"Int64Property") return BRIEFCASE_PROPERTY_INT64;
@@ -1260,11 +1263,19 @@ BriefcasePropertyKind propertyKind(const FProperty* property) {
     if (type == L"FloatProperty") return BRIEFCASE_PROPERTY_FLOAT;
     if (type == L"DoubleProperty") return BRIEFCASE_PROPERTY_DOUBLE;
     if (type == L"BoolProperty") return BRIEFCASE_PROPERTY_BOOL;
-    if (type == L"ByteProperty" || type == L"EnumProperty") return BRIEFCASE_PROPERTY_BYTE;
+    if (type == L"ByteProperty") return BRIEFCASE_PROPERTY_BYTE;
+    if (type == L"EnumProperty") {
+        if (property->ElementSize == 1) return BRIEFCASE_PROPERTY_BYTE;
+        if (property->ElementSize == 2) return BRIEFCASE_PROPERTY_UINT16;
+        if (property->ElementSize == 4) return BRIEFCASE_PROPERTY_UINT32;
+        if (property->ElementSize == 8) return BRIEFCASE_PROPERTY_UINT64;
+        return BRIEFCASE_PROPERTY_UNKNOWN;
+    }
     if (type == L"ObjectProperty" || type == L"ClassProperty") return BRIEFCASE_PROPERTY_OBJECT;
     if (type == L"StructProperty") return BRIEFCASE_PROPERTY_STRUCT;
     if (type == L"StrProperty") return BRIEFCASE_PROPERTY_STRING;
     if (type == L"TextProperty") return BRIEFCASE_PROPERTY_TEXT;
+    if (type == L"NameProperty") return BRIEFCASE_PROPERTY_NAME;
     return BRIEFCASE_PROPERTY_UNKNOWN;
 }
 
@@ -1450,10 +1461,109 @@ void writeJsonString(std::ostream& output, std::wstring_view value) {
     output.put('"');
 }
 
+std::wstring propertyTypeName(const FProperty* property) {
+    if (!property || !readable(property->ClassPrivate, sizeof(FFieldClass)))
+        return L"UnknownProperty";
+    return nameToString(
+        reinterpret_cast<const FFieldClass*>(property->ClassPrivate)->Name,
+        RuntimeNameConverter);
+}
+
+void writeTypeReference(std::ostream& output, const UObject* object) {
+    if (!object || !readable(object, sizeof(UObject))) return;
+    const auto path = objectPath(object, RuntimeNameConverter);
+    if (path.empty()) return;
+    output << ",\"referencedTypePath\":";
+    writeJsonString(output, path);
+}
+
+void writePropertyTypeSnapshot(
+    std::ostream& output,
+    const FProperty* property,
+    unsigned depth = 0) {
+    constexpr unsigned MaximumTypeDepth = 8;
+    const auto typeName = propertyTypeName(property);
+    output << "{\"unrealType\":";
+    writeJsonString(output, typeName);
+    output << ",\"elementSize\":" << (property ? property->ElementSize : 0);
+    if (!property || depth >= MaximumTypeDepth) {
+        output << '}';
+        return;
+    }
+
+    if (typeName == L"BoolProperty" && readable(property, sizeof(FBoolProperty))) {
+        const auto* boolean = reinterpret_cast<const FBoolProperty*>(property);
+        output << ",\"booleanLayout\":{\"fieldSize\":"
+               << static_cast<unsigned>(boolean->FieldSize)
+               << ",\"byteOffset\":" << static_cast<unsigned>(boolean->ByteOffset)
+               << ",\"byteMask\":" << static_cast<unsigned>(boolean->ByteMask)
+               << ",\"fieldMask\":" << static_cast<unsigned>(boolean->FieldMask)
+               << '}';
+    } else if (typeName == L"StructProperty" &&
+               readable(property, sizeof(FStructProperty))) {
+        writeTypeReference(
+            output, reinterpret_cast<const FStructProperty*>(property)->Struct);
+    } else if ((typeName == L"ObjectProperty" || typeName == L"WeakObjectProperty" ||
+                typeName == L"LazyObjectProperty" || typeName == L"SoftObjectProperty") &&
+               readable(property, sizeof(FObjectPropertyBase))) {
+        writeTypeReference(
+            output, reinterpret_cast<const FObjectPropertyBase*>(property)->PropertyClass);
+    } else if ((typeName == L"ClassProperty" || typeName == L"SoftClassProperty") &&
+               readable(property, sizeof(FClassProperty))) {
+        writeTypeReference(
+            output, reinterpret_cast<const FClassProperty*>(property)->MetaClass);
+    } else if (typeName == L"InterfaceProperty" &&
+               readable(property, sizeof(FInterfaceProperty))) {
+        writeTypeReference(
+            output, reinterpret_cast<const FInterfaceProperty*>(property)->InterfaceClass);
+    } else if (typeName == L"EnumProperty" && readable(property, sizeof(FEnumProperty))) {
+        const auto* enumeration = reinterpret_cast<const FEnumProperty*>(property);
+        writeTypeReference(output, enumeration->Enum);
+        if (enumeration->UnderlyingProperty &&
+            readable(enumeration->UnderlyingProperty, sizeof(FProperty))) {
+            output << ",\"underlyingType\":";
+            writePropertyTypeSnapshot(output, enumeration->UnderlyingProperty, depth + 1);
+        }
+    } else if (typeName == L"ByteProperty" && readable(property, sizeof(FByteProperty))) {
+        writeTypeReference(output, reinterpret_cast<const FByteProperty*>(property)->Enum);
+    } else if ((typeName == L"DelegateProperty" ||
+                typeName == L"MulticastDelegateProperty" ||
+                typeName == L"MulticastInlineDelegateProperty" ||
+                typeName == L"MulticastSparseDelegateProperty") &&
+               readable(property, sizeof(FDelegateProperty))) {
+        writeTypeReference(
+            output, reinterpret_cast<const FDelegateProperty*>(property)->SignatureFunction);
+    } else if (typeName == L"FieldPathProperty" &&
+               readable(property, sizeof(FFieldPathProperty))) {
+        const auto* fieldClass =
+            reinterpret_cast<const FFieldPathProperty*>(property)->PropertyClass;
+        if (fieldClass && readable(fieldClass, sizeof(FFieldClass))) {
+            output << ",\"referencedTypePath\":";
+            writeJsonString(output, L"FFieldClass:" +
+                nameToString(fieldClass->Name, RuntimeNameConverter));
+        }
+    }
+
+    const auto writeNested = [&](const char* name, const FProperty* nested) {
+        if (!nested || !readable(nested, sizeof(FProperty))) return;
+        output << ",\"" << name << "\":";
+        writePropertyTypeSnapshot(output, nested, depth + 1);
+    };
+    if (typeName == L"ArrayProperty" && readable(property, sizeof(FArrayProperty))) {
+        writeNested("innerType", reinterpret_cast<const FArrayProperty*>(property)->Inner);
+    } else if (typeName == L"SetProperty" && readable(property, sizeof(FSetProperty))) {
+        writeNested(
+            "innerType", reinterpret_cast<const FSetProperty*>(property)->ElementProperty);
+    } else if (typeName == L"MapProperty" && readable(property, sizeof(FMapProperty))) {
+        const auto* map = reinterpret_cast<const FMapProperty*>(property);
+        writeNested("keyType", map->KeyProperty);
+        writeNested("valueType", map->ValueProperty);
+    }
+    output << '}';
+}
+
 void writePropertySnapshot(std::ostream& output, const FProperty* property) {
-    const auto* fieldClass = reinterpret_cast<const FFieldClass*>(property->ClassPrivate);
-    const auto typeName = readable(fieldClass, sizeof(FFieldClass))
-        ? nameToString(fieldClass->Name, RuntimeNameConverter) : L"UnknownProperty";
+    const auto typeName = propertyTypeName(property);
     output << "{\"name\":";
     writeJsonString(output, nameToString(property->NamePrivate, RuntimeNameConverter));
     output << ",\"unrealType\":";
@@ -1461,27 +1571,11 @@ void writePropertySnapshot(std::ostream& output, const FProperty* property) {
     output << ",\"offset\":" << property->OffsetInternal
            << ",\"elementSize\":" << property->ElementSize
            << ",\"arrayDimension\":" << property->ArrayDim
-           << ",\"flags\":" << property->PropertyFlags;
-    if (typeName == L"StructProperty" && readable(property, sizeof(FStructProperty))) {
-        const auto* typed = reinterpret_cast<const FStructProperty*>(property);
-        if (typed->Struct && readable(typed->Struct, sizeof(UStruct))) {
-            output << ",\"referencedTypePath\":";
-            writeJsonString(output, objectPath(typed->Struct, RuntimeNameConverter));
-        }
-    }
-    if (typeName == L"ArrayProperty" && readable(property, sizeof(FArrayProperty))) {
-        const auto* typed = reinterpret_cast<const FArrayProperty*>(property);
-        if (typed->Inner && readable(typed->Inner, sizeof(FProperty))) {
-            const auto* innerClass = reinterpret_cast<const FFieldClass*>(typed->Inner->ClassPrivate);
-            if (readable(innerClass, sizeof(FFieldClass))) {
-                output << ",\"innerUnrealType\":";
-                writeJsonString(output, nameToString(innerClass->Name, RuntimeNameConverter));
-            }
-        }
-    }
+           << ",\"flags\":" << property->PropertyFlags
+           << ",\"type\":";
+    writePropertyTypeSnapshot(output, property);
     output << '}';
 }
-
 void writeProperties(std::ostream& output, const FField* first, bool parametersOnly) {
     constexpr std::uint64_t ParameterFlag = 0x80;
     bool needsComma = false;
@@ -1523,6 +1617,24 @@ void writeFunctions(std::ostream& output, const UField* first) {
     }
 }
 
+void writeEnumValues(std::ostream& output, const UEnum* enumeration) {
+    if (!enumeration || !readable(enumeration, sizeof(UEnum)) ||
+        enumeration->NamesNum < 0 || enumeration->NamesMax < enumeration->NamesNum ||
+        enumeration->NamesNum > 65'536 ||
+        (enumeration->NamesNum > 0 &&
+         (!enumeration->Names ||
+          !readable(enumeration->Names,
+              static_cast<std::size_t>(enumeration->NamesNum) * sizeof(FEnumNameValue)))))
+        return;
+
+    for (std::int32_t index = 0; index < enumeration->NamesNum; ++index) {
+        if (index != 0) output.put(',');
+        output << "{\"name\":";
+        writeJsonString(
+            output, nameToString(enumeration->Names[index].Name, RuntimeNameConverter));
+        output << ",\"value\":" << enumeration->Names[index].Value << '}';
+    }
+}
 struct ReflectedType {
     const UObject* Object;
     std::wstring Path;
@@ -1538,13 +1650,16 @@ void writeSdkSnapshot(const std::filesystem::path& root,
     types.reserve(4096);
     for (std::int32_t index = 0; index < objectCount; ++index) {
         const auto* item = itemAt(RuntimeObjects->ObjObjects, index);
-        if (!item || !readable(item->Object, sizeof(UStruct)) ||
+        if (!item || !readable(item->Object, sizeof(UObject)) ||
             item->Object->InternalIndex != index ||
             !readable(item->Object->ClassPrivate, sizeof(UObject)))
             continue;
         const auto kind = nameToString(
             item->Object->ClassPrivate->NamePrivate, RuntimeNameConverter);
-        if (kind != L"Class" && kind != L"ScriptStruct") continue;
+        if (kind != L"Class" && kind != L"ScriptStruct" && kind != L"Enum") continue;
+        if ((kind == L"Enum" && !readable(item->Object, sizeof(UEnum))) ||
+            (kind != L"Enum" && !readable(item->Object, sizeof(UStruct))))
+            continue;
         auto path = objectPath(item->Object, RuntimeNameConverter);
         if (!path.starts_with(L"/Script/")) continue;
         types.push_back({item->Object, std::move(path), kind});
@@ -1569,7 +1684,7 @@ void writeSdkSnapshot(const std::filesystem::path& root,
         briefcase::log(L"sdk snapshot: unable to create " + temporary);
         return;
     }
-    output << "{\"schemaVersion\":2,\"target\":";
+    output << "{\"schemaVersion\":3,\"target\":";
     writeJsonString(output, runtimeProfile.TargetName);
     output << ",\"sdkAssemblyName\":";
     writeJsonString(output, runtimeProfile.SdkAssemblyName);
@@ -1579,8 +1694,12 @@ void writeSdkSnapshot(const std::filesystem::path& root,
 
     bool needsTypeComma = false;
     for (const auto& type : types) {
+        const bool enumeration = type.Kind == L"Enum";
         const auto* structure = reinterpret_cast<const UStruct*>(type.Object);
-        if (!readable(structure, sizeof(UStruct))) continue;
+        const auto* enumObject = reinterpret_cast<const UEnum*>(type.Object);
+        if ((enumeration && !readable(enumObject, sizeof(UEnum))) ||
+            (!enumeration && !readable(structure, sizeof(UStruct))))
+            continue;
         if (needsTypeComma) output.put(',');
         output << "{\"path\":";
         writeJsonString(output, type.Path);
@@ -1588,16 +1707,24 @@ void writeSdkSnapshot(const std::filesystem::path& root,
         writeJsonString(output, nameToString(type.Object->NamePrivate, RuntimeNameConverter));
         output << ",\"kind\":";
         writeJsonString(output, type.Kind);
-        output << ",\"superPath\":";
-        if (structure->SuperStruct && readable(structure->SuperStruct, sizeof(UStruct)))
-            writeJsonString(output, objectPath(structure->SuperStruct, RuntimeNameConverter));
-        else
-            output << "null";
-        output << ",\"size\":" << structure->PropertiesSize << ",\"properties\":[";
-        writeProperties(output, structure->ChildProperties, false);
-        output << "],\"functions\":[";
-        writeFunctions(output, structure->Children);
-        output << "]}";
+
+        if (enumeration) {
+            output << ",\"superPath\":null,\"size\":0,\"properties\":[],"
+                      "\"functions\":[],\"values\":[";
+            writeEnumValues(output, enumObject);
+            output << "]}";
+        } else {
+            output << ",\"superPath\":";
+            if (structure->SuperStruct && readable(structure->SuperStruct, sizeof(UStruct)))
+                writeJsonString(output, objectPath(structure->SuperStruct, RuntimeNameConverter));
+            else
+                output << "null";
+            output << ",\"size\":" << structure->PropertiesSize << ",\"properties\":[";
+            writeProperties(output, structure->ChildProperties, false);
+            output << "],\"functions\":[";
+            writeFunctions(output, structure->Children);
+            output << "],\"values\":[]}";
+        }
         needsTypeComma = true;
     }
     output << "]}";
@@ -1737,15 +1864,19 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiGetPropertyInfo(
 
 std::int32_t canonicalSize(BriefcasePropertyKind kind) {
     switch (kind) {
+    case BRIEFCASE_PROPERTY_INT8:
+    case BRIEFCASE_PROPERTY_BYTE:
+    case BRIEFCASE_PROPERTY_BOOL: return 1;
+    case BRIEFCASE_PROPERTY_INT16:
+    case BRIEFCASE_PROPERTY_UINT16: return 2;
     case BRIEFCASE_PROPERTY_INT32:
     case BRIEFCASE_PROPERTY_UINT32:
     case BRIEFCASE_PROPERTY_FLOAT: return 4;
     case BRIEFCASE_PROPERTY_INT64:
     case BRIEFCASE_PROPERTY_UINT64:
     case BRIEFCASE_PROPERTY_DOUBLE:
-    case BRIEFCASE_PROPERTY_OBJECT: return 8;
-    case BRIEFCASE_PROPERTY_BOOL: return 1;
-    case BRIEFCASE_PROPERTY_BYTE: return 1;
+    case BRIEFCASE_PROPERTY_OBJECT:
+    case BRIEFCASE_PROPERTY_NAME: return 8;
     default: return 0;
     }
 }

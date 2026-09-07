@@ -47,7 +47,11 @@ public enum UnrealPropertyKind : uint
     Struct,
     String,
     Byte,
-    Text
+    Text,
+    Int8,
+    Int16,
+    UInt16,
+    Name
 }
 
 [Flags]

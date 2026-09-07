@@ -94,23 +94,76 @@ static_assert(offsetof(FBoolProperty, ByteMask) == 0x7A);
 static_assert(offsetof(FBoolProperty, FieldMask) == 0x7B);
 
 // Every typed FProperty subclass starts its payload at 0x78 in this UE 4.27
-// build. FStructProperty keeps the UScriptStruct describing its value there.
-// Recording that object path in the SDK snapshot lets generated C# signatures
-// say FGeometry instead of the unhelpful generic name "StructProperty".
+// build. These non-owning views expose metadata pointers only; they never model
+// live property values or take ownership of an Unreal allocation.
 struct FStructProperty : FProperty {
     std::byte Padding60[0x18];
     struct UStruct* Struct;
 };
 static_assert(offsetof(FStructProperty, Struct) == 0x78);
 
-// Container properties use the same typed-property payload offset. Inner
-// describes the element type of a TArray and is metadata, never array data.
+struct FObjectPropertyBase : FProperty {
+    std::byte Padding60[0x18];
+    UObject* PropertyClass;
+};
+static_assert(offsetof(FObjectPropertyBase, PropertyClass) == 0x78);
+
+struct FClassProperty : FObjectPropertyBase {
+    UObject* MetaClass;
+};
+static_assert(offsetof(FClassProperty, MetaClass) == 0x80);
+
+struct FInterfaceProperty : FProperty {
+    std::byte Padding60[0x18];
+    UObject* InterfaceClass;
+};
+static_assert(offsetof(FInterfaceProperty, InterfaceClass) == 0x78);
+
 struct FArrayProperty : FProperty {
     std::byte Padding60[0x18];
     FProperty* Inner;
 };
 static_assert(offsetof(FArrayProperty, Inner) == 0x78);
 
+struct FSetProperty : FProperty {
+    std::byte Padding60[0x18];
+    FProperty* ElementProperty;
+};
+static_assert(offsetof(FSetProperty, ElementProperty) == 0x78);
+
+struct FMapProperty : FProperty {
+    std::byte Padding60[0x18];
+    FProperty* KeyProperty;
+    FProperty* ValueProperty;
+};
+static_assert(offsetof(FMapProperty, KeyProperty) == 0x78);
+static_assert(offsetof(FMapProperty, ValueProperty) == 0x80);
+
+struct FEnumProperty : FProperty {
+    std::byte Padding60[0x18];
+    UObject* Enum;
+    FProperty* UnderlyingProperty;
+};
+static_assert(offsetof(FEnumProperty, Enum) == 0x78);
+static_assert(offsetof(FEnumProperty, UnderlyingProperty) == 0x80);
+
+struct FByteProperty : FProperty {
+    std::byte Padding60[0x18];
+    UObject* Enum;
+};
+static_assert(offsetof(FByteProperty, Enum) == 0x78);
+
+struct FDelegateProperty : FProperty {
+    std::byte Padding60[0x18];
+    struct UFunction* SignatureFunction;
+};
+static_assert(offsetof(FDelegateProperty, SignatureFunction) == 0x78);
+
+struct FFieldPathProperty : FProperty {
+    std::byte Padding60[0x18];
+    FFieldClass* PropertyClass;
+};
+static_assert(offsetof(FFieldPathProperty, PropertyClass) == 0x78);
 struct UStruct : UField {
     UStruct* SuperStruct;
     UField* Children;
@@ -145,6 +198,22 @@ static_assert(offsetof(UFunction, ParmsSize) == 0xB6);
 static_assert(offsetof(UFunction, Func) == 0xD8);
 static_assert(sizeof(UFunction) == 0xE0);
 
+struct FEnumNameValue {
+    FName Name;
+    std::int64_t Value;
+};
+static_assert(sizeof(FEnumNameValue) == 0x10);
+
+// UEnum stores its reflected names as TArray<TPair<FName, int64>> at 0x50.
+// Only that bounded array is read while producing the address-free snapshot.
+struct UEnum : UField {
+    FStringBuffer CppType;
+    FEnumNameValue* Names;
+    std::int32_t NamesNum;
+    std::int32_t NamesMax;
+};
+static_assert(offsetof(UEnum, Names) == 0x50);
+static_assert(sizeof(UEnum) == 0x60);
 struct FUObjectItem {
     UObject* Object;
     std::int32_t Flags;

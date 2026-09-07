@@ -13,6 +13,8 @@ public sealed record PersistedSdkGenerationResult(
     int TypeCount,
     int PropertyCount,
     int FunctionCount,
+    int DescribedPropertyCount,
+    int DescribedFunctionCount,
     int SkippedTypeCount,
     int SkippedPropertyCount,
     int SkippedFunctionCount);
@@ -24,7 +26,7 @@ public sealed record PersistedSdkGenerationResult(
 /// </summary>
 public static class PersistedSdkGenerator
 {
-    private const string EmitterSchema = "2";
+    private const string EmitterSchema = "3";
 
     public static PersistedSdkGenerationResult Generate(
         string coreDirectory, string snapshotPath)
@@ -85,6 +87,8 @@ public static class PersistedSdkGenerator
             emission.TypeCount,
             emission.PropertyCount,
             emission.FunctionCount,
+            emission.Plan.DescribedPropertyCount,
+            emission.Plan.DescribedFunctionCount,
             emission.Plan.SkippedTypeCount,
             emission.Plan.SkippedPropertyCount,
             emission.Plan.SkippedFunctionCount);

@@ -1,13 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using Briefcase.ModApi;
 
 namespace Briefcase.SdkEmitter;
 
 /// <summary>
-/// Converts a raw Unreal snapshot into the exact public surface that can be
-/// represented by the current managed ABI. Both the emitter and validator use
-/// this immutable plan, so a skipped member can never be mistaken for emitted
-/// API.
+/// Separates the complete reflected metadata surface from the smaller set of
+/// values that the current native ABI can safely marshal. Unknown or owning
+/// Unreal values remain visible through Metadata without acquiring a misleading
+/// C# getter or callable method.
 /// </summary>
 internal sealed class SdkEmissionPlan
 {
@@ -38,12 +39,14 @@ internal sealed class SdkEmissionPlan
     public int SkippedTypeCount { get; }
     public int SkippedPropertyCount { get; }
     public int SkippedFunctionCount { get; }
+    public int DescribedPropertyCount => Types.Sum(type => type.MetadataProperties.Count);
+    public int DescribedFunctionCount => Types.Sum(type => type.MetadataFunctions.Count);
 
     public static SdkEmissionPlan Create(SdkSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var candidates = snapshot.Types
-            .Where(type => type.Kind is "Class" or "ScriptStruct" &&
+            .Where(type => type.Kind is "Class" or "ScriptStruct" or "Enum" &&
                            type.Path.StartsWith("/Script/", StringComparison.Ordinal))
             .GroupBy(type => type.Path, StringComparer.Ordinal)
             .Select(group => group.First())
@@ -51,7 +54,7 @@ internal sealed class SdkEmissionPlan
             .ToArray();
 
         var usable = candidates
-            .Where(type => type.Kind == "Class" || type.Size is > 0 and <= 65_535)
+            .Where(type => type.Kind is "Class" or "Enum" || type.Size is > 0 and <= 65_535)
             .ToArray();
         var names = BuildTypeNames(usable);
         var knownPaths = names.Keys.ToHashSet(StringComparer.Ordinal);
@@ -61,16 +64,25 @@ internal sealed class SdkEmissionPlan
 
         foreach (var type in usable)
         {
+            var metadataProperties = PlanMetadataProperties(type);
+            var metadataFunctions = PlanMetadataFunctions(type);
+            if (type.Kind == "Enum")
+            {
+                planned.Add(new PlannedType(
+                    type, names[type.Path], [], [], metadataProperties, metadataFunctions));
+                continue;
+            }
+
             var used = type.Kind == "Class"
                 ? new HashSet<string>(StringComparer.Ordinal)
                 {
                     "Handle", "Name", "Path", "ClassHandle", "StaticClass", "Properties",
-                    "Functions", "UnrealPath", "FromObject", "Read", "ReadString", "ReadText",
-                    "InvokeText", "IsA", names[type.Path].Name
+                    "Functions", "Metadata", "Reflection", "UnrealPath", "FromObject", "Read",
+                    "ReadString", "ReadText", "InvokeText", "IsA", names[type.Path].Name
                 }
                 : new HashSet<string>(StringComparer.Ordinal)
                 {
-                    "UnrealPath", "NativeSize", names[type.Path].Name
+                    "Metadata", "Reflection", "UnrealPath", "NativeSize", names[type.Path].Name
                 };
 
             var properties = new List<PlannedProperty>();
@@ -107,13 +119,36 @@ internal sealed class SdkEmissionPlan
                 }
             }
 
-            planned.Add(new PlannedType(type, names[type.Path], properties, functions));
+            planned.Add(new PlannedType(
+                type, names[type.Path], properties, functions,
+                metadataProperties, metadataFunctions));
         }
 
         var byPath = planned.ToDictionary(type => type.Snapshot.Path, StringComparer.Ordinal);
         return new SdkEmissionPlan(
             snapshot, planned, byPath, candidates.Length - usable.Length,
             skippedProperties, skippedFunctions);
+    }
+
+    private static IReadOnlyList<PlannedMetadataProperty> PlanMetadataProperties(TypeSnapshot type)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal) { "Properties" };
+        return type.Properties
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .ThenBy(property => property.Offset)
+            .Select(property => new PlannedMetadataProperty(
+                property, UniqueMember(property.Name, "Property", used)))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<PlannedMetadataFunction> PlanMetadataFunctions(TypeSnapshot type)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal) { "Functions" };
+        return type.Functions
+            .OrderBy(function => function.Name, StringComparer.Ordinal)
+            .Select(function => new PlannedMetadataFunction(
+                function, UniqueMember(function.Name, "Function", used)))
+            .ToArray();
     }
 
     private static PlannedFunction? TryPlanFunction(
@@ -134,22 +169,16 @@ internal sealed class SdkEmissionPlan
             if (managedType is null || parameter.ArrayDimension != 1 ||
                 !CanUseExactParameterName(parameter.Name))
                 return null;
-            // UE represents `const FStruct&` as ConstParm | OutParm |
-            // ReferenceParm. It is still an input value in the ProcessEvent
-            // buffer, so it is safe to emit. A writable out parameter remains
-            // excluded until generated methods can return multiple values.
+
+            // UE represents const FStruct& as ConstParm | OutParm | ReferenceParm.
+            // It remains an input in the ProcessEvent buffer. Writable out/ref
+            // values stay metadata-only until their ownership rules are modeled.
             var isConstReference =
                 (parameter.Flags & (ConstParameterFlag | ReferenceParameterFlag)) ==
                 (ConstParameterFlag | ReferenceParameterFlag);
             if (!isReturn && (parameter.Flags & OutParameterFlag) != 0 &&
                 !isConstReference)
                 return null;
-            // Unreal marks native `const FStruct&` inputs as ReferenceParm even
-            // though ProcessEvent still stores the complete value inline in
-            // the reflected parameter buffer. Generated blittable structures
-            // can therefore use the same value signature as ordinary struct
-            // inputs. Writable OutParm values remain excluded above until the
-            // SDK can model multiple return values explicitly.
             if (!isReturn && (parameter.Flags & ReferenceParameterFlag) != 0 &&
                 managedType.Kind is not (ManagedTypeKind.String or ManagedTypeKind.Text or
                     ManagedTypeKind.ByteArray or ManagedTypeKind.GeneratedStruct))
@@ -164,6 +193,41 @@ internal sealed class SdkEmissionPlan
     private static bool IsReturnParameter(PropertySnapshot parameter) =>
         (parameter.Flags & ReturnParameterFlag) != 0;
 
+    internal static UnrealTypeKind MetadataKind(UnrealTypeSnapshot type) => type.UnrealType switch
+    {
+        "BoolProperty" => UnrealTypeKind.Boolean,
+        "Int8Property" => UnrealTypeKind.Int8,
+        "ByteProperty" => type.ReferencedTypePath is null ? UnrealTypeKind.UInt8 : UnrealTypeKind.Enum,
+        "Int16Property" => UnrealTypeKind.Int16,
+        "UInt16Property" => UnrealTypeKind.UInt16,
+        "IntProperty" => UnrealTypeKind.Int32,
+        "UInt32Property" => UnrealTypeKind.UInt32,
+        "Int64Property" => UnrealTypeKind.Int64,
+        "UInt64Property" => UnrealTypeKind.UInt64,
+        "FloatProperty" => UnrealTypeKind.Float,
+        "DoubleProperty" => UnrealTypeKind.Double,
+        "EnumProperty" => UnrealTypeKind.Enum,
+        "NameProperty" => UnrealTypeKind.Name,
+        "StrProperty" => UnrealTypeKind.String,
+        "TextProperty" => UnrealTypeKind.Text,
+        "ObjectProperty" => UnrealTypeKind.Object,
+        "ClassProperty" => UnrealTypeKind.Class,
+        "InterfaceProperty" => UnrealTypeKind.Interface,
+        "WeakObjectProperty" => UnrealTypeKind.WeakObject,
+        "LazyObjectProperty" => UnrealTypeKind.LazyObject,
+        "SoftObjectProperty" => UnrealTypeKind.SoftObject,
+        "SoftClassProperty" => UnrealTypeKind.SoftClass,
+        "StructProperty" => UnrealTypeKind.Struct,
+        "ArrayProperty" => UnrealTypeKind.Array,
+        "SetProperty" => UnrealTypeKind.Set,
+        "MapProperty" => UnrealTypeKind.Map,
+        "DelegateProperty" => UnrealTypeKind.Delegate,
+        "MulticastDelegateProperty" or "MulticastInlineDelegateProperty" or
+        "MulticastSparseDelegateProperty" => UnrealTypeKind.MulticastDelegate,
+        "FieldPathProperty" => UnrealTypeKind.FieldPath,
+        _ => UnrealTypeKind.Unknown
+    };
+
     private static Dictionary<string, GeneratedTypeName> BuildTypeNames(
         IReadOnlyList<TypeSnapshot> types)
     {
@@ -171,9 +235,12 @@ internal sealed class SdkEmissionPlan
         foreach (var namespaceGroup in types.GroupBy(type => NamespaceFor(type.Path)))
         {
             foreach (var nameGroup in namespaceGroup.GroupBy(
-                         type => type.Kind == "ScriptStruct"
-                             ? "F" + Identifier(type.Name).TrimStart('F')
-                             : Identifier(type.Name), StringComparer.Ordinal))
+                         type => type.Kind switch
+                         {
+                             "ScriptStruct" => "F" + Identifier(type.Name).TrimStart('F'),
+                             "Enum" => "E" + Identifier(type.Name).TrimStart('E'),
+                             _ => Identifier(type.Name)
+                         }, StringComparer.Ordinal))
             {
                 var ordered = nameGroup.OrderBy(type => type.Path, StringComparer.Ordinal).ToArray();
                 for (var index = 0; index < ordered.Length; index++)
@@ -204,12 +271,7 @@ internal sealed class SdkEmissionPlan
         return candidate;
     }
 
-    private static bool CanUseExactParameterName(string value) =>
-        !string.IsNullOrEmpty(value) &&
-        (char.IsLetter(value[0]) || value[0] == '_') &&
-        value.All(character => char.IsLetterOrDigit(character) || character == '_');
-
-    private static string Identifier(string value)
+    internal static string Identifier(string value)
     {
         if (string.IsNullOrEmpty(value)) return "Unnamed";
         var result = new StringBuilder(value.Length + 1);
@@ -220,6 +282,11 @@ internal sealed class SdkEmissionPlan
         return result.ToString();
     }
 
+    private static bool CanUseExactParameterName(string value) =>
+        !string.IsNullOrEmpty(value) &&
+        (char.IsLetter(value[0]) || value[0] == '_') &&
+        value.All(character => char.IsLetterOrDigit(character) || character == '_');
+
     private static string StableSuffix(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8];
 }
@@ -228,15 +295,18 @@ internal sealed record PlannedType(
     TypeSnapshot Snapshot,
     GeneratedTypeName Name,
     IReadOnlyList<PlannedProperty> Properties,
-    IReadOnlyList<PlannedFunction> Functions)
+    IReadOnlyList<PlannedFunction> Functions,
+    IReadOnlyList<PlannedMetadataProperty> MetadataProperties,
+    IReadOnlyList<PlannedMetadataFunction> MetadataFunctions)
 {
     public string FullName => Name.Namespace + "." + Name.Name;
 }
 
 internal readonly record struct GeneratedTypeName(string Namespace, string Name);
-
 internal sealed record PlannedProperty(
     PropertySnapshot Snapshot, ManagedTypeDescriptor Type, string MemberName);
+internal sealed record PlannedMetadataProperty(PropertySnapshot Snapshot, string MemberName);
+internal sealed record PlannedMetadataFunction(FunctionSnapshot Snapshot, string MemberName);
 
 internal sealed record PlannedFunction(
     FunctionSnapshot Snapshot, string MemberName, IReadOnlyList<PlannedParameter> Parameters)
@@ -257,20 +327,20 @@ internal sealed record ManagedTypeDescriptor(ManagedTypeKind Kind, string? Refer
         bool allowStringProperty = false,
         bool allowTextProperty = false)
     {
-        if (property.UnrealType == "StructProperty")
-            return property.ReferencedTypePath is { } path && knownPaths.Contains(path)
+        var type = property.EffectiveType;
+        if (type.UnrealType == "StructProperty")
+            return type.ReferencedTypePath is { } path && knownPaths.Contains(path)
                 ? new ManagedTypeDescriptor(ManagedTypeKind.GeneratedStruct, path)
                 : null;
 
-        var kind = property.UnrealType switch
+        var kind = type.UnrealType switch
         {
-            "StrProperty" when allowInputContainers || allowStringProperty =>
-                ManagedTypeKind.String,
+            "StrProperty" when allowInputContainers || allowStringProperty => ManagedTypeKind.String,
             "TextProperty" when allowInputContainers || allowStringProperty || allowTextProperty =>
                 ManagedTypeKind.Text,
-            "NameProperty" when allowInputContainers => ManagedTypeKind.Name,
+            "NameProperty" => ManagedTypeKind.Name,
             "ArrayProperty" when allowInputContainers &&
-                                 property.InnerUnrealType == "ByteProperty" =>
+                                 type.InnerType?.UnrealType == "ByteProperty" =>
                 ManagedTypeKind.ByteArray,
             "IntProperty" => ManagedTypeKind.Int32,
             "Int8Property" => ManagedTypeKind.Int8,

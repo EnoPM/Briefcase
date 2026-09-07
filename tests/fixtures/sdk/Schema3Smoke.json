@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 3,
+  "target": "Client",
+  "sdkAssemblyName": "Briefcase.DeceiveInc.Client.Sdk",
+  "gameBuild": {
+    "peTimestamp": 1,
+    "imageSize": 2
+  },
+  "types": [
+    {
+      "path": "/Script/DeceiveInc.AgentRole",
+      "name": "AgentRole",
+      "kind": "Enum",
+      "size": 0,
+      "properties": [],
+      "functions": [],
+      "values": [
+        { "name": "AgentRole::Spy", "value": 0 },
+        { "name": "AgentRole::Guard", "value": 7 }
+      ]
+    },
+    {
+      "path": "/Script/DeceiveInc.Settings",
+      "name": "Settings",
+      "kind": "Class",
+      "size": 96,
+      "properties": [
+        {
+          "name": "Properties",
+          "unrealType": "MapProperty",
+          "offset": 40,
+          "elementSize": 80,
+          "arrayDimension": 1,
+          "flags": 0,
+          "type": {
+            "unrealType": "MapProperty",
+            "elementSize": 80,
+            "keyType": {
+              "unrealType": "NameProperty",
+              "elementSize": 8
+            },
+            "valueType": {
+              "unrealType": "ArrayProperty",
+              "elementSize": 16,
+              "innerType": {
+                "unrealType": "FloatProperty",
+                "elementSize": 4
+              }
+            }
+          }
+        },
+        {
+          "name": "Enabled",
+          "unrealType": "BoolProperty",
+          "offset": 8,
+          "elementSize": 1,
+          "arrayDimension": 1,
+          "flags": 0,
+          "type": {
+            "unrealType": "BoolProperty",
+            "elementSize": 1,
+            "booleanLayout": {
+              "fieldSize": 1,
+              "byteOffset": 0,
+              "byteMask": 4,
+              "fieldMask": 4
+            }
+          }
+        }
+      ],
+      "functions": [
+        {
+          "name": "Functions",
+          "flags": 67240961,
+          "parameterSize": 8,
+          "parameterCount": 2,
+          "parameters": [
+            {
+              "name": "Weight",
+              "unrealType": "FloatProperty",
+              "offset": 0,
+              "elementSize": 4,
+              "arrayDimension": 1,
+              "flags": 256,
+              "type": {
+                "unrealType": "FloatProperty",
+                "elementSize": 4
+              }
+            },
+            {
+              "name": "ReturnValue",
+              "unrealType": "BoolProperty",
+              "offset": 4,
+              "elementSize": 1,
+              "arrayDimension": 1,
+              "flags": 1024,
+              "type": {
+                "unrealType": "BoolProperty",
+                "elementSize": 1
+              }
+            }
+          ]
+        }
+      ],
+      "values": []
+    }
+  ]
+}

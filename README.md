@@ -43,6 +43,12 @@ UE 4.27 chunked-object lookup: every matching call site must resolve to the same
 address in `.data`. Missing, truncated, out-of-image, or conflicting results
 disable the Unreal API before any resolved address is dereferenced.
 
+The build-specific SDK describes classes, structures, enums, property offsets,
+packed booleans and recursive Unreal types such as arrays, sets and maps. Mods
+can inspect the complete read-only surface through generated `Reflection` and
+`Metadata` members. Typed getters and methods are emitted separately when the
+native ABI has an explicit, ownership-safe contract for the value.
+
 F1 opens the managed Briefcase menu. A top switch selects the local **Client**
 configuration or remote **Server** administration. The Client view uses vertical
 tabs for Briefcase and each configurable user mod.

@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using Briefcase.ModApi;
 
 namespace Briefcase.SdkEmitter;
 
@@ -51,12 +52,18 @@ internal static class SnapshotSdkEmitter
         SdkEmissionPlan plan, ModuleBuilder module, EmissionTypeSystem types)
     {
         private readonly Dictionary<string, TypeBuilder> _builders = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, EnumBuilder> _enumBuilders = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ConstructorBuilder> _constructors = new(StringComparer.Ordinal);
         private readonly Dictionary<string, (TypeBuilder Properties, TypeBuilder Functions)> _descriptors =
+            new(StringComparer.Ordinal);
+        private readonly Dictionary<string,
+            (TypeBuilder Metadata, TypeBuilder Properties, TypeBuilder Functions)> _metadataDescriptors =
             new(StringComparer.Ordinal);
 
         public void DefineTypeShells()
         {
+            foreach (var type in plan.Types.Where(type => type.Snapshot.Kind == "Enum"))
+                DefineEnum(type);
             foreach (var type in plan.Types.Where(type => type.Snapshot.Kind == "ScriptStruct"))
                 DefineStructShell(type);
             foreach (var type in plan.Types.Where(type => type.Snapshot.Kind == "Class"))
@@ -73,20 +80,55 @@ internal static class SnapshotSdkEmitter
 
         public void CompleteTypes()
         {
-            // Struct signatures may refer to other struct TypeBuilders. All of
-            // their definitions are complete before any class is finalized.
+            foreach (var type in plan.Types.Where(type => type.Snapshot.Kind == "Enum"))
+                _enumBuilders[type.Snapshot.Path].CreateTypeInfo();
+
+            // Nested metadata types must be completed before their owner.
             foreach (var type in plan.Types.Where(type => type.Snapshot.Kind == "ScriptStruct"))
+            {
+                CompleteMetadataTypes(type.Snapshot.Path);
                 _builders[type.Snapshot.Path].CreateType();
+            }
 
             foreach (var type in ClassesInBaseOrder())
             {
                 var descriptors = _descriptors[type.Snapshot.Path];
                 descriptors.Properties.CreateType();
                 descriptors.Functions.CreateType();
+                CompleteMetadataTypes(type.Snapshot.Path);
                 _builders[type.Snapshot.Path].CreateType();
             }
         }
 
+        private void DefineEnum(PlannedType type)
+        {
+            var builder = module.DefineEnum(
+                type.FullName, TypeAttributes.Public, types.Int64);
+            var attributeConstructor = types.UnrealTypePathAttribute.GetConstructor([types.String])!;
+            builder.SetCustomAttribute(new CustomAttributeBuilder(
+                attributeConstructor, [type.Snapshot.Path]));
+
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var value in type.Snapshot.Values)
+            {
+                var separator = value.Name.LastIndexOf("::", StringComparison.Ordinal);
+                var leaf = separator >= 0 ? value.Name[(separator + 2)..] : value.Name;
+                var root = SdkEmissionPlan.Identifier(leaf);
+                var member = root;
+                var suffix = 2;
+                while (!used.Add(member)) member = root + "_Value" + suffix++;
+                builder.DefineLiteral(member, value.Value);
+            }
+            _enumBuilders.Add(type.Snapshot.Path, builder);
+        }
+
+        private void CompleteMetadataTypes(string path)
+        {
+            var metadata = _metadataDescriptors[path];
+            metadata.Properties.CreateType();
+            metadata.Functions.CreateType();
+            metadata.Metadata.CreateType();
+        }
         private void DefineStructShell(PlannedType type)
         {
             var builder = module.DefineType(
@@ -135,6 +177,7 @@ internal static class SnapshotSdkEmitter
 
             DefineStructSize(builder, type.Snapshot.Size);
             DefineStructWrite(builder, type.Snapshot.Size);
+            DefineMetadata(builder, type);
         }
 
         private void DefineStructSize(TypeBuilder builder, int nativeSize)
@@ -210,6 +253,7 @@ internal static class SnapshotSdkEmitter
                 DefineFunction(builder, functionDescriptors, type.Snapshot.Path, function);
 
             _descriptors.Add(type.Snapshot.Path, (propertyDescriptors, functionDescriptors));
+            DefineMetadata(builder, type);
         }
 
         private ConstructorBuilder DefineConstructor(PlannedType type, TypeBuilder builder)
@@ -281,6 +325,142 @@ internal static class SnapshotSdkEmitter
                 .SetGetMethod(getter);
         }
 
+        private void DefineMetadata(TypeBuilder owner, PlannedType type)
+        {
+            var reflectionGetter = DefineStaticGetter(owner, "Reflection", types.UnrealReflectedType);
+            var reflectionIl = reflectionGetter.GetILGenerator();
+            reflectionIl.Emit(OpCodes.Ldstr, type.Snapshot.Path);
+            reflectionIl.Emit(OpCodes.Ldstr, type.Snapshot.Name);
+            reflectionIl.Emit(
+                OpCodes.Ldc_I4,
+                type.Snapshot.Kind == "Class"
+                    ? (int)UnrealReflectedTypeKind.Class
+                    : (int)UnrealReflectedTypeKind.Struct);
+            EmitOptionalString(reflectionIl, type.Snapshot.SuperPath);
+            reflectionIl.Emit(OpCodes.Ldc_I4, type.Snapshot.Size);
+            reflectionIl.Emit(OpCodes.Newobj, types.UnrealReflectedType.GetConstructors().Single());
+            reflectionIl.Emit(OpCodes.Ret);
+
+            var metadata = owner.DefineNestedType(
+                "Metadata",
+                TypeAttributes.NestedPublic | TypeAttributes.Abstract |
+                TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
+            var properties = metadata.DefineNestedType(
+                "Properties",
+                TypeAttributes.NestedPublic | TypeAttributes.Abstract |
+                TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
+            foreach (var property in type.MetadataProperties)
+            {
+                var getter = DefineStaticGetter(
+                    properties, property.MemberName, types.UnrealReflectedProperty);
+                EmitReflectedProperty(getter.GetILGenerator(), property.Snapshot);
+            }
+
+            var functions = metadata.DefineNestedType(
+                "Functions",
+                TypeAttributes.NestedPublic | TypeAttributes.Abstract |
+                TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
+            foreach (var function in type.MetadataFunctions)
+            {
+                var getter = DefineStaticGetter(
+                    functions, function.MemberName, types.UnrealReflectedFunction);
+                EmitReflectedFunction(getter.GetILGenerator(), function.Snapshot);
+            }
+            _metadataDescriptors.Add(type.Snapshot.Path, (metadata, properties, functions));
+        }
+
+        private static MethodBuilder DefineStaticGetter(
+            TypeBuilder owner, string name, Type returnType)
+        {
+            var getter = owner.DefineMethod(
+                "get_" + name,
+                MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig |
+                MethodAttributes.SpecialName,
+                returnType,
+                Type.EmptyTypes);
+            owner.DefineProperty(name, PropertyAttributes.None, returnType, null)
+                .SetGetMethod(getter);
+            return getter;
+        }
+
+        private void EmitReflectedProperty(ILGenerator il, PropertySnapshot property)
+        {
+            il.Emit(OpCodes.Ldstr, property.Name);
+            il.Emit(OpCodes.Ldc_I4, property.Offset);
+            il.Emit(OpCodes.Ldc_I4, property.ElementSize);
+            il.Emit(OpCodes.Ldc_I4, property.ArrayDimension);
+            il.Emit(OpCodes.Ldc_I8, unchecked((long)property.Flags));
+            EmitTypeMetadata(il, property.EffectiveType);
+            il.Emit(OpCodes.Newobj, types.UnrealReflectedProperty.GetConstructors().Single());
+            il.Emit(OpCodes.Ret);
+        }
+
+        private void EmitReflectedFunction(ILGenerator il, FunctionSnapshot function)
+        {
+            il.Emit(OpCodes.Ldstr, function.Name);
+            il.Emit(OpCodes.Ldc_I4, unchecked((int)function.Flags));
+            il.Emit(OpCodes.Ldc_I4, function.ParameterSize);
+            il.Emit(OpCodes.Ldc_I4, function.ParameterCount);
+            il.Emit(OpCodes.Ldc_I4, function.Parameters.Count);
+            il.Emit(OpCodes.Newarr, types.UnrealReflectedParameter);
+            for (var index = 0; index < function.Parameters.Count; index++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, index);
+                EmitReflectedParameter(il, function.Parameters[index]);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Newobj, types.UnrealReflectedFunction.GetConstructors().Single());
+            il.Emit(OpCodes.Ret);
+        }
+
+        private void EmitReflectedParameter(ILGenerator il, PropertySnapshot parameter)
+        {
+            il.Emit(OpCodes.Ldstr, parameter.Name);
+            il.Emit(OpCodes.Ldc_I4, parameter.Offset);
+            il.Emit(OpCodes.Ldc_I4, parameter.ElementSize);
+            il.Emit(OpCodes.Ldc_I4, parameter.ArrayDimension);
+            il.Emit(OpCodes.Ldc_I8, unchecked((long)parameter.Flags));
+            EmitTypeMetadata(il, parameter.EffectiveType);
+            il.Emit(OpCodes.Newobj, types.UnrealReflectedParameter.GetConstructors().Single());
+        }
+
+        private void EmitTypeMetadata(ILGenerator il, UnrealTypeSnapshot type)
+        {
+            il.Emit(OpCodes.Ldc_I4, (int)SdkEmissionPlan.MetadataKind(type));
+            il.Emit(OpCodes.Ldstr, type.UnrealType);
+            il.Emit(OpCodes.Ldc_I4, type.ElementSize);
+            EmitOptionalString(il, type.ReferencedTypePath);
+            EmitOptionalTypeMetadata(il, type.InnerType);
+            EmitOptionalTypeMetadata(il, type.KeyType);
+            EmitOptionalTypeMetadata(il, type.ValueType);
+            EmitOptionalTypeMetadata(il, type.UnderlyingType);
+            if (type.BooleanLayout is { } boolean)
+            {
+                il.Emit(OpCodes.Ldc_I4, (int)boolean.FieldSize);
+                il.Emit(OpCodes.Ldc_I4, (int)boolean.ByteOffset);
+                il.Emit(OpCodes.Ldc_I4, (int)boolean.ByteMask);
+                il.Emit(OpCodes.Ldc_I4, (int)boolean.FieldMask);
+                il.Emit(OpCodes.Newobj, types.UnrealBooleanLayout.GetConstructors().Single());
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldnull);
+            }
+            il.Emit(OpCodes.Newobj, types.UnrealTypeMetadata.GetConstructors().Single());
+        }
+
+        private void EmitOptionalTypeMetadata(ILGenerator il, UnrealTypeSnapshot? type)
+        {
+            if (type is null) il.Emit(OpCodes.Ldnull);
+            else EmitTypeMetadata(il, type);
+        }
+
+        private static void EmitOptionalString(ILGenerator il, string? value)
+        {
+            if (value is null) il.Emit(OpCodes.Ldnull);
+            else il.Emit(OpCodes.Ldstr, value);
+        }
         private void DefineProperty(
             TypeBuilder owner,
             TypeBuilder descriptorOwner,

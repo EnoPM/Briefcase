@@ -1,4 +1,4 @@
-# Standalone Unreal reflection: milestone 1
+# Standalone Unreal reflection
 
 This note describes exactly what the first UE4SS-independent runtime does. The
 runtime is intentionally read-only. It proves that we can bootstrap Unreal
@@ -115,20 +115,45 @@ instance field begin at:
 0x0000012340000000 + 0x500
 ```
 
-The metadata alone does not provide a live player instance and does not say how
-to interpret every property subclass. A later layer must find a valid instance,
-confirm that it belongs to the expected `UClass`, inspect the concrete property
-type (`FIntProperty`, `FBoolProperty`, `FObjectProperty`, and so on), and only
-then copy or change a correctly sized value.
+The metadata alone does not provide a live player instance. Access still starts
+by finding a valid instance, confirming its `UClass`, and resolving the live
+property descriptor again before copying a correctly sized value.
+
+The schema 3 collector now decodes the concrete metadata payload that begins at
+`FProperty + 0x78` in this UE 4.27 build:
+
+- `FBoolProperty` field size, byte offset and masks;
+- referenced `UStruct`, `UClass`, interface, enum and delegate signature paths;
+- `FArrayProperty.Inner` and `FSetProperty.ElementProperty`;
+- `FMapProperty.KeyProperty` and `ValueProperty`;
+- `FEnumProperty.UnderlyingProperty`;
+- weak, lazy and soft object categories, plus field paths;
+- `UEnum` names and signed 64-bit values.
+
+Container properties form a recursive tree. For example, a reflected map can be
+described as `TMap<FName, TArray<Vector>>` without copying a `TMap` or exposing
+an engine pointer to managed code. Recursion is bounded to eight levels, enum
+arrays are bounded to 65,536 entries, and every nested pointer passes the same
+readability checks as the root property. An unknown property class remains in
+the snapshot as `Unknown` with its original Unreal class name.
+
+The generated SDK exposes this data through `Type.Reflection`,
+`Type.Metadata.Properties` and `Type.Metadata.Functions`. Function parameters
+retain their Unreal flags, so mods can distinguish input, output, reference,
+const and return parameters even before a writable `out/ref` ABI is added.
 
 ## 6. Why no values are modified yet
 
 Writing `base + offset` is mechanically easy and semantically dangerous. An
 Unreal field may be a packed boolean, an object reference tracked by garbage
 collection, a replicated property, or state that must be changed through a
-`UFunction` to preserve invariants. This milestone only inventories names,
-sizes and offsets. The next stages will add type descriptions and stable object
-lookup before any controlled mutation is reintroduced.
+`UFunction` to preserve invariants.
+
+The reflection layer now inventories names, sizes, offsets and complete type
+descriptions. The callable ABI still exposes only the value categories whose
+copying and ownership rules Briefcase implements explicitly. Additional
+container and multi-result function contracts can be added one category at a
+time without changing the snapshot format.
 
 ## 7. Current source map
 
@@ -137,7 +162,7 @@ lookup before any controlled mutation is reintroduced.
 - `runtime/Briefcase.UnrealRuntime/src/PeImageView.*`: bounded mapped-PE section reader.
 - `runtime/Briefcase.UnrealRuntime/src/SignatureScanner.*`: masked scanning and RIP decoding.
 - `runtime/Briefcase.UnrealRuntime/src/RuntimeSymbolResolver.*`: fail-closed Unreal symbol discovery.
-- `runtime/Briefcase.UnrealRuntime/src/UnrealLayout.h`: minimal UE 4.27 memory views.
+- `runtime/Briefcase.UnrealRuntime/src/UnrealLayout.h`: bounded UE 4.27 object and typed-property metadata views.
 - `runtime/Briefcase.UnrealRuntime/src/UnrealProbe.cpp`: validation, registry traversal
   and metadata inventory.
 - `Briefcase/Briefcase.log`: observable result for the native and managed runtime.
@@ -146,5 +171,5 @@ The complete package is produced under `dist/Briefcase`. Its `version.dll` is
 placed beside the game executable, while `Briefcase.UnrealRuntime.dll` is stored
 under `Briefcase/Core/Native`; the rest of the `Briefcase` directory remains intact.
 
-The next reflection milestone can now focus on additional property subclasses
-and containers because critical symbol addresses no longer come from fixed RVAs.
+The next ABI milestone can use these descriptors to add safe container reads and
+multi-result calls without returning to fixed RVAs or guessing native layouts.

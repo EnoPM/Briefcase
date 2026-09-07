@@ -763,6 +763,9 @@ public readonly unsafe partial struct UnrealApi
 
     private static UnrealPropertyKind KindOf<T>() where T : unmanaged
     {
+        if (typeof(T) == typeof(sbyte)) return UnrealPropertyKind.Int8;
+        if (typeof(T) == typeof(short)) return UnrealPropertyKind.Int16;
+        if (typeof(T) == typeof(ushort)) return UnrealPropertyKind.UInt16;
         if (typeof(T) == typeof(int)) return UnrealPropertyKind.Int32;
         if (typeof(T) == typeof(uint)) return UnrealPropertyKind.UInt32;
         if (typeof(T) == typeof(long)) return UnrealPropertyKind.Int64;
@@ -771,6 +774,7 @@ public readonly unsafe partial struct UnrealApi
         if (typeof(T) == typeof(double)) return UnrealPropertyKind.Double;
         if (typeof(T) == typeof(bool)) return UnrealPropertyKind.Bool;
         if (typeof(T) == typeof(byte)) return UnrealPropertyKind.Byte;
+        if (typeof(T) == typeof(UnrealName)) return UnrealPropertyKind.Name;
         if (typeof(T) == typeof(UnrealObjectReference)) return UnrealPropertyKind.Object;
         if (typeof(T).IsValueType && !typeof(T).IsPrimitive) return UnrealPropertyKind.Struct;
         throw new NotSupportedException($"Property reads for {typeof(T).FullName} are not implemented.");

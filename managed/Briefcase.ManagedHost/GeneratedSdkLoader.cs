@@ -73,10 +73,13 @@ internal static class GeneratedSdkLoader
             $"Shared generated SDK {(generation.Generated ? "generated" : "reused")}: " +
             $"{identity.Name} ({buildKey}); {generation.TypeCount} types, " +
             $"{generation.PropertyCount} properties/fields, {generation.FunctionCount} functions");
+        context.Info(
+            $"Generated SDK reflection metadata: {generation.DescribedPropertyCount} properties/fields, " +
+            $"{generation.DescribedFunctionCount} functions described");
         if (generation.SkippedTypeCount + generation.SkippedPropertyCount +
             generation.SkippedFunctionCount > 0)
             context.Info(
-                $"Generated SDK unsupported ABI report: {generation.SkippedTypeCount} types, " +
+                $"Generated SDK callable ABI report: {generation.SkippedTypeCount} types, " +
                 $"{generation.SkippedPropertyCount} properties/fields, " +
                 $"{generation.SkippedFunctionCount} functions skipped");
         return loaded;

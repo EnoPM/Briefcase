@@ -32,6 +32,8 @@ internal static class FullSurfaceValidator
             var actual = RequireType(emitted, type.FullName);
             if (type.Snapshot.Kind == "ScriptStruct")
                 ValidateStruct(type, expected, actual);
+            else if (type.Snapshot.Kind == "Enum")
+                ValidateEnum(type, expected, actual);
             else
                 ValidateClass(type, expected, actual);
         }
@@ -64,6 +66,7 @@ internal static class FullSurfaceValidator
             throw new InvalidDataException($"{plan.FullName} has an invalid native size.");
         CompareConstant(expected, actual, "UnrealPath");
         CompareConstant(expected, actual, "NativeSize");
+        ValidateMetadata(plan, expected, actual);
 
         foreach (var property in plan.Properties)
         {
@@ -102,6 +105,7 @@ internal static class FullSurfaceValidator
             actual.GetProperty("StaticClass")!.GetValue(null)!,
             ["Path"]);
         CompareFromObject(expected, actual, invoke: true);
+        ValidateMetadata(plan, expected, actual);
 
         var expectedProperties = expected.GetNestedType("Properties", BindingFlags.Public)
             ?? throw new MissingMemberException(plan.FullName, "Properties");
@@ -131,6 +135,83 @@ internal static class FullSurfaceValidator
         }
     }
 
+    private static void ValidateEnum(PlannedType plan, Type expected, Type actual)
+    {
+        if (!expected.IsEnum || !actual.IsEnum ||
+            Enum.GetUnderlyingType(expected) != typeof(long) ||
+            Enum.GetUnderlyingType(actual) != typeof(long))
+            throw new InvalidDataException($"{plan.FullName} has an invalid enum contract.");
+
+        var expectedPath = expected.GetCustomAttribute<UnrealTypePathAttribute>()?.Path;
+        var actualPath = actual.GetCustomAttribute<UnrealTypePathAttribute>()?.Path;
+        if (expectedPath != plan.Snapshot.Path || actualPath != plan.Snapshot.Path)
+            throw new InvalidDataException($"{plan.FullName} has an invalid Unreal enum path.");
+
+        var expectedValues = expected.GetFields(BindingFlags.Public | BindingFlags.Static)
+            .ToDictionary(field => field.Name, field => Convert.ToInt64(field.GetRawConstantValue()),
+                StringComparer.Ordinal);
+        var actualValues = actual.GetFields(BindingFlags.Public | BindingFlags.Static)
+            .ToDictionary(field => field.Name, field => Convert.ToInt64(field.GetRawConstantValue()),
+                StringComparer.Ordinal);
+        if (expectedValues.Count != actualValues.Count ||
+            expectedValues.Any(pair => !actualValues.TryGetValue(pair.Key, out var value) ||
+                                       value != pair.Value))
+            throw new InvalidDataException($"{plan.FullName} has different enum values.");
+    }
+
+    private static void ValidateMetadata(PlannedType plan, Type expected, Type actual)
+    {
+        CompareProperty(expected, actual, "Reflection");
+        var expectedType = (UnrealReflectedType)expected.GetProperty("Reflection")!.GetValue(null)!;
+        var actualType = (UnrealReflectedType)actual.GetProperty("Reflection")!.GetValue(null)!;
+        if (expectedType != actualType || actualType.Path != plan.Snapshot.Path)
+            throw new InvalidDataException($"{plan.FullName} has different reflected type metadata.");
+
+        var expectedMetadata = expected.GetNestedType("Metadata", BindingFlags.Public)
+            ?? throw new MissingMemberException(plan.FullName, "Metadata");
+        var actualMetadata = actual.GetNestedType("Metadata", BindingFlags.Public)
+            ?? throw new MissingMemberException(plan.FullName, "Metadata");
+        var expectedProperties = expectedMetadata.GetNestedType("Properties", BindingFlags.Public)
+            ?? throw new MissingMemberException(plan.FullName, "Metadata.Properties");
+        var actualProperties = actualMetadata.GetNestedType("Properties", BindingFlags.Public)
+            ?? throw new MissingMemberException(plan.FullName, "Metadata.Properties");
+        foreach (var property in plan.MetadataProperties)
+        {
+            CompareProperty(expectedProperties, actualProperties, property.MemberName);
+            var left = (UnrealReflectedProperty)expectedProperties
+                .GetProperty(property.MemberName)!.GetValue(null)!;
+            var right = (UnrealReflectedProperty)actualProperties
+                .GetProperty(property.MemberName)!.GetValue(null)!;
+            if (left != right)
+                throw new InvalidDataException(
+                    $"{plan.FullName}.{property.MemberName} has different property metadata.");
+        }
+
+        var expectedFunctions = expectedMetadata.GetNestedType("Functions", BindingFlags.Public)
+            ?? throw new MissingMemberException(plan.FullName, "Metadata.Functions");
+        var actualFunctions = actualMetadata.GetNestedType("Functions", BindingFlags.Public)
+            ?? throw new MissingMemberException(plan.FullName, "Metadata.Functions");
+        foreach (var function in plan.MetadataFunctions)
+        {
+            CompareProperty(expectedFunctions, actualFunctions, function.MemberName);
+            var left = (UnrealReflectedFunction)expectedFunctions
+                .GetProperty(function.MemberName)!.GetValue(null)!;
+            var right = (UnrealReflectedFunction)actualFunctions
+                .GetProperty(function.MemberName)!.GetValue(null)!;
+            if (left.Name != right.Name || left.Flags != right.Flags ||
+                left.ParameterBufferSize != right.ParameterBufferSize ||
+                left.ParameterCount != right.ParameterCount ||
+                left.Parameters.Count != right.Parameters.Count)
+                throw new InvalidDataException(
+                    $"{plan.FullName}.{function.MemberName} has different function metadata.");
+            for (var index = 0; index < left.Parameters.Count; index++)
+            {
+                if (left.Parameters[index] != right.Parameters[index])
+                    throw new InvalidDataException(
+                        $"{plan.FullName}.{function.MemberName} parameter {index} differs.");
+            }
+        }
+    }
     private static void CompareFromObject(Type expected, Type actual, bool invoke)
     {
         var expectedMethod = expected.GetMethod(

@@ -12,7 +12,7 @@ internal readonly record struct GenerationResult(
 
 internal static class SourceSdkGenerator
 {
-    private const string GeneratorSchema = "8";
+    private const string GeneratorSchema = "9";
     private const ulong OutParameterFlag = 0x100;
     private const ulong ReturnParameterFlag = 0x400;
     private const ulong ReferenceParameterFlag = 0x08000000;
@@ -46,7 +46,7 @@ internal static class SourceSdkGenerator
         if (File.Exists(completion) && File.ReadAllText(completion) == GeneratorSchema)
             return new GenerationResult(
                 output, projectPath, snapshot.SdkAssemblyName,
-                snapshot.Types.Count(type => type.Kind is "Class" or "ScriptStruct"), false);
+                snapshot.Types.Count(type => type.Kind is "Class" or "ScriptStruct" or "Enum"), false);
 
         Directory.CreateDirectory(output);
         var generatedDirectory = Path.Combine(output, "Generated");
@@ -60,7 +60,7 @@ internal static class SourceSdkGenerator
         Directory.CreateDirectory(generatedDirectory);
 
         var types = snapshot.Types
-            .Where(type => type.Kind is "Class" or "ScriptStruct" &&
+            .Where(type => type.Kind is "Class" or "ScriptStruct" or "Enum" &&
                            type.Path.StartsWith("/Script/", StringComparison.Ordinal))
             .GroupBy(type => type.Path, StringComparer.Ordinal)
             .Select(group => group.First())
@@ -81,6 +81,7 @@ internal static class SourceSdkGenerator
             foreach (var type in namespaceGroup.OrderBy(type => type.Path, StringComparer.Ordinal))
             {
                 if (type.Kind == "ScriptStruct") WriteStruct(source, type, names);
+                else if (type.Kind == "Enum") WriteEnum(source, type, names);
                 else WriteType(source, type, names);
             }
             var fileName = Identifier(namespaceGroup.Key.Replace('.', '_')) + ".g.cs";
@@ -105,9 +106,12 @@ internal static class SourceSdkGenerator
         foreach (var namespaceGroup in types.GroupBy(type => NamespaceFor(type.Path, target)))
         {
             foreach (var nameGroup in namespaceGroup.GroupBy(
-                         type => type.Kind == "ScriptStruct"
-                             ? "F" + Identifier(type.Name).TrimStart('F')
-                             : Identifier(type.Name), StringComparer.Ordinal))
+                         type => type.Kind switch
+                         {
+                             "ScriptStruct" => "F" + Identifier(type.Name).TrimStart('F'),
+                             "Enum" => "E" + Identifier(type.Name).TrimStart('E'),
+                             _ => Identifier(type.Name)
+                         }, StringComparer.Ordinal))
             {
                 var ordered = nameGroup.OrderBy(type => type.Path, StringComparer.Ordinal).ToArray();
                 for (var index = 0; index < ordered.Length; index++)
@@ -122,6 +126,23 @@ internal static class SourceSdkGenerator
         return result;
     }
 
+    private static void WriteEnum(
+        StringBuilder source, TypeSnapshot type, IReadOnlyDictionary<string, GeneratedTypeName> names)
+    {
+        var generatedName = names[type.Path];
+        source.Append("[UnrealTypePath(").Append(Literal(type.Path)).AppendLine(")]")
+              .Append("public enum ").Append(generatedName.Name).AppendLine(" : long")
+              .AppendLine("{");
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in type.Values)
+        {
+            var separator = value.Name.LastIndexOf("::", StringComparison.Ordinal);
+            var leaf = separator >= 0 ? value.Name[(separator + 2)..] : value.Name;
+            source.Append("    ").Append(UniqueMember(leaf, "Value", used))
+                  .Append(" = ").Append(value.Value).AppendLine(",");
+        }
+        source.AppendLine("}").AppendLine();
+    }
     private static void WriteStruct(
         StringBuilder source, TypeSnapshot type, IReadOnlyDictionary<string, GeneratedTypeName> names)
     {
@@ -140,6 +161,7 @@ internal static class SourceSdkGenerator
               .AppendLine("        var value = this;")
               .AppendLine("        MemoryMarshal.Write(destination, in value);")
               .AppendLine("    }");
+        WriteReflectionAndMetadata(source, type);
 
         var used = new HashSet<string>(StringComparer.Ordinal)
             { "UnrealPath", "NativeSize", generatedName.Name };
@@ -178,9 +200,11 @@ internal static class SourceSdkGenerator
               .Append("    public static UnrealClass<").Append(generatedName.Name)
               .AppendLine("> StaticClass { get; } = new(UnrealPath);")
               .AppendLine();
+        WriteReflectionAndMetadata(source, type);
 
         var usedMembers = new HashSet<string>(StringComparer.Ordinal)
         { "Handle", "Name", "Path", "ClassHandle", "StaticClass", "Properties",
+          "Metadata", "Reflection",
           "Functions", "UnrealPath", "FromObject", "Read", "ReadString", "ReadText",
           "InvokeText", "IsA" };
         usedMembers.Add(generatedName.Name);
@@ -287,6 +311,145 @@ internal static class SourceSdkGenerator
         source.AppendLine("    }").AppendLine("}").AppendLine();
     }
 
+    private static void WriteReflectionAndMetadata(StringBuilder source, TypeSnapshot type)
+    {
+        var reflectedKind = type.Kind == "Class"
+            ? "UnrealReflectedTypeKind.Class"
+            : "UnrealReflectedTypeKind.Struct";
+        source.Append("    public static UnrealReflectedType Reflection { get; } = new(")
+              .Append(Literal(type.Path)).Append(", ")
+              .Append(Literal(type.Name)).Append(", ")
+              .Append(reflectedKind).Append(", ")
+              .Append(type.SuperPath is null ? "null" : Literal(type.SuperPath)).Append(", ")
+              .Append(type.Size).AppendLine(");")
+              .AppendLine("    public static class Metadata")
+              .AppendLine("    {")
+              .AppendLine("        public static class Properties")
+              .AppendLine("        {");
+
+        var propertyNames = new HashSet<string>(StringComparer.Ordinal) { "Properties" };
+        foreach (var property in type.Properties
+                     .OrderBy(property => property.Name, StringComparer.Ordinal)
+                     .ThenBy(property => property.Offset))
+        {
+            var member = UniqueMember(property.Name, "Property", propertyNames);
+            source.Append("            public static UnrealReflectedProperty ")
+                  .Append(member).Append(" { get; } = new(")
+                  .Append(Literal(property.Name)).Append(", ")
+                  .Append(property.Offset).Append(", ")
+                  .Append(property.ElementSize).Append(", ")
+                  .Append(property.ArrayDimension).Append(", ")
+                  .Append(property.Flags).Append("UL, ")
+                  .Append(TypeMetadataExpression(property.EffectiveType)).AppendLine(");");
+        }
+
+        source.AppendLine("        }")
+              .AppendLine("        public static class Functions")
+              .AppendLine("        {");
+        var functionNames = new HashSet<string>(StringComparer.Ordinal) { "Functions" };
+        foreach (var function in type.Functions.OrderBy(
+                     function => function.Name, StringComparer.Ordinal))
+        {
+            var member = UniqueMember(function.Name, "Function", functionNames);
+            source.Append("            public static UnrealReflectedFunction ")
+                  .Append(member).Append(" { get; } = new(")
+                  .Append(Literal(function.Name)).Append(", ")
+                  .Append(function.Flags).Append("U, ")
+                  .Append(function.ParameterSize).Append(", ")
+                  .Append(function.ParameterCount).Append(", [");
+            for (var index = 0; index < function.Parameters.Count; index++)
+            {
+                if (index != 0) source.Append(", ");
+                var parameter = function.Parameters[index];
+                source.Append("new UnrealReflectedParameter(")
+                      .Append(Literal(parameter.Name)).Append(", ")
+                      .Append(parameter.Offset).Append(", ")
+                      .Append(parameter.ElementSize).Append(", ")
+                      .Append(parameter.ArrayDimension).Append(", ")
+                      .Append(parameter.Flags).Append("UL, ")
+                      .Append(TypeMetadataExpression(parameter.EffectiveType)).Append(')');
+            }
+            source.AppendLine("]);");
+        }
+        source.AppendLine("        }")
+              .AppendLine("    }")
+              .AppendLine();
+    }
+
+    private static string TypeMetadataExpression(UnrealTypeSnapshot type)
+    {
+        var result = new StringBuilder("new UnrealTypeMetadata(UnrealTypeKind.")
+            .Append(MetadataKind(type.UnrealType, type.ReferencedTypePath))
+            .Append(", ").Append(Literal(type.UnrealType))
+            .Append(", ").Append(type.ElementSize)
+            .Append(", ").Append(type.ReferencedTypePath is null
+                ? "null"
+                : Literal(type.ReferencedTypePath))
+            .Append(", ").Append(type.InnerType is null
+                ? "null"
+                : TypeMetadataExpression(type.InnerType))
+            .Append(", ").Append(type.KeyType is null
+                ? "null"
+                : TypeMetadataExpression(type.KeyType))
+            .Append(", ").Append(type.ValueType is null
+                ? "null"
+                : TypeMetadataExpression(type.ValueType))
+            .Append(", ").Append(type.UnderlyingType is null
+                ? "null"
+                : TypeMetadataExpression(type.UnderlyingType))
+            .Append(", ");
+        if (type.BooleanLayout is { } boolean)
+        {
+            result.Append("new UnrealBooleanLayout(")
+                  .Append(boolean.FieldSize).Append(", ")
+                  .Append(boolean.ByteOffset).Append(", ")
+                  .Append(boolean.ByteMask).Append(", ")
+                  .Append(boolean.FieldMask).Append(')');
+        }
+        else
+        {
+            result.Append("null");
+        }
+        return result.Append(')').ToString();
+    }
+
+    private static string MetadataKind(string unrealType, string? referencedTypePath) =>
+        unrealType switch
+        {
+            "BoolProperty" => "Boolean",
+            "Int8Property" => "Int8",
+            "ByteProperty" => referencedTypePath is null
+                ? "UInt8"
+                : "Enum",
+            "Int16Property" => "Int16",
+            "UInt16Property" => "UInt16",
+            "IntProperty" => "Int32",
+            "UInt32Property" => "UInt32",
+            "Int64Property" => "Int64",
+            "UInt64Property" => "UInt64",
+            "FloatProperty" => "Float",
+            "DoubleProperty" => "Double",
+            "EnumProperty" => "Enum",
+            "NameProperty" => "Name",
+            "StrProperty" => "String",
+            "TextProperty" => "Text",
+            "ObjectProperty" => "Object",
+            "ClassProperty" => "Class",
+            "InterfaceProperty" => "Interface",
+            "WeakObjectProperty" => "WeakObject",
+            "LazyObjectProperty" => "LazyObject",
+            "SoftObjectProperty" => "SoftObject",
+            "SoftClassProperty" => "SoftClass",
+            "StructProperty" => "Struct",
+            "ArrayProperty" => "Array",
+            "SetProperty" => "Set",
+            "MapProperty" => "Map",
+            "DelegateProperty" => "Delegate",
+            "MulticastDelegateProperty" or "MulticastInlineDelegateProperty" or
+                "MulticastSparseDelegateProperty" => "MulticastDelegate",
+            "FieldPathProperty" => "FieldPath",
+            _ => "Unknown"
+        };
     private static bool IsCallableFunction(
         FunctionSnapshot function, IReadOnlyDictionary<string, GeneratedTypeName> names)
     {
@@ -315,7 +478,7 @@ internal static class SourceSdkGenerator
             // the bridge to copy a changed value back before the original call.
             if (!isReturn && (parameter.Flags & ReferenceParameterFlag) != 0 &&
                 managedType is not ("string" or "UnrealText" or "byte[]") &&
-                parameter.UnrealType != "StructProperty")
+                parameter.EffectiveType.UnrealType != "StructProperty")
                 return false;
             if (managedType is null ||
                 parameter.ArrayDimension != 1 ||
@@ -335,17 +498,18 @@ internal static class SourceSdkGenerator
         bool allowStringProperty = false,
         bool allowTextProperty = false)
     {
-        if (property.UnrealType == "StructProperty" &&
-            property.ReferencedTypePath is { } path && names.TryGetValue(path, out var type))
+        var typeShape = property.EffectiveType;
+        if (typeShape.UnrealType == "StructProperty" &&
+            typeShape.ReferencedTypePath is { } path && names.TryGetValue(path, out var type))
             return $"global::{type.Namespace}.{type.Name}";
-        return property.UnrealType switch
+        return typeShape.UnrealType switch
         {
             "StrProperty" when allowInputContainers || allowStringProperty => "string",
             "TextProperty" when allowInputContainers || allowStringProperty || allowTextProperty =>
                 "UnrealText",
-            "NameProperty" when allowInputContainers => "UnrealName",
+            "NameProperty" => "UnrealName",
             "ArrayProperty" when allowInputContainers &&
-                                 property.InnerUnrealType == "ByteProperty" => "byte[]",
+                                 typeShape.InnerType?.UnrealType == "ByteProperty" => "byte[]",
             "IntProperty" => "int",
             "Int8Property" => "sbyte",
             "Int16Property" => "short",
@@ -365,7 +529,6 @@ internal static class SourceSdkGenerator
             _ => null
         };
     }
-
     private static string NamespaceFor(string path, string target)
     {
         var moduleEnd = path.IndexOf('.', "/Script/".Length);
