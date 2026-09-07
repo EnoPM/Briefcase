@@ -51,9 +51,17 @@ jobs:
           }
           "BRIEFCASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Run unit tests
+        shell: pwsh
+        run: ./scripts/test/TestBriefcase.ps1 -Configuration Release
+
       - name: Build and package Briefcase
         shell: pwsh
         run: ./scripts/release/PrepareRelease.ps1 -Configuration Release
+
+      - name: Run integration validations
+        shell: pwsh
+        run: ./scripts/test/TestBriefcase.ps1 -Configuration Release -SkipUnit -IncludeIntegration
 
       - name: Create GitHub release
         shell: pwsh

@@ -1,4 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("Briefcase.GameThread.Validation")]
 [assembly: InternalsVisibleTo("Briefcase.Core.Tests")]

@@ -112,6 +112,37 @@ The same deployment installs `StartBriefcaseServerNoUI.bat` directly in
 `DeceiveInc/Binaries/Win64`. It provides identical console-only behavior with
 paths resolved relative to the Shipping executable.
 
+## Tests
+
+Run the fast unit-test suite during development with:
+
+```bat
+scripts\test\test_briefcase.bat -Configuration Debug
+```
+
+For a continuous TDD loop in Rider's terminal:
+
+```powershell
+dotnet watch --project tests/Briefcase.Core.Tests/Briefcase.Core.Tests.csproj test -c Debug
+```
+
+The suite covers configuration persistence and validation, the managed game-thread
+scheduler, attributed patch discovery, SDK snapshot planning, the shared network
+protocol and authentication, native ABI layouts, and release-version calculation.
+Coverage is written in Cobertura format below `artifacts/test-results`.
+
+The longer integration validations need the generated client and server SDKs.
+Build the release packages first, then run:
+
+```powershell
+./scripts/release/PrepareRelease.ps1 -Configuration Release
+./scripts/test/TestBriefcase.ps1 -Configuration Release -SkipUnit -IncludeIntegration
+```
+
+GitHub runs unit tests and the complete Windows release/integration validation as
+separate pull-request checks. The release workflow repeats both gates before it
+publishes archives.
+
 ## Projects
 
 - `loader/Briefcase.VersionProxy`: `version.dll` bootstrap and Windows export forwarding.

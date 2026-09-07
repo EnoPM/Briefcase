@@ -1,0 +1,66 @@
+name: Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run unit tests
+        shell: pwsh
+        run: ./scripts/test/TestBriefcase.ps1 -Configuration Release
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefcase-unit-test-results
+          path: artifacts/test-results
+          if-no-files-found: warn
+
+  integration:
+    name: Release build and integration validation
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build client and server release packages
+        shell: pwsh
+        run: ./scripts/release/PrepareRelease.ps1 -Configuration Release
+
+      - name: Run integration validations
+        shell: pwsh
+        run: ./scripts/test/TestBriefcase.ps1 -Configuration Release -SkipUnit -IncludeIntegration
