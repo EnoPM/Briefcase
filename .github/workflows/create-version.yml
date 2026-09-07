@@ -3,10 +3,10 @@ name: Create Version
 on:
   workflow_dispatch:
     inputs:
-      pull_request:
-        description: Pull request number to merge into main
+      source_branch:
+        description: Reviewed integration branch to release into main
         required: true
-        type: number
+        type: string
       increment:
         description: Version component to increment
         required: true
@@ -19,8 +19,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
-  checks: read
 
 concurrency:
   group: briefcase-create-version
@@ -28,9 +26,9 @@ concurrency:
 
 jobs:
   prepare:
-    name: Version and merge pull request
+    name: Merge branch and create version
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
@@ -42,12 +40,11 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Validate, version, and merge pull request
+      - name: Merge reviewed branch and create tag
         id: release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pull_request }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
           VERSION_INCREMENT: ${{ inputs.increment }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -59,43 +56,35 @@ jobs:
             }
           }
 
-          $pullRequestNumber = [uint32]::Parse($env:PR_NUMBER)
-          $detailsJson = & gh pr view $pullRequestNumber `
-            --json number,state,isDraft,baseRefName,headRefName,headRefOid,isCrossRepository,mergeable,title
+          $sourceBranch = $env:SOURCE_BRANCH.Trim()
+          if ([string]::IsNullOrWhiteSpace($sourceBranch)) {
+            throw 'A source branch is required.'
+          }
+          & git check-ref-format --branch $sourceBranch *> $null
           if ($LASTEXITCODE -ne 0) {
-            throw "Could not read pull request #$pullRequestNumber."
+            throw "Invalid source branch name: '$sourceBranch'."
           }
-          $pullRequest = $detailsJson | ConvertFrom-Json
-
-          if ($pullRequest.state -ne 'OPEN') {
-            throw "Pull request #$pullRequestNumber is not open."
-          }
-          if ($pullRequest.isDraft) {
-            throw "Pull request #$pullRequestNumber is still a draft."
-          }
-          if ($pullRequest.baseRefName -ne 'main') {
-            throw "Pull request #$pullRequestNumber targets '$($pullRequest.baseRefName)', not 'main'."
-          }
-          if ($pullRequest.isCrossRepository) {
-            throw 'The release workflow can version only a pull request whose branch belongs to this repository.'
-          }
-          if ($pullRequest.mergeable -eq 'CONFLICTING') {
-            throw "Pull request #$pullRequestNumber conflicts with main."
+          if ($sourceBranch -eq 'main') {
+            throw "Select a reviewed integration branch other than 'main'."
           }
 
           Invoke-Git config user.name 'github-actions[bot]'
           Invoke-Git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           Invoke-Git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
-          Invoke-Git fetch --no-tags origin "+refs/pull/$pullRequestNumber/head:refs/remotes/origin/release-pr/$pullRequestNumber"
 
-          $pullRequestRef = "refs/remotes/origin/release-pr/$pullRequestNumber"
-          $fetchedHead = (& git rev-parse $pullRequestRef).Trim()
-          if ($LASTEXITCODE -ne 0 -or $fetchedHead -ne $pullRequest.headRefOid) {
-            throw 'The pull request changed while its release revision was being fetched. Run the workflow again.'
-          }
+          $sourceRef = 'refs/remotes/origin/release-source'
+          Invoke-Git fetch --no-tags origin "+refs/heads/${sourceBranch}:$sourceRef"
+          $sourceHead = (& git rev-parse $sourceRef).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Could not resolve branch '$sourceBranch'." }
 
           $mainVersion = (& git show 'refs/remotes/origin/main:VERSION').Trim()
           if ($LASTEXITCODE -ne 0) { throw 'Could not read VERSION from main.' }
+          $sourceVersion = (& git show "${sourceRef}:VERSION").Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Could not read VERSION from '$sourceBranch'." }
+          if ($sourceVersion -ne $mainVersion) {
+            throw "Branch '$sourceBranch' contains VERSION '$sourceVersion', while main contains '$mainVersion'. Merge main into the branch before releasing."
+          }
+
           $nextVersion = (& ./scripts/release/GetNextVersion.ps1 `
             -CurrentVersion $mainVersion `
             -Increment $env:VERSION_INCREMENT).Trim()
@@ -110,61 +99,31 @@ jobs:
             throw "Could not verify whether tag '$tag' already exists."
           }
 
-          Invoke-Git switch --detach $pullRequestRef
-          $pullRequestVersion = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          if ($pullRequestVersion -eq $mainVersion) {
-            [IO.File]::WriteAllText(
-              (Join-Path $PWD 'VERSION'),
-              "$nextVersion`n",
-              [Text.UTF8Encoding]::new($false))
-            Invoke-Git add -- VERSION
-            Invoke-Git commit -m "Release $tag"
-            Invoke-Git push origin "HEAD:refs/heads/$($pullRequest.headRefName)"
-          }
-          elseif ($pullRequestVersion -ne $nextVersion) {
-            throw "The pull request contains VERSION '$pullRequestVersion'; expected '$mainVersion' or prepared version '$nextVersion'."
-          }
+          Invoke-Git switch --force-create release-main refs/remotes/origin/main
+          Invoke-Git merge --no-ff --no-commit $sourceRef
 
-          $versionedHead = (& git rev-parse HEAD).Trim()
-          Start-Sleep -Seconds 10
-          $checkOutput = (& gh pr checks $pullRequestNumber `
-            --required --watch --fail-fast 2>&1 | Out-String).Trim()
-          $checkExitCode = $LASTEXITCODE
-          if ($checkOutput) { Write-Host $checkOutput }
-          if ($checkExitCode -ne 0 -and $checkOutput -notmatch 'no (required )?checks reported') {
-            throw "Required checks did not pass for pull request #$pullRequestNumber."
-          }
+          [IO.File]::WriteAllText(
+            (Join-Path $PWD 'VERSION'),
+            "$nextVersion`n",
+            [Text.UTF8Encoding]::new($false))
+          Invoke-Git add -- VERSION
+          Invoke-Git commit -m "Release $tag from $sourceBranch"
 
-          & gh pr merge $pullRequestNumber --merge --match-head-commit $versionedHead
+          & git merge-base --is-ancestor $sourceHead HEAD
           if ($LASTEXITCODE -ne 0) {
-            throw "GitHub refused to merge pull request #$pullRequestNumber."
+            throw "The release commit does not contain branch '$sourceBranch'."
           }
 
-          $mergeCommit = $null
-          for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            $mergeStatusJson = & gh pr view $pullRequestNumber --json state,mergeCommit
-            if ($LASTEXITCODE -ne 0) { throw 'Could not read pull request merge status.' }
-            $mergeStatus = $mergeStatusJson | ConvertFrom-Json
-            if ($mergeStatus.state -eq 'MERGED' -and $null -ne $mergeStatus.mergeCommit) {
-              $mergeCommit = $mergeStatus.mergeCommit.oid
-              break
-            }
-            if ($mergeStatus.state -eq 'CLOSED') {
-              throw "Pull request #$pullRequestNumber was closed without being merged."
-            }
-            Start-Sleep -Seconds 10
-          }
-          if ([string]::IsNullOrWhiteSpace($mergeCommit)) {
-            throw "Timed out waiting for pull request #$pullRequestNumber to merge."
-          }
+          $releaseCommit = (& git rev-parse HEAD).Trim()
+          Invoke-Git tag -a $tag $releaseCommit -m "Briefcase $nextVersion"
 
-          Invoke-Git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
-          $publishedVersion = (& git show "${mergeCommit}:VERSION").Trim()
-          if ($LASTEXITCODE -ne 0 -or $publishedVersion -ne $nextVersion) {
-            throw "Merged commit does not contain expected VERSION '$nextVersion'."
-          }
-          Invoke-Git tag -a $tag $mergeCommit -m "Briefcase $nextVersion"
-          Invoke-Git push origin "refs/tags/$tag"
+          # Updating main, the integration branch, and the tag atomically keeps
+          # the next release on the new VERSION. If either branch changed after
+          # it was fetched or any ref is denied, nothing is published.
+          Invoke-Git push --atomic origin `
+            'HEAD:refs/heads/main' `
+            "HEAD:refs/heads/$sourceBranch" `
+            "refs/tags/$tag"
 
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "version=$nextVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8

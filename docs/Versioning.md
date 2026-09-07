@@ -26,24 +26,27 @@ manually maintained Semantic Versioning number.
 
 ## Publishing a release
 
-Run the **Create Version** workflow manually from GitHub Actions. Its form asks
-for an open pull request number and one increment:
+Pull requests should be reviewed and merged into an integration branch before
+publication. Run the **Create Version** workflow manually from GitHub Actions.
+Its form asks for that source branch and one increment:
 
 - `build`: `1.2.3` becomes `1.2.4`; this is the Semantic Versioning patch;
 - `minor`: `1.2.3` becomes `1.3.0`;
 - `major`: `1.2.3` becomes `2.0.0`.
 
-The selected pull request must target `main`, must not be a draft, and must use a
-branch in the Briefcase repository. The workflow calculates the next version
-from `main`, commits `VERSION` to the pull request, waits for required checks,
-and asks GitHub to merge the exact checked revision. It then tags the resulting
-merge commit and calls the reusable release workflow. A rerun recognizes an
-already prepared `VERSION` and does not increment it twice.
+The source branch must be a remote branch in the Briefcase repository and must
+still contain the same `VERSION` as `main`. The workflow fetches an exact
+snapshot of both branches, merges the source into `main` locally, and writes the
+new `VERSION` into that merge commit. It then creates the tag and pushes `main`
+and the integration branch atomically before calling the reusable release
+workflow. The source branch is advanced to the same release commit, so it
+already contains the new version when it receives the next reviewed pull
+requests.
 
-Repository Actions settings must allow workflows to write repository contents
-and pull requests. Branch protection and required reviews or checks remain
-enforced because the merge is performed by GitHub without an administrator
-bypass.
+Repository Actions settings must allow workflows to write repository contents.
+If `main` is protected, its ruleset must explicitly allow this workflow or the
+GitHub Actions bot to update it. Otherwise the atomic push is rejected and
+neither `main` nor the release tag is changed.
 
 Build and inspect the same archives locally at any time with:
 

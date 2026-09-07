@@ -69,10 +69,11 @@ rooted for direct extraction into the corresponding `Binaries/Win64` directory.
 `VERSION` is the single source used by managed assemblies, the native runtime,
 installed packages, tags, and archive names.
 
-To publish, run the **Create Version** workflow from the Actions page. Enter the
-number of an open pull request targeting `main`, then choose `build`, `minor`, or
-`major`. The workflow updates `VERSION` on the pull request, waits for required
-checks, merges it through GitHub, creates the matching tag, and publishes both
+To publish, first merge and review pull requests in an integration branch. Then
+run the **Create Version** workflow from the Actions page, enter that branch,
+and choose `build`, `minor`, or `major`. The workflow merges its exact remote
+revision into `main`, updates `VERSION` in the merge commit, creates the matching
+tag, synchronizes the integration branch with that commit, and publishes both
 archives. The lower-level **Release** workflow can rebuild an existing tag.
 
 To install the built package with the game closed:
