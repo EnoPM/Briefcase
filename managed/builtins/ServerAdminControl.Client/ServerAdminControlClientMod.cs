@@ -61,6 +61,8 @@ public sealed class ServerAdminControlClientMod : BriefcaseMod
     private int _receivedGameProfile;
     private int _refreshWorkspaceAfterLoad;
     private ServerModEnvelope[] _serverMods = [];
+    private readonly Dictionary<string, int> _serverModIntegerDrafts =
+        new(StringComparer.Ordinal);
     private ServerPlayerEnvelope[] _serverPlayers = [];
     private ModHandshakeClientSnapshot[] _handshakeClients = [];
     private ServerConfigurationEnvelope? _serverConfiguration;
@@ -887,13 +889,9 @@ public sealed class ServerAdminControlClientMod : BriefcaseMod
                         }
                         case "int":
                         {
-                            var current = entry.Value.GetInt32();
-                            // Remote values are submitted only on Enter. A
-                            // continuously changing slider would start one TCP
-                            // administration request for every rendered frame.
-                            changed = ImGui.InputInt(
-                                entry.Key, ref current, 1, 10,
-                                ImGuiNET.ImGuiInputTextFlags.EnterReturnsTrue);
+                            var identity = $"{mod.FileName}\n{entry.Section}\n{entry.Key}";
+                            changed = DrawCommittedInteger(
+                                entry.Key, identity, entry.Value.GetInt32(), out var current);
                             if (changed) value = JsonSerializer.SerializeToElement(current);
                             break;
                         }
@@ -964,6 +962,30 @@ public sealed class ServerAdminControlClientMod : BriefcaseMod
                 finally { ImGui.PopID(); }
             }
         }
+    }
+
+    private bool DrawCommittedInteger(
+        string label, string identity, int serverValue, out int submittedValue)
+    {
+        // Dear ImGui deliberately rejects EnterReturnsTrue on InputInt because
+        // InputInt is an InputScalar widget. Keep the in-progress value locally
+        // and submit it only when the edit is committed, preventing a TCP
+        // administration request for every digit or key repeat.
+        var current = _serverModIntegerDrafts.TryGetValue(identity, out var draft)
+            ? draft
+            : serverValue;
+        if (ImGui.InputInt(label, ref current, 1, 10))
+            _serverModIntegerDrafts[identity] = current;
+
+        var enterPressed = ImGui.IsItemActive() &&
+                           (ImGui.IsKeyPressed(ImGuiKey.Enter) ||
+                            ImGui.IsKeyPressed(ImGuiKey.KeypadEnter));
+        var committed = ImGui.IsItemDeactivatedAfterEdit() || enterPressed;
+        if (committed && _serverModIntegerDrafts.Remove(identity, out submittedValue))
+            return submittedValue != serverValue;
+
+        submittedValue = serverValue;
+        return false;
     }
 
     private void DrawCompatibilityPanel()
