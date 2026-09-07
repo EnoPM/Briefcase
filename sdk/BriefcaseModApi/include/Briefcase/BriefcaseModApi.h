@@ -19,6 +19,7 @@
 #define BRIEFCASE_RENDERING_API_VERSION 4u
 #define BRIEFCASE_INPUT_API_VERSION 1u
 #define BRIEFCASE_PATCHING_API_VERSION 4u
+#define BRIEFCASE_GAME_THREAD_API_VERSION 1u
 #define BRIEFCASE_MOD_ID_CAPACITY 64u
 #define BRIEFCASE_MOD_NAME_CAPACITY 96u
 #define BRIEFCASE_MOD_AUTHOR_CAPACITY 64u
@@ -34,7 +35,9 @@ enum BriefcaseCapability : uint64_t {
     BRIEFCASE_CAPABILITY_UNREAL_INVOCATION = 1ull << 2,
     BRIEFCASE_CAPABILITY_RENDERING = 1ull << 3,
     BRIEFCASE_CAPABILITY_INPUT = 1ull << 4,
-    BRIEFCASE_CAPABILITY_PATCHING = 1ull << 5
+    BRIEFCASE_CAPABILITY_PATCHING = 1ull << 5,
+    // Bit 6 is reserved by the managed-only mod-management facade.
+    BRIEFCASE_CAPABILITY_GAME_THREAD = 1ull << 7
 };
 
 enum BriefcaseLogLevel : uint32_t {
@@ -407,6 +410,41 @@ struct BriefcasePatchingApi {
 
 // Future services are separate versioned tables. Adding a field to reflection,
 // rendering or input will not move the existing Core pointer.
+// The proxy is imported while Windows is starting the executable. It records
+// that initial thread and only dispatches this callback when ProcessEvent later
+// runs on the same thread. Managed work consequently enters Unreal from its
+// game thread without exposing a native address to a mod.
+struct BriefcaseGameThreadFrame {
+    uint32_t StructSize;
+    uint32_t ThreadId;
+    uint64_t Sequence;
+    float DeltaSeconds;
+    uint32_t Reserved0;
+    BriefcaseObjectHandle CurrentWorld;
+    uint64_t Reserved[4];
+};
+
+typedef void(BRIEFCASE_MOD_CALL* BriefcaseGameThreadCallbackFn)(
+    void* userContext, const BriefcaseGameThreadFrame* frame);
+typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseRegisterGameThreadCallbackFn)(
+    void* context, BriefcaseGameThreadCallbackFn callback, void* userContext,
+    uint64_t* registrationId);
+typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseUnregisterGameThreadCallbackFn)(
+    void* context, uint64_t registrationId);
+typedef void(BRIEFCASE_MOD_CALL* BriefcaseRequestGameThreadPumpFn)(void* context);
+typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseIsGameThreadFn)(void* context);
+
+struct BriefcaseGameThreadApi {
+    uint32_t StructSize;
+    uint32_t ApiVersion;
+    void* Context;
+    BriefcaseRegisterGameThreadCallbackFn RegisterCallback;
+    BriefcaseUnregisterGameThreadCallbackFn UnregisterCallback;
+    BriefcaseRequestGameThreadPumpFn RequestPump;
+    BriefcaseIsGameThreadFn IsGameThread;
+    void* Reserved[8];
+};
+
 struct BriefcaseHostApi {
     uint32_t StructSize;
     uint32_t ApiVersion;
@@ -416,8 +454,16 @@ struct BriefcaseHostApi {
     const BriefcaseRenderingApi* Rendering;
     const BriefcaseInputApi* Input;
     const BriefcasePatchingApi* Patching;
-    void* Reserved[7];
+    // GameThread consumes the first v1 reserved slot.
+    const BriefcaseGameThreadApi* GameThread;
+    void* Reserved[6];
 };
+
+#if defined(__cplusplus)
+static_assert(sizeof(BriefcaseGameThreadFrame) == 64);
+static_assert(sizeof(BriefcaseGameThreadApi) == 112);
+static_assert(sizeof(BriefcaseHostApi) == 112);
+#endif
 
 // All text is UTF-8 and stored inline. The host never frees mod-owned memory.
 struct BriefcaseModInfo {

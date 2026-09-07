@@ -17,6 +17,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
     private readonly string _cacheDirectory;
     private readonly Assembly? _generatedSdk;
     private readonly ConfigurationRegistry _configuration;
+    private readonly GameThreadService _gameThread;
     private readonly Dictionary<string, LoadedMod> _loaded = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, InstalledMod> _installed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Timer> _pending = new(StringComparer.OrdinalIgnoreCase);
@@ -30,13 +31,15 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         string modsDirectory,
         string cacheDirectory,
         Assembly? generatedSdk,
-        ConfigurationRegistry configuration)
+        ConfigurationRegistry configuration,
+        GameThreadService gameThread)
     {
         _context = context;
         _modsDirectory = modsDirectory;
         _cacheDirectory = cacheDirectory;
         _generatedSdk = generatedSdk;
         _configuration = configuration;
+        _gameThread = gameThread;
     }
 
     public void Start()
@@ -275,6 +278,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                 PatchRuntime? patchRuntime = null;
                 ConfigurationRegistry.ModScope? configuration = null;
                 BriefcaseMod? instance = null;
+                IGameThreadScope? gameThread = null;
                 var modLoaded = false;
                 try
                 {
@@ -296,13 +300,16 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                         throw new InvalidOperationException("The framework does not expose every required capability.");
 
                     configuration = _configuration.RegisterMod(info);
-                    var modContext = _context.WithConfiguration(configuration);
+                    gameThread = _gameThread.CreateScope(info.Id);
+                    var modContext = _context
+                        .WithConfiguration(configuration)
+                        .WithGameThread(gameThread);
                     patches = PatchDiscovery.Discover(assembly);
                     instance.Load(modContext);
                     modLoaded = true;
                     patchRuntime = PatchRuntime.Attach(modContext, patches, info);
                     _loaded[sourcePath] = new LoadedMod(
-                        loadContext, instance, info, patches, patchRuntime, configuration);
+                        loadContext, instance, info, patches, patchRuntime, configuration, gameThread);
                     var installed = GetOrAddInstalled(sourcePath);
                     installed.Info = info;
                     installed.LastError = null;
@@ -314,6 +321,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                 }
                 catch
                 {
+                    gameThread?.Dispose();
                     patchRuntime?.Dispose();
                     patches?.Dispose();
                     if (modLoaded)
@@ -734,6 +742,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         {
             // Remove every MethodInfo reference before asking CoreCLR to unload
             // the collectible assembly that declared those patch methods.
+            loaded.GameThread.Dispose();
             loaded.PatchRuntime.Dispose();
             loaded.Patches.Dispose();
             loaded.Instance.Unload();
@@ -805,7 +814,8 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         ModInfo Info,
         PatchSet Patches,
         PatchRuntime PatchRuntime,
-        ConfigurationRegistry.ModScope Configuration);
+        ConfigurationRegistry.ModScope Configuration,
+        IGameThreadScope GameThread);
     private sealed record UnloadTicket(WeakReference Reference, ModInfo Info);
 
     private sealed class InstalledMod(string sourcePath)

@@ -14,18 +14,21 @@ internal sealed class BuiltInServiceLoader : IDisposable
     private readonly string _directory;
     private readonly Assembly? _generatedSdk;
     private readonly ConfigurationRegistry _configuration;
+    private readonly GameThreadService _gameThread;
     private readonly List<LoadedService> _loaded = [];
 
     public BuiltInServiceLoader(
         ModContext context,
         string directory,
         Assembly? generatedSdk,
-        ConfigurationRegistry configuration)
+        ConfigurationRegistry configuration,
+        GameThreadService gameThread)
     {
         _context = context;
         _directory = directory;
         _generatedSdk = generatedSdk;
         _configuration = configuration;
+        _gameThread = gameThread;
     }
 
     public void Start()
@@ -44,6 +47,7 @@ internal sealed class BuiltInServiceLoader : IDisposable
         PatchRuntime? patchRuntime = null;
         ConfigurationRegistry.ModScope? configuration = null;
         BriefcaseMod? instance = null;
+        IGameThreadScope? gameThread = null;
         var modLoaded = false;
         try
         {
@@ -66,17 +70,21 @@ internal sealed class BuiltInServiceLoader : IDisposable
                     "The framework does not expose every required capability.");
 
             configuration = _configuration.RegisterMod(info);
-            var modContext = _context.WithConfiguration(configuration);
+            gameThread = _gameThread.CreateScope(info.Id);
+            var modContext = _context
+                .WithConfiguration(configuration)
+                .WithGameThread(gameThread);
             patches = PatchDiscovery.Discover(assembly);
             instance.Load(modContext);
             modLoaded = true;
             patchRuntime = PatchRuntime.Attach(modContext, patches, info);
             _loaded.Add(new LoadedService(
-                loadContext, instance, info, patches, patchRuntime, configuration));
+                loadContext, instance, info, patches, patchRuntime, configuration, gameThread));
             _context.Info($"Loaded Core built-in {info.Name} {info.Version} [{info.Id}]");
         }
         catch (Exception exception)
         {
+            gameThread?.Dispose();
             patchRuntime?.Dispose();
             patches?.Dispose();
             if (modLoaded)
@@ -100,6 +108,7 @@ internal sealed class BuiltInServiceLoader : IDisposable
             var loaded = _loaded[index];
             try
             {
+                loaded.GameThread.Dispose();
                 loaded.PatchRuntime.Dispose();
                 loaded.Patches.Dispose();
                 loaded.Instance.Unload();
@@ -123,5 +132,6 @@ internal sealed class BuiltInServiceLoader : IDisposable
         ModInfo Info,
         PatchSet Patches,
         PatchRuntime PatchRuntime,
-        ConfigurationRegistry.ModScope Configuration);
+        ConfigurationRegistry.ModScope Configuration,
+        IGameThreadScope GameThread);
 }

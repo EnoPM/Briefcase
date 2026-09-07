@@ -28,6 +28,7 @@
   <Folder Name="/Core/Tooling/">
     <Project Path="managed/Briefcase.SdkGenerator/Briefcase.SdkGenerator.csproj" />
     <Project Path="validation/Briefcase.ServerAdministration.Validation/Briefcase.ServerAdministration.Validation.csproj" />
+    <Project Path="validation/Briefcase.GameThread.Validation/Briefcase.GameThread.Validation.csproj" />
   </Folder>
 
   <Folder Name="/Samples/">

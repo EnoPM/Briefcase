@@ -12,6 +12,7 @@ public static unsafe class EntryPoint
 {
     private static ManagedModManager? _manager;
     private static BuiltInServiceLoader? _builtIns;
+    private static GameThreadService? _gameThread;
 #if !BRIEFCASE_HEADLESS
     private static ManagedRenderingHost? _rendering;
 #endif
@@ -29,9 +30,13 @@ public static unsafe class EntryPoint
                 return 0;
 
             var modManagement = new DeferredModManagementBackend();
-            var context = new ModContext(host).WithModManagement(modManagement);
-            if (!context.IsValid)
+            var nativeContext = new ModContext(host);
+            if (!nativeContext.IsValid)
                 return 1;
+            _gameThread = new GameThreadService(nativeContext);
+            var context = nativeContext
+                .WithGameThread(_gameThread.CreateScope("briefcase.core"))
+                .WithModManagement(modManagement);
 
             var gameDirectory = Path.GetDirectoryName(Environment.ProcessPath);
             if (string.IsNullOrWhiteSpace(gameDirectory))
@@ -72,7 +77,8 @@ public static unsafe class EntryPoint
                 Path.Combine(frameworkDirectory, "Mods"),
                 Path.Combine(coreDirectory, "Cache"),
                 generatedSdk,
-                _configuration);
+                _configuration,
+                _gameThread);
             modManagement.Attach(_manager);
             _configuration.AttachModControl(_manager);
             _manager.Start();
@@ -80,12 +86,15 @@ public static unsafe class EntryPoint
                 context,
                 Path.Combine(coreDirectory, "BuiltIns"),
                 generatedSdk,
-                _configuration);
+                _configuration,
+                _gameThread);
             _builtIns.Start();
             return 0;
         }
-        catch
+        catch (Exception exception)
         {
+            try { new ModContext(host).Error($"Managed host initialization failed: {exception}"); }
+            catch { }
             return 3;
         }
     }

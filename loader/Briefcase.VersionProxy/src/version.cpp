@@ -20,6 +20,9 @@ DWORD WINAPI runEmbeddedRuntime(void* parameter) {
 BOOL WINAPI DllMain(HMODULE self, DWORD reason, void*) {
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(self);
+    // A statically imported proxy is attached on Unreal's initial process
+    // thread. Save the ID before creating our bootstrap worker.
+    briefcase::captureGameThreadId(GetCurrentThreadId());
     static wchar_t path[32768]{};
     const UINT length = GetSystemDirectoryW(path, static_cast<UINT>(std::size(path)));
     if (!length || length >= std::size(path) || wcscat_s(path, L"\\version.dll")) return FALSE;

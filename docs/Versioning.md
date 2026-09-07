@@ -1,8 +1,7 @@
 # Versioning
 
-Briefcase uses Semantic Versioning for framework releases. The repository tag
-for version `0.7.0` is `v0.7.0` and the portable client and server packages are
-both produced from that tag.
+Briefcase uses Semantic Versioning for framework releases. The current development version is `0.8.0`. A release produced from this
+revision uses tag `v0.8.0` for both the portable client and server packages.
 
 The public framework version, native API versions and game build identity are
 separate compatibility axes:

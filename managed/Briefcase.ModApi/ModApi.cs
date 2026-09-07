@@ -39,32 +39,40 @@ public readonly unsafe struct ModContext
     private readonly NativeHostApi* _api;
     private readonly ConfigurationApi _configuration;
     private readonly ModManagementApi _mods;
+    private readonly GameThreadApi _gameThread;
 
     public ModContext(NativeHostApi* api)
     {
         _api = api;
         _configuration = default;
         _mods = default;
+        _gameThread = default;
     }
 
     private ModContext(
         NativeHostApi* api,
         ConfigurationApi configuration,
-        ModManagementApi mods)
+        ModManagementApi mods,
+        GameThreadApi gameThread)
     {
         _api = api;
         _configuration = configuration;
         _mods = mods;
+        _gameThread = gameThread;
     }
 
     internal ModContext WithConfiguration(IModConfigurationScope configuration) =>
-        new(_api, new ConfigurationApi(configuration), _mods);
+        new(_api, new ConfigurationApi(configuration), _mods, _gameThread);
 
     internal ModContext WithModManagement(IModManagementBackend backend) =>
-        new(_api, _configuration, new ModManagementApi(backend));
+        new(_api, _configuration, new ModManagementApi(backend), _gameThread);
+
+    internal ModContext WithGameThread(IGameThreadScope scope) =>
+        new(_api, _configuration, _mods, new GameThreadApi(scope));
 
     internal NativeRenderingApi* RenderingNative => IsValid ? _api->Rendering : null;
     internal NativePatchingApi* PatchingNative => IsValid ? _api->Patching : null;
+    internal NativeGameThreadApi* GameThreadNative => IsValid ? _api->GameThread : null;
 
     public bool IsValid => _api != null && _api->ApiVersion == BriefcaseAbi.HostApiVersion &&
                            _api->Core != null && _api->Core->Log != null;
@@ -81,6 +89,7 @@ public readonly unsafe struct ModContext
     public InputApi Input => new();
     public ConfigurationApi Configuration => _configuration;
     public ModManagementApi Mods => _mods;
+    public GameThreadApi GameThread => _gameThread;
 
     public Version FrameworkVersion
     {

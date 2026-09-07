@@ -18,7 +18,7 @@
 #include <vector>
 
 namespace {
-constexpr BriefcaseVersion FrameworkVersion{0, 7, 0, 0};
+constexpr BriefcaseVersion FrameworkVersion{0, 8, 0, 0};
 std::vector<HMODULE> LoadedMods;
 std::vector<HMODULE> ResidentModules;
 
@@ -59,7 +59,7 @@ const BriefcaseCoreApi CoreApi{
 
 BriefcaseHostApi HostApi{
     sizeof(BriefcaseHostApi), BRIEFCASE_HOST_API_VERSION, BRIEFCASE_CAPABILITY_CORE, &CoreApi,
-    nullptr, nullptr, nullptr, nullptr, {}};
+    nullptr, nullptr, nullptr, nullptr, nullptr, {}};
 
 bool hasTerminator(const char* text, std::size_t capacity) {
     return text && std::memchr(text, '\0', capacity) != nullptr;
@@ -108,12 +108,15 @@ const BriefcaseHostApi* getHostApi() {
     HostApi.Rendering = nullptr;
     HostApi.Input = nullptr;
     HostApi.Patching = nullptr;
+    HostApi.GameThread = nullptr;
     if (isUnrealApiReady()) {
         HostApi.Capabilities |= BRIEFCASE_CAPABILITY_UNREAL_REFLECTION |
                                 BRIEFCASE_CAPABILITY_UNREAL_INVOCATION;
         HostApi.Unreal = getUnrealApi();
         HostApi.Capabilities |= BRIEFCASE_CAPABILITY_PATCHING;
         HostApi.Patching = getPatchingApi();
+        HostApi.Capabilities |= BRIEFCASE_CAPABILITY_GAME_THREAD;
+        HostApi.GameThread = getGameThreadApi();
     }
     return &HostApi;
 }

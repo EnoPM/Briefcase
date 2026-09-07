@@ -32,6 +32,7 @@ Windows loads version.dll
   -> a worker thread validates the Deceive Inc. executable profile
   -> Unreal reflection and patching services are initialized
   -> the private CoreCLR starts from Briefcase/Core/DotNet
+  -> Briefcase.ManagedHost registers the scoped game-thread scheduler
   -> Briefcase.ManagedHost loads or emits the SDK for this executable
   -> Briefcase.Rendering creates the Win32/DirectComposition overlay and ImGui context
   -> managed DLLs in Briefcase/Mods are loaded in filename order
@@ -67,6 +68,7 @@ The API is split into independent services:
 
 - Core logging and build identity.
 - Validated Unreal object, reflection, property, and function operations.
+- Scoped game-thread scheduling, timers, and engine/world lifecycle events.
 - Unreal and native prefix/postfix patch dispatch.
 
 C# mod authors consume these services through `Briefcase.ModApi`, not through

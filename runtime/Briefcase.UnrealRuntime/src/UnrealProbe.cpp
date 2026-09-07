@@ -292,6 +292,108 @@ std::atomic<ProcessEventFn> OriginalProcessEvent{};
 void* ProcessEventTarget{};
 std::atomic_bool FirstProcessEventObserved{false};
 
+struct GameThreadRegistration {
+    std::uint64_t Id{};
+    BriefcaseGameThreadCallbackFn Callback{};
+    void* UserContext{};
+    bool Active{true};
+    std::recursive_mutex InvocationMutex;
+};
+
+std::mutex GameThreadStateMutex;
+std::vector<std::shared_ptr<GameThreadRegistration>> GameThreadRegistrations;
+std::atomic_uint32_t GameThreadRegistrationCount{};
+std::uint64_t NextGameThreadRegistrationId{1};
+std::atomic_uint32_t CapturedGameThreadId{};
+std::atomic_bool GameThreadPumpRequested{true};
+std::atomic_uint64_t GameThreadSequence{};
+std::atomic_int64_t LastGameThreadPumpCounter{};
+std::atomic_int64_t GameThreadPerformanceFrequency{};
+const UObject* GameThreadWorldClass{};
+BriefcaseObjectHandle LastObservedWorld{UINT32_MAX, 0};
+thread_local bool InsideGameThreadPump{};
+
+bool safeGameThreadCallback(
+    const std::shared_ptr<GameThreadRegistration>& registration,
+    const BriefcaseGameThreadFrame* frame) noexcept {
+    __try {
+        registration->Callback(registration->UserContext, frame);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+const UObject* worldFor(const UObject* object) {
+    if (!GameThreadWorldClass)
+        GameThreadWorldClass = findObjectByPath(L"/Script/Engine.World");
+    if (!GameThreadWorldClass) return nullptr;
+    auto* current = object;
+    for (unsigned depth = 0; current && depth < 64; ++depth) {
+        if (!readable(current, sizeof(UObject))) return nullptr;
+        if (objectIsA(current, GameThreadWorldClass)) return current;
+        current = current->OuterPrivate;
+    }
+    return nullptr;
+}
+
+void pumpGameThread(UObject* eventObject) {
+    if (InsideGameThreadPump ||
+        GetCurrentThreadId() != CapturedGameThreadId.load(std::memory_order_acquire)) return;
+
+    // ProcessEvent is one of Unreal's hottest paths. Perform only atomic
+    // checks and the clock throttle until a pulse is actually due.
+    if (GameThreadRegistrationCount.load(std::memory_order_relaxed) == 0) return;
+
+    LARGE_INTEGER counter{};
+    if (!QueryPerformanceCounter(&counter)) return;
+    auto frequency = GameThreadPerformanceFrequency.load(std::memory_order_acquire);
+    if (frequency == 0) {
+        LARGE_INTEGER queried{};
+        if (!QueryPerformanceFrequency(&queried) || queried.QuadPart <= 0) return;
+        frequency = queried.QuadPart;
+        GameThreadPerformanceFrequency.store(frequency, std::memory_order_release);
+    }
+    auto previous = LastGameThreadPumpCounter.load(std::memory_order_relaxed);
+    const auto minimumInterval = std::max<LONGLONG>(1, frequency / 120);
+    const bool requested = GameThreadPumpRequested.exchange(false, std::memory_order_acq_rel);
+    if (!requested && previous != 0 && counter.QuadPart - previous < minimumInterval) return;
+    if (!LastGameThreadPumpCounter.compare_exchange_strong(
+            previous, counter.QuadPart,
+            std::memory_order_acq_rel, std::memory_order_relaxed)) return;
+
+    std::vector<std::shared_ptr<GameThreadRegistration>> registrations;
+    {
+        const std::scoped_lock lock(GameThreadStateMutex);
+        if (GameThreadRegistrations.empty()) return;
+        registrations = GameThreadRegistrations;
+    }
+
+    if (const auto* world = worldFor(eventObject)) {
+        BriefcaseObjectHandle handle{};
+        if (makeHandle(world, handle)) LastObservedWorld = handle;
+    } else if (!resolveObject(LastObservedWorld)) {
+        LastObservedWorld = {UINT32_MAX, 0};
+    }
+
+    const float delta = previous == 0 ? 0.0f : static_cast<float>(
+        static_cast<double>(counter.QuadPart - previous) /
+        static_cast<double>(frequency));
+    BriefcaseGameThreadFrame frame{
+        sizeof(BriefcaseGameThreadFrame), GetCurrentThreadId(),
+        GameThreadSequence.fetch_add(1, std::memory_order_relaxed) + 1,
+        delta, 0, LastObservedWorld, {}};
+
+    InsideGameThreadPump = true;
+    for (const auto& registration : registrations) {
+        const std::scoped_lock invocationLock(registration->InvocationMutex);
+        if (!registration->Active) continue;
+        if (!safeGameThreadCallback(registration, &frame))
+            briefcase::log(L"game thread: managed callback raised a native exception");
+    }
+    InsideGameThreadPump = false;
+}
+
 void __fastcall processEventHook(UObject* object, const UFunction* function, void* parameters);
 
 ProcessEventFn originalProcessEvent(void** vtable) {
@@ -354,6 +456,8 @@ void __fastcall processEventHook(
     auto** vtable = object ? reinterpret_cast<void**>(object->VTable) : nullptr;
     const auto original = originalProcessEvent(vtable);
     if (!original) return;
+
+    pumpGameThread(object);
 
     if (!FirstProcessEventObserved.exchange(true, std::memory_order_relaxed)) {
         const auto functionName = function && readable(function, sizeof(UFunction))
@@ -2075,6 +2179,76 @@ bool installProcessEventDetour(void** vtable) {
     return true;
 }
 
+BriefcaseBool BRIEFCASE_MOD_CALL apiRegisterGameThreadCallback(
+    void*, BriefcaseGameThreadCallbackFn callback, void* userContext,
+    std::uint64_t* registrationId) {
+    if (!RuntimeObjects || !callback || !registrationId ||
+        !writable(registrationId, sizeof(*registrationId)) ||
+        CapturedGameThreadId.load(std::memory_order_acquire) == 0) return 0;
+
+    auto* anchor = findObjectByPath(L"/Script/Engine.Default__KismetSystemLibrary");
+    if (!anchor)
+        anchor = findObjectByPath(L"/Script/Engine.Default__KismetTextLibrary");
+    if (!anchor || !readable(anchor, sizeof(UObject))) {
+        briefcase::log(L"game thread: no stable ProcessEvent anchor was found");
+        return 0;
+    }
+    if (!installProcessEventDetour(reinterpret_cast<void**>(anchor->VTable))) {
+        briefcase::log(L"game thread: ProcessEvent detour installation failed");
+        return 0;
+    }
+
+    try {
+        auto registration = std::make_shared<GameThreadRegistration>();
+        {
+            const std::scoped_lock lock(GameThreadStateMutex);
+            registration->Id = NextGameThreadRegistrationId++;
+            registration->Callback = callback;
+            registration->UserContext = userContext;
+            GameThreadRegistrations.push_back(registration);
+            GameThreadRegistrationCount.store(
+                static_cast<std::uint32_t>(GameThreadRegistrations.size()),
+                std::memory_order_release);
+        }
+        *registrationId = registration->Id;
+        GameThreadPumpRequested.store(true, std::memory_order_release);
+        briefcase::log(L"game thread: registered managed scheduler on thread " +
+                       std::to_wstring(CapturedGameThreadId.load(std::memory_order_relaxed)));
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
+BriefcaseBool BRIEFCASE_MOD_CALL apiUnregisterGameThreadCallback(
+    void*, std::uint64_t registrationId) {
+    std::shared_ptr<GameThreadRegistration> removed;
+    {
+        const std::scoped_lock lock(GameThreadStateMutex);
+        const auto registration = std::find_if(
+            GameThreadRegistrations.begin(), GameThreadRegistrations.end(),
+            [registrationId](const auto& item) { return item->Id == registrationId; });
+        if (registration == GameThreadRegistrations.end()) return 0;
+        removed = *registration;
+        removed->Active = false;
+        GameThreadRegistrations.erase(registration);
+        GameThreadRegistrationCount.store(
+            static_cast<std::uint32_t>(GameThreadRegistrations.size()),
+            std::memory_order_release);
+    }
+    const std::scoped_lock invocationLock(removed->InvocationMutex);
+    return 1;
+}
+
+void BRIEFCASE_MOD_CALL apiRequestGameThreadPump(void*) {
+    GameThreadPumpRequested.store(true, std::memory_order_release);
+}
+
+BriefcaseBool BRIEFCASE_MOD_CALL apiIsGameThread(void*) {
+    const auto captured = CapturedGameThreadId.load(std::memory_order_acquire);
+    return captured != 0 && GetCurrentThreadId() == captured ? 1u : 0u;
+}
+
 BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiRegisterPatch(
     void*, BriefcaseObjectHandle targetClassHandle, BriefcaseObjectHandle functionOwnerClassHandle,
     const char* utf8FunctionName, std::uint32_t functionNameLength, BriefcasePatchPhase phase,
@@ -2407,6 +2581,10 @@ const BriefcaseUnrealApi UnrealApi{
     apiGetObjectClass, apiIsObjectA, apiGetPropertyInfo, apiReadProperty,
     apiInvokeFunction, apiReadStringProperty,
     apiInvokeFunctionText, apiReadTextProperty, apiInvokeNativeBoolean, {}};
+const BriefcaseGameThreadApi GameThreadApi{
+    sizeof(BriefcaseGameThreadApi), BRIEFCASE_GAME_THREAD_API_VERSION, nullptr,
+    apiRegisterGameThreadCallback, apiUnregisterGameThreadCallback,
+    apiRequestGameThreadPump, apiIsGameThread, {}};
 const BriefcasePatchingApi PatchingApi{
     sizeof(BriefcasePatchingApi), BRIEFCASE_PATCHING_API_VERSION, nullptr,
     apiRegisterPatch, apiUnregisterPatch,
@@ -2419,6 +2597,12 @@ namespace briefcase {
 
 const BriefcaseUnrealApi* getUnrealApi() { return isUnrealApiReady() ? &UnrealApi : nullptr; }
 const BriefcasePatchingApi* getPatchingApi() { return isUnrealApiReady() ? &PatchingApi : nullptr; }
+const BriefcaseGameThreadApi* getGameThreadApi() {
+    return isUnrealApiReady() ? &GameThreadApi : nullptr;
+}
+void captureGameThreadId(DWORD threadId) {
+    CapturedGameThreadId.store(threadId, std::memory_order_release);
+}
 bool isUnrealApiReady() {
     return RuntimeObjects && RuntimeNameConverter && saneObjectArray(RuntimeObjects);
 }

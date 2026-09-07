@@ -8,6 +8,7 @@ public static class BriefcaseAbi
     public const uint RenderingApiVersion = 4;
     public const uint InputApiVersion = 1;
     public const uint PatchingApiVersion = 4;
+    public const uint GameThreadApiVersion = 1;
     public const ulong CoreCapability = 1UL << 0;
     public const ulong UnrealReflectionCapability = 1UL << 1;
     public const ulong UnrealInvocationCapability = 1UL << 2;
@@ -15,6 +16,7 @@ public static class BriefcaseAbi
     public const ulong InputCapability = 1UL << 4;
     public const ulong PatchingCapability = 1UL << 5;
     public const ulong ModManagementCapability = 1UL << 6;
+    public const ulong GameThreadCapability = 1UL << 7;
 }
 
 public enum NativeUnrealResult : uint
@@ -130,7 +132,8 @@ public unsafe struct NativeHostApi
     public NativeRenderingApi* Rendering;
     public NativeInputApi* Input;
     public NativePatchingApi* Patching;
-    public fixed ulong Reserved[7];
+    public NativeGameThreadApi* GameThread;
+    public fixed ulong Reserved[6];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -177,6 +180,31 @@ public unsafe struct NativePatchingApi
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, char*, uint, uint*, NativeUnrealResult> CopyString;
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, char*, uint, uint*, NativeUnrealResult> CopyText;
     public fixed ulong Reserved[3];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeGameThreadFrame
+{
+    public uint StructSize;
+    public uint ThreadId;
+    public ulong Sequence;
+    public float DeltaSeconds;
+    public uint Reserved0;
+    public UnrealObjectHandle CurrentWorld;
+    public fixed ulong Reserved[4];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeGameThreadApi
+{
+    public uint StructSize;
+    public uint ApiVersion;
+    public void* Context;
+    public delegate* unmanaged[Cdecl]<void*, delegate* unmanaged[Cdecl]<void*, NativeGameThreadFrame*, void>, void*, ulong*, uint> RegisterCallback;
+    public delegate* unmanaged[Cdecl]<void*, ulong, uint> UnregisterCallback;
+    public delegate* unmanaged[Cdecl]<void*, void> RequestPump;
+    public delegate* unmanaged[Cdecl]<void*, uint> IsGameThread;
+    public fixed ulong Reserved[8];
 }
 
 [StructLayout(LayoutKind.Sequential)]

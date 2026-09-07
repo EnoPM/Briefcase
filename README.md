@@ -27,7 +27,9 @@ DeceiveInc/Binaries/Win64/
 `version.dll` forwards the Windows Version API, starts the bundled CoreCLR, and
 passes a versioned native service table to `Briefcase.ManagedHost`. The managed
 host generates or loads the SDK for the current executable and then loads C# mod
-DLLs from `Briefcase/Mods` into collectible `AssemblyLoadContext` instances.
+DLLs from `Briefcase/Mods` into collectible `AssemblyLoadContext` instances. A scoped
+game-thread API provides queued calls, asynchronous invocation, timers, ticks, and
+engine/world lifecycle observations to client and server mods.
 F1 opens the managed Briefcase menu. A top switch selects the local **Client**
 configuration or remote **Server** administration. The Client view uses vertical
 tabs for Briefcase and each configurable user mod.
@@ -108,7 +110,7 @@ Game-specific user mods and historical experiments live in a separate private
 repository. The public solution and release pipeline contain no references to
 those projects.
 
-See `docs/BriefcaseArchitecture.md`, `docs/CSharpRuntime.md`, `docs/ModConfiguration.md`,
+See `docs/BriefcaseArchitecture.md`, `docs/CSharpRuntime.md`, `docs/GameThread.md`, `docs/ModConfiguration.md`,
 `docs/AutomaticSdkGeneration.md`, `docs/Patching.md`, and
 `docs/Versioning.md` for the internal model. Dependency declarations and lifecycle
 ordering are documented in `docs/ModDependencies.md`; the player/server manifest
