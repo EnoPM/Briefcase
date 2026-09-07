@@ -2,10 +2,11 @@
 
 ## Startup
 
-`version.dll` loads `Briefcase/Core/DotNet/host/fxr/<version>/hostfxr.dll` and
-starts the bundled CoreCLR with `Briefcase.ManagedHost.runtimeconfig.json`. It
-then obtains `Briefcase.ManagedHost.EntryPoint.Initialize` and passes the
-versioned native `BriefcaseHostApi` table to managed code.
+`version.dll` loads `Briefcase/Core/Native/Briefcase.UnrealRuntime.dll`. The
+native runtime then loads `Briefcase/Core/DotNet/host/fxr/<version>/hostfxr.dll`
+and starts the bundled CoreCLR with `Briefcase.ManagedHost.runtimeconfig.json`.
+It obtains `Briefcase.ManagedHost.EntryPoint.Initialize` and passes the versioned
+native `BriefcaseHostApi` table to managed code.
 
 The runtime is framework-dependent relative to the private bundled .NET tree.
 The user does not need to install .NET globally.

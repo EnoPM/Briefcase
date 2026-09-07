@@ -196,7 +196,7 @@ Generated method invocation is implemented by Unreal API v2. The native side
 resolves the object and owner handles, finds the named UFunction in reflected
 metadata, checks `UFunction::ParmsSize`, checks the ProcessEvent vtable entry,
 and only then invokes the function. UObject parameters cross the ABI as an
-index/serial handle; `version.dll` resolves them immediately before ProcessEvent
+index/serial handle; the native runtime resolves them immediately before ProcessEvent
 and converts object outputs back to handles. Game pointers are never exposed to
 C#.
 

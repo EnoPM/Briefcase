@@ -11,6 +11,8 @@ Briefcase/
 |-- settings.json
 |-- Briefcase.log
 |-- Core/
+|   |-- Native/
+|   |   `-- Briefcase.UnrealRuntime.dll
 |   |-- Briefcase.ManagedHost.dll
 |   |-- Briefcase.ModApi.dll
 |   |-- Briefcase.Rendering.dll
@@ -29,7 +31,8 @@ dependency in `Core/Sdk`; a mod package does not include its own SDK copy.
 ```text
 Windows loads version.dll
   -> Windows Version API exports are forwarded to System32/version.dll
-  -> a worker thread validates the Deceive Inc. executable profile
+  -> a worker loads Briefcase/Core/Native/Briefcase.UnrealRuntime.dll
+  -> the native runtime validates the Deceive Inc. executable profile
   -> Unreal reflection and patching services are initialized
   -> the private CoreCLR starts from Briefcase/Core/DotNet
   -> Briefcase.ManagedHost registers the scoped game-thread scheduler
@@ -46,7 +49,8 @@ Initialization runs outside `DllMain` and the Windows loader lock.
 Briefcase keeps native C++ limited to operations that require an unmanaged
 entry point or direct cooperation with the game's native code:
 
-- the `version.dll` proxy, Windows export forwarding, and CoreCLR bootstrap;
+- the minimal `version.dll` proxy and Windows export forwarding;
+- the separate native runtime and CoreCLR bootstrap;
 - native detours and their machine-code trampolines;
 - guarded Unreal memory and reflection operations at the native ABI boundary;
 - the smallest callbacks needed to cross safely between Unreal and managed code.

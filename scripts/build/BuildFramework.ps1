@@ -34,10 +34,17 @@ try {
     $install=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
     if ($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }
     $msbuild=Join-Path $install[0] 'MSBuild\Current\Bin\amd64\MSBuild.exe'
-    $nativeProject=Join-Path $root 'loader\Briefcase.VersionProxy\Briefcase.VersionProxy.vcxproj'
+    $runtimeProject=Join-Path $root 'runtime\Briefcase.UnrealRuntime\Briefcase.UnrealRuntime.vcxproj'
+    Write-Host "Building Briefcase.UnrealRuntime.dll | $Configuration | x64"
+    $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
+        $runtimeProject,"/p:Configuration=$Configuration",'/p:Platform=x64','/m','/nologo','/verbosity:minimal','/nr:false')
+    if($result -ne 0){ exit $result }
+
+    $proxyProject=Join-Path $root 'loader\Briefcase.VersionProxy\Briefcase.VersionProxy.vcxproj'
     Write-Host "Building Briefcase version.dll | $Configuration | x64"
     $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
-        $nativeProject,"/p:Configuration=$Configuration",'/p:Platform=x64','/m','/nologo','/verbosity:minimal','/nr:false')
+        $proxyProject,"/p:Configuration=$Configuration",'/p:Platform=x64',
+        '/p:BuildProjectReferences=false','/m','/nologo','/verbosity:minimal','/nr:false')
     if($result -ne 0){ exit $result }
 
     $managedHostProject=Join-Path $root 'managed\Briefcase.ManagedHost\Briefcase.ManagedHost.csproj'
@@ -132,13 +139,16 @@ try {
 
     $frameworkDistribution=Join-Path $distribution 'Briefcase'
     $coreDistribution=Join-Path $frameworkDistribution 'Core'
+    $nativeDistribution=Join-Path $coreDistribution 'Native'
     $builtInsDistribution=Join-Path $coreDistribution 'BuiltIns'
     $dotNetDistribution=Join-Path $coreDistribution 'DotNet'
     $modsDistribution=Join-Path $frameworkDistribution 'Mods'
-    New-Item -ItemType Directory -Path $coreDistribution,$builtInsDistribution,$modsDistribution -Force | Out-Null
+    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$builtInsDistribution,$modsDistribution -Force | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
         -Destination (Join-Path $distribution 'version.dll') -Force
+    Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `
+        -Destination (Join-Path $nativeDistribution 'Briefcase.UnrealRuntime.dll') -Force
 
     Copy-Item -Path (Join-Path $managedHostPublish '*') -Destination $coreDistribution -Recurse -Force
     # Briefcase.SdkEmitter is a library at runtime. Its CLI companions are used

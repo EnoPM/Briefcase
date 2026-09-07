@@ -1,7 +1,8 @@
 # Briefcase.UnrealRuntime
 
-This static x64 library provides the native half of Briefcase. It is linked
-directly into the proxy `version.dll`; no separate runtime DLL is distributed.
+This x64 DLL provides the native half of Briefcase. The minimal `version.dll`
+proxy loads it from `Briefcase/Core/Native/Briefcase.UnrealRuntime.dll` through
+a small versioned bootstrap ABI.
 
 Its responsibilities include:
 

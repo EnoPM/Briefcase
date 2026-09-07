@@ -14,6 +14,8 @@ DeceiveInc/Binaries/Win64/
     |-- settings.json
     |-- Briefcase.log
     |-- Core/
+    |   |-- Native/
+    |   |   `-- Briefcase.UnrealRuntime.dll
     |   |-- Briefcase.ManagedHost.dll
     |   |-- Briefcase.ModApi.dll
     |   |-- Briefcase.SdkEmitter.dll
@@ -24,10 +26,12 @@ DeceiveInc/Binaries/Win64/
     `-- Mods/
 ```
 
-`version.dll` forwards the Windows Version API, starts the bundled CoreCLR, and
-passes a versioned native service table to `Briefcase.ManagedHost`. The managed
-host generates or loads the SDK for the current executable and then loads C# mod
-DLLs from `Briefcase/Mods` into collectible `AssemblyLoadContext` instances. A scoped
+`version.dll` only forwards the Windows Version API and loads the native runtime
+from `Briefcase/Core/Native`. `Briefcase.UnrealRuntime.dll` initializes Unreal,
+starts the bundled CoreCLR, and passes a versioned native service table to
+`Briefcase.ManagedHost`. The managed host generates or loads the SDK for the
+current executable and then loads C# mod DLLs from `Briefcase/Mods` into collectible
+`AssemblyLoadContext` instances. A scoped
 game-thread API provides queued calls, asynchronous invocation, timers, ticks, and
 engine/world lifecycle observations to client and server mods.
 F1 opens the managed Briefcase menu. A top switch selects the local **Client**

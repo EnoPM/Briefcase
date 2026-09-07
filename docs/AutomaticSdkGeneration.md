@@ -2,8 +2,8 @@
 
 ## Goal
 
-The same `version.dll` can run inside the Deceive Inc. client or dedicated
-server. The process that loads the proxy determines the generated SDK:
+The same proxy and `Briefcase.UnrealRuntime.dll` can run inside the Deceive Inc.
+client or dedicated server. The process that loads them determines the generated SDK:
 
 ```text
 DeceiveInc-Win64-Shipping.exe -> Briefcase.DeceiveInc.Client.Sdk
@@ -19,7 +19,8 @@ An unknown build is rejected instead of being scanned with stale offsets.
 
 ```text
 version.dll
-  -> identifies Client or Server and the exact build
+  -> loads Briefcase/Core/Native/Briefcase.UnrealRuntime.dll
+  -> the runtime identifies Client or Server and the exact build
   -> walks GUObjectArray and Unreal reflection metadata in-process
   -> writes an address-free JSON snapshot atomically
   -> starts the bundled CoreCLR and Briefcase.ManagedHost

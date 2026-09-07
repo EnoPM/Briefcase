@@ -1,9 +1,10 @@
 # Briefcase.VersionProxy
 
 `version.dll` forwards all 17 exports to the genuine Windows System32 library.
-The Unreal metadata runtime is statically linked into this same DLL and runs on
-a worker thread after `DllMain` returns.
+After `DllMain` returns, a worker thread loads
+`Briefcase/Core/Native/Briefcase.UnrealRuntime.dll` and calls its versioned
+bootstrap export. The proxy contains no Unreal, CoreCLR, mod-loading, or UI code.
 
-The source remains separated by responsibility. The build script places the
-proxy in `dist\Briefcase\version.dll` and the managed runtime in the adjacent
-`dist\Briefcase\Briefcase` directory; deploy both parts together.
+The build script places the proxy in `dist\Briefcase\version.dll`, the native
+runtime in `dist\Briefcase\Briefcase\Core\Native`, and the managed runtime in
+the adjacent Core directory. Deploy the complete package together.

@@ -20,10 +20,17 @@ try {
     if($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }
     $msbuild=Join-Path $install[0] 'MSBuild\Current\Bin\amd64\MSBuild.exe'
 
-    Write-Host "Building Briefcase server proxy | $Configuration | x64"
-    $nativeProject=Join-Path $root 'loader\Briefcase.VersionProxy\Briefcase.VersionProxy.vcxproj'
+    Write-Host "Building Briefcase server native runtime | $Configuration | x64"
+    $runtimeProject=Join-Path $root 'runtime\Briefcase.UnrealRuntime\Briefcase.UnrealRuntime.vcxproj'
     $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
-        $nativeProject,"/p:Configuration=$Configuration",'/p:Platform=x64','/m','/nologo','/verbosity:minimal','/nr:false')
+        $runtimeProject,"/p:Configuration=$Configuration",'/p:Platform=x64','/m','/nologo','/verbosity:minimal','/nr:false')
+    if($result -ne 0){ exit $result }
+
+    Write-Host "Building Briefcase server proxy | $Configuration | x64"
+    $proxyProject=Join-Path $root 'loader\Briefcase.VersionProxy\Briefcase.VersionProxy.vcxproj'
+    $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
+        $proxyProject,"/p:Configuration=$Configuration",'/p:Platform=x64',
+        '/p:BuildProjectReferences=false','/m','/nologo','/verbosity:minimal','/nr:false')
     if($result -ne 0){ exit $result }
 
     $artifactRoot=Join-Path $root 'artifacts'
@@ -71,12 +78,15 @@ try {
     Remove-SafeDirectory $distribution (Join-Path $root 'dist')
     $framework=Join-Path $distribution 'Briefcase'
     $core=Join-Path $framework 'Core'
+    $native=Join-Path $core 'Native'
     $builtIns=Join-Path $core 'BuiltIns'
     $mods=Join-Path $framework 'Mods'
     $dotnetDistribution=Join-Path $core 'DotNet'
-    New-Item -ItemType Directory -Path $core,$builtIns,$mods -Force | Out-Null
+    New-Item -ItemType Directory -Path $core,$native,$builtIns,$mods -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
         -Destination (Join-Path $distribution 'version.dll')
+    Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `
+        -Destination (Join-Path $native 'Briefcase.UnrealRuntime.dll')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServer.bat') `
         -Destination (Join-Path $distribution 'StartBriefcaseServer.bat')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServerNoUI.bat') `

@@ -16,12 +16,13 @@ try {
     $proxy=Join-Path $package 'version.dll'
     $sourceFramework=Join-Path $package 'Briefcase'
     $sourceCore=Join-Path $sourceFramework 'Core'
+    $sourceRuntime=Join-Path $sourceCore 'Native\Briefcase.UnrealRuntime.dll'
     $sourceMods=Join-Path $sourceFramework 'Mods'
     $sourceLoaderConfiguration=Join-Path $sourceFramework 'loader.json'
     $sourceLauncher=Join-Path $package 'StartBriefcaseServer.bat'
     $sourceWin64Launcher=Join-Path $package 'StartBriefcaseServerNoUI.bat'
     foreach($required in @(
-        $proxy,$sourceCore,$sourceMods,$sourceLoaderConfiguration,
+        $proxy,$sourceCore,$sourceRuntime,$sourceMods,$sourceLoaderConfiguration,
         $sourceLauncher,$sourceWin64Launcher)) {
         if(-not (Test-Path -LiteralPath $required)) {
             throw "Missing build output: $required. Run scripts\build\build_server_framework.bat $Configuration first."
@@ -58,6 +59,7 @@ try {
     }
 
     Write-Host '[OK] Installed Briefcase server proxy and headless Core.'
+    Write-Host "[OK] Native runtime: $(Join-Path $core 'Native\Briefcase.UnrealRuntime.dll')"
     Write-Host "[OK] Server mod directory: $mods"
     Write-Host "[OK] Core built-ins: $(Join-Path $core 'BuiltIns')"
     Write-Host "[OK] Headless launcher: $(Join-Path $serverInstallRoot 'StartBriefcaseServer.bat')"

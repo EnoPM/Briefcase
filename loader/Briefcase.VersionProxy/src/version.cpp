@@ -3,26 +3,80 @@
 #include <cwchar>
 #include <iterator>
 
-#include "UnrealProbe.h"
-#include "ModHost.h"
-#include "DotNetHost.h"
+#include <Briefcase/BriefcaseRuntimeBootstrap.h>
 
 extern "C" { std::uintptr_t mProcs[17] = {}; }
 static HMODULE OriginalVersion;
+static DWORD InitialThreadId;
 
-DWORD WINAPI runEmbeddedRuntime(void* parameter) {
+namespace {
+void reportProxyFailure(const wchar_t* message, DWORD error = 0) {
+    wchar_t line[512]{};
+    if (error)
+        swprintf_s(line, L"Briefcase proxy: %ls (error=%lu)\n", message, error);
+    else
+        swprintf_s(line, L"Briefcase proxy: %ls\n", message);
+    OutputDebugStringW(line);
+}
+
+DWORD WINAPI loadRuntime(void* parameter) {
     const auto self = static_cast<HMODULE>(parameter);
-    briefcase::runUnrealProbe(self);
-    briefcase::runDotNetHost(self);
+    wchar_t runtimePath[32768]{};
+    const DWORD length = GetModuleFileNameW(
+        self, runtimePath, static_cast<DWORD>(std::size(runtimePath)));
+    if (!length || length >= std::size(runtimePath)) {
+        reportProxyFailure(L"could not resolve the proxy path", GetLastError());
+        return 1;
+    }
+
+    auto* separator = wcsrchr(runtimePath, L'\\');
+    if (!separator) {
+        reportProxyFailure(L"proxy path has no parent directory");
+        return 2;
+    }
+    separator[1] = L'\0';
+    if (wcscat_s(
+            runtimePath,
+            L"Briefcase\\Core\\Native\\Briefcase.UnrealRuntime.dll")) {
+        reportProxyFailure(L"native runtime path is too long");
+        return 3;
+    }
+
+    const HMODULE runtime = LoadLibraryExW(
+        runtimePath, nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!runtime) {
+        reportProxyFailure(L"could not load Briefcase.UnrealRuntime.dll", GetLastError());
+        return 4;
+    }
+
+    const auto initialize = reinterpret_cast<BriefcaseRuntimeInitializeFn>(
+        GetProcAddress(runtime, BRIEFCASE_RUNTIME_INITIALIZE_EXPORT));
+    if (!initialize) {
+        reportProxyFailure(L"native runtime bootstrap export is missing", GetLastError());
+        return 5;
+    }
+
+    const BriefcaseRuntimeBootstrap bootstrap{
+        sizeof(BriefcaseRuntimeBootstrap),
+        BRIEFCASE_RUNTIME_BOOTSTRAP_VERSION,
+        self,
+        InitialThreadId,
+        0};
+    if (!initialize(&bootstrap)) {
+        reportProxyFailure(L"native runtime initialization failed");
+        return 6;
+    }
     return 0;
 }
+} // namespace
 
 BOOL WINAPI DllMain(HMODULE self, DWORD reason, void*) {
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(self);
     // A statically imported proxy is attached on Unreal's initial process
     // thread. Save the ID before creating our bootstrap worker.
-    briefcase::captureGameThreadId(GetCurrentThreadId());
+    InitialThreadId = GetCurrentThreadId();
     static wchar_t path[32768]{};
     const UINT length = GetSystemDirectoryW(path, static_cast<UINT>(std::size(path)));
     if (!length || length >= std::size(path) || wcscat_s(path, L"\\version.dll")) return FALSE;
@@ -40,9 +94,11 @@ BOOL WINAPI DllMain(HMODULE self, DWORD reason, void*) {
         if (!mProcs[index]) return FALSE;
     }
 
-    // The Unreal reader is linked into this DLL. Run it on a worker thread after
-    // DllMain returns so reflection traversal and file IO happen without holding
-    // the Windows loader lock.
-    if (HANDLE thread = CreateThread(nullptr, 0, runEmbeddedRuntime, self, 0, nullptr)) CloseHandle(thread);
+    // Load the separate native runtime on a worker. Windows does not execute the
+    // thread entry point until DLL_PROCESS_ATTACH has released the loader lock.
+    if (HANDLE thread = CreateThread(nullptr, 0, loadRuntime, self, 0, nullptr))
+        CloseHandle(thread);
+    else
+        reportProxyFailure(L"could not create the runtime bootstrap thread", GetLastError());
     return TRUE;
 }

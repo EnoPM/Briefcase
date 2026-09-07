@@ -11,11 +11,17 @@
   <ImportGroup Label="ExtensionSettings"><Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" /></ImportGroup>
   <PropertyGroup><OutDir>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutDir><IntDir>$(MSBuildProjectDirectory)\obj\Briefcase.VersionProxy\$(Configuration)\</IntDir><TargetName>version</TargetName></PropertyGroup>
   <ItemDefinitionGroup>
-    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard><RuntimeLibrary>MultiThreaded</RuntimeLibrary><AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.UnrealRuntime\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard><RuntimeLibrary>MultiThreaded</RuntimeLibrary><AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\..\sdk\BriefcaseModApi\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
     <Link><SubSystem>Windows</SubSystem><ModuleDefinitionFile>src\version.def</ModuleDefinitionFile><GenerateDebugInformation>true</GenerateDebugInformation></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="src\version.cpp" /><MASM Include="src\forwards.asm" /><None Include="src\version.def" /></ItemGroup>
-  <ItemGroup><ProjectReference Include="..\..\runtime\Briefcase.UnrealRuntime\Briefcase.UnrealRuntime.vcxproj"><Project>{6A9C1A41-A8B8-4F7A-AF04-A7C64F138AA8}</Project></ProjectReference></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\runtime\Briefcase.UnrealRuntime\Briefcase.UnrealRuntime.vcxproj">
+      <Project>{6A9C1A41-A8B8-4F7A-AF04-A7C64F138AA8}</Project>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets"><Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" /></ImportGroup>
 </Project>

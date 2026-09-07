@@ -15,10 +15,11 @@ process startup. The proxy performs two jobs:
 2. its assembly trampolines jump to those addresses, preserving the behaviour
    expected by the game.
 
-The Unreal runtime is compiled as a static library and linked into the proxy.
-After Windows releases its loader lock, a worker thread calls it directly. The
-source responsibilities remain separate while the deployed product is a single
-`version.dll`.
+After Windows releases its loader lock, a worker thread loads
+`Briefcase/Core/Native/Briefcase.UnrealRuntime.dll` by absolute path. It resolves
+the runtime's single versioned bootstrap export and passes the proxy module plus
+the process's initial thread ID. The proxy therefore contains no Unreal or .NET
+hosting implementation.
 
 ## 2. Image base, RVA and ASLR
 
@@ -138,7 +139,8 @@ lookup before any controlled mutation is reintroduced.
 - `Briefcase/Briefcase.log`: observable result for the native and managed runtime.
 
 The complete package is produced under `dist/Briefcase`. Its `version.dll` is
-placed beside the game executable and its `Briefcase` directory remains intact.
+placed beside the game executable, while `Briefcase.UnrealRuntime.dll` is stored
+under `Briefcase/Core/Native`; the rest of the `Briefcase` directory remains intact.
 
 The next milestone should resolve globals by byte signatures bounded to PE
 sections, then decode reflected property subclasses. That removes the two hard

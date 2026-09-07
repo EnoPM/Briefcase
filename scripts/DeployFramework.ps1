@@ -15,9 +15,10 @@ try {
     $proxy=Join-Path $package 'version.dll'
     $sourceFramework=Join-Path $package 'Briefcase'
     $sourceCore=Join-Path $sourceFramework 'Core'
+    $sourceRuntime=Join-Path $sourceCore 'Native\Briefcase.UnrealRuntime.dll'
     $sourceMods=Join-Path $sourceFramework 'Mods'
     $sourceLoaderConfiguration=Join-Path $sourceFramework 'loader.json'
-    foreach($required in @($proxy,$sourceCore,$sourceMods,$sourceLoaderConfiguration)) {
+    foreach($required in @($proxy,$sourceCore,$sourceRuntime,$sourceMods,$sourceLoaderConfiguration)) {
         if(-not (Test-Path -LiteralPath $required)) {
             throw "Missing build output: $required. Run scripts\build\build_framework.bat $Configuration first."
         }
@@ -51,7 +52,8 @@ try {
         Copy-Item -LiteralPath $sourceLoaderConfiguration -Destination $loaderConfiguration
     }
 
-    Write-Host '[OK] Installed Briefcase version.dll and managed Core.'
+    Write-Host '[OK] Installed Briefcase proxy and native/managed Core.'
+    Write-Host "[OK] Native runtime: $(Join-Path $core 'Native\Briefcase.UnrealRuntime.dll')"
     Write-Host "[OK] Managed mod directory: $mods"
     Write-Host "[OK] Loader configuration: $loaderConfiguration"
     Write-Host "[INFO] Runtime log: $(Join-Path $framework 'Briefcase.log')"
