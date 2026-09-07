@@ -9,5 +9,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Briefcase.ModApi\Briefcase.ModApi.csproj" />
+    <ProjectReference Include="..\Briefcase.SdkSnapshots\Briefcase.SdkSnapshots.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Briefcase.SdkSnapshots" />
   </ItemGroup>
 </Project>

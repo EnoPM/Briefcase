@@ -1,23 +1,24 @@
 using System.Text.Json.Serialization;
 
-namespace Briefcase.SdkGenerator;
+namespace Briefcase.SdkSnapshots;
 
-internal sealed class SdkSnapshot
+public sealed class SdkSnapshot
 {
     [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; init; }
     [JsonPropertyName("target")] public string Target { get; init; } = "";
     [JsonPropertyName("sdkAssemblyName")] public string SdkAssemblyName { get; init; } = "";
     [JsonPropertyName("gameBuild")] public GameBuildSnapshot GameBuild { get; init; } = new();
+    [JsonPropertyName("capturedObjectCount")] public int CapturedObjectCount { get; init; }
     [JsonPropertyName("types")] public List<TypeSnapshot> Types { get; init; } = [];
 }
 
-internal sealed class GameBuildSnapshot
+public sealed class GameBuildSnapshot
 {
     [JsonPropertyName("peTimestamp")] public uint PeTimestamp { get; init; }
     [JsonPropertyName("imageSize")] public uint ImageSize { get; init; }
 }
 
-internal sealed class TypeSnapshot
+public sealed class TypeSnapshot
 {
     [JsonPropertyName("path")] public string Path { get; init; } = "";
     [JsonPropertyName("name")] public string Name { get; init; } = "";
@@ -29,7 +30,7 @@ internal sealed class TypeSnapshot
     [JsonPropertyName("values")] public List<EnumValueSnapshot> Values { get; init; } = [];
 }
 
-internal sealed class PropertySnapshot
+public sealed class PropertySnapshot
 {
     [JsonPropertyName("name")] public string Name { get; init; } = "";
     [JsonPropertyName("unrealType")] public string UnrealType { get; init; } = "";
@@ -47,7 +48,7 @@ internal sealed class PropertySnapshot
     public UnrealTypeSnapshot EffectiveType => Type ?? UnrealTypeSnapshot.FromLegacy(this);
 }
 
-internal sealed class UnrealTypeSnapshot
+public sealed class UnrealTypeSnapshot
 {
     [JsonPropertyName("unrealType")] public string UnrealType { get; init; } = "UnknownProperty";
     [JsonPropertyName("elementSize")] public int ElementSize { get; init; }
@@ -71,7 +72,7 @@ internal sealed class UnrealTypeSnapshot
     };
 }
 
-internal sealed class BooleanLayoutSnapshot
+public sealed class BooleanLayoutSnapshot
 {
     [JsonPropertyName("fieldSize")] public byte FieldSize { get; init; }
     [JsonPropertyName("byteOffset")] public byte ByteOffset { get; init; }
@@ -79,13 +80,13 @@ internal sealed class BooleanLayoutSnapshot
     [JsonPropertyName("fieldMask")] public byte FieldMask { get; init; }
 }
 
-internal sealed class EnumValueSnapshot
+public sealed class EnumValueSnapshot
 {
     [JsonPropertyName("name")] public string Name { get; init; } = "";
     [JsonPropertyName("value")] public long Value { get; init; }
 }
 
-internal sealed class FunctionSnapshot
+public sealed class FunctionSnapshot
 {
     [JsonPropertyName("name")] public string Name { get; init; } = "";
     [JsonPropertyName("flags")] public uint Flags { get; init; }
@@ -96,4 +97,4 @@ internal sealed class FunctionSnapshot
 
 [JsonSerializable(typeof(SdkSnapshot))]
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = false)]
-internal sealed partial class SnapshotJsonContext : JsonSerializerContext;
+public sealed partial class SnapshotJsonContext : JsonSerializerContext;

@@ -9,4 +9,10 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Briefcase.SdkSnapshots\Briefcase.SdkSnapshots.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Briefcase.SdkSnapshots" />
+  </ItemGroup>
 </Project>

@@ -17,6 +17,7 @@ Briefcase/
 |   |-- Briefcase.ModApi.dll
 |   |-- Briefcase.Rendering.dll
 |   |-- Briefcase.SdkEmitter.dll
+|   |-- Briefcase.SdkSnapshots.dll
 |   |-- DotNet/
 |   |-- Sdk/
 |   `-- Cache/
@@ -126,7 +127,7 @@ build-specific IL assembly with `PersistedAssemblyBuilder`:
 
 ```text
 Briefcase/Core/Sdk/
-|-- Metadata/DeceiveInc.<Target>.<Build>.json
+|-- Metadata/DeceiveInc.<Target>.<Build>.bserializer
 `-- Generated/<Target>/
     |-- Current.props
     `-- <Build>/
@@ -136,7 +137,10 @@ Briefcase/Core/Sdk/
         `-- bin/Release/net10.0/Briefcase.DeceiveInc.<Target>.Sdk.dll
 ```
 
-The host validates the executable identity and snapshot hash, publishes through
+The compact binary format is the runtime default. Setting
+`sdkSnapshotFormat` to `json` in `loader.json` produces the equivalent
+human-readable development snapshot instead. The host validates the executable
+identity and snapshot hash, publishes through
 completion markers, and reuses the cached assembly only when all identities
 match. It loads the target SDK before mods and shares that assembly with their
 collectible contexts.

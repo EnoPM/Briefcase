@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
-using System.Text.Json;
 
 namespace Briefcase.SdkGenerator;
 
@@ -27,10 +26,7 @@ internal static class Program
         var logPath = Path.Combine(logDirectory, "Generator.log");
         try
         {
-            using var snapshotStream = File.OpenRead(snapshotPath);
-            var snapshot = JsonSerializer.Deserialize(
-                snapshotStream, SnapshotJsonContext.Default.SdkSnapshot) ??
-                throw new InvalidDataException("The SDK snapshot is empty.");
+            var snapshot = SnapshotReader.Read(snapshotPath);
             if (snapshot.SchemaVersion is not (1 or 2 or 3))
                 throw new InvalidDataException(
                     $"Unsupported SDK snapshot schema {snapshot.SchemaVersion}.");

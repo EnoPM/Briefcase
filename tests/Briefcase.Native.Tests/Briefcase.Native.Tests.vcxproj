@@ -49,11 +49,13 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="NativeTests.cpp" />
+    <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\BinarySnapshotWriter.cpp" />
     <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\PeImageView.cpp" />
     <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\RuntimeSymbolResolver.cpp" />
     <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\SignatureScanner.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\BinarySnapshotWriter.h" />
     <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\PeImageView.h" />
     <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\RuntimeProfile.h" />
     <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\RuntimeSymbolResolver.h" />

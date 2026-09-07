@@ -84,13 +84,18 @@ try {
 
     $serverBuildCore=Join-Path $artifactRoot 'server-sdk\Core'
     Remove-SafeDirectory $serverBuildCore $artifactRoot
-    $snapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.json"
+    $jsonSnapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.json"
+    $snapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.bserializer"
     New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($snapshot)) -Force | Out-Null
     [IO.File]::WriteAllText(
-        $snapshot,
+        $jsonSnapshot,
         $snapshotContents,
         [Text.UTF8Encoding]::new($false))
     $sdkEmitter=Join-Path $publishCore 'Briefcase.SdkEmitter.dll'
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        $sdkEmitter,'convert',$jsonSnapshot,$snapshot)
+    if($result -ne 0){ exit $result }
+    Remove-Item -LiteralPath $jsonSnapshot -Force
     $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
         $sdkEmitter,'production',$snapshot,$serverBuildCore)
     if($result -ne 0){ exit $result }
@@ -160,7 +165,7 @@ try {
     # Server mods are built and distributed independently from Briefcase Core.
     [IO.File]::WriteAllText(
         (Join-Path $framework 'loader.json'),
-        "{`n  `"schemaVersion`": 1`n}`n",
+        "{`n  `"schemaVersion`": 1,`n  `"sdkSnapshotFormat`": `"bserializer`"`n}`n",
         [Text.UTF8Encoding]::new($false))
 
     $forbidden=@(Get-ChildItem -LiteralPath $framework -File -Recurse | Where-Object {

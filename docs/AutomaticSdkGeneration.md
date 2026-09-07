@@ -22,7 +22,7 @@ version.dll
   -> loads Briefcase/Core/Native/Briefcase.UnrealRuntime.dll
   -> the runtime identifies Client or Server and the exact build
   -> walks GUObjectArray and Unreal reflection metadata in-process
-  -> writes an address-free JSON snapshot atomically
+  -> writes an address-free binary snapshot atomically
   -> starts the bundled CoreCLR and Briefcase.ManagedHost
   -> Briefcase.ManagedHost converts the snapshot into a deterministic emission plan
   -> PersistedAssemblyBuilder writes the target-specific IL SDK directly
@@ -35,7 +35,7 @@ The generated files live beside the executable:
 
 ```text
 Briefcase/Core/Sdk/
-  Metadata/DeceiveInc.<Target>.<Timestamp>-<ImageSize>.json
+  Metadata/DeceiveInc.<Target>.<Timestamp>-<ImageSize>.bserializer
   Generated/<Target>/<Timestamp>-<ImageSize>/
     bin/Release/net10.0/Briefcase.DeceiveInc.<Target>.Sdk.dll
     snapshot.txt
@@ -58,10 +58,34 @@ operations resolve and validate the live reflected object again before use.
 Schema 2 snapshots remain readable so a packaged fallback SDK can still be
 built before a process has produced its first schema 3 snapshot.
 
+### Snapshot format
+
+The runtime uses `bserializer` by default. This is a specialized Briefcase
+format inspired by BSerializer: integers are little-endian, UTF-8 strings use a
+7-bit encoded byte length, collections start with a signed 32-bit element count,
+and nullable nodes have an explicit presence byte. A `BRSK` signature and a
+separate binary-format version make incompatible files fail before allocation.
+Readers bound the file size, string lengths, collection counts and recursive
+type depth.
+
+For development, switch one setting in `Briefcase/loader.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "sdkSnapshotFormat": "json"
+}
+```
+
+Accepted values are `bserializer` and `json`. After an atomic write succeeds,
+the runtime removes the snapshot for the same target and build in the other
+format, so switching formats never leaves two production copies. Repository
+reference snapshots remain JSON and are read by the same shared contract.
+
 ## Role of System.Reflection.Metadata
 
 Unreal reflection and CLR metadata are different formats. The native runtime
-extracts Unreal metadata into JSON. The managed host uses
+extracts Unreal metadata into the configured snapshot format. The managed host uses
 `PersistedAssemblyBuilder` to translate that snapshot directly into a normal IL
 assembly. No C# source project or external `dotnet build` process is created at
 game startup.
@@ -177,8 +201,9 @@ its distribution contains no ImGui or rendering binaries.
 
 ## Persisted IL emitter implementation
 
-The implementation is isolated in `managed/Briefcase.SdkEmitter` and is
-referenced by `Briefcase.ManagedHost`.
+The binary and JSON contract is isolated in `managed/Briefcase.SdkSnapshots`.
+`managed/Briefcase.SdkEmitter` consumes that contract and is referenced by
+`Briefcase.ManagedHost`.
 It uses `PersistedAssemblyBuilder` to emit a real IL SDK assembly directly from
 the Unreal snapshot, without generating a C# project or starting `dotnet build`.
 Its code is split into four explicit stages:

@@ -97,20 +97,32 @@ internal static class GeneratedSdkLoader
         public static Candidate For(string coreDirectory, string target, string buildKey)
         {
             var assemblyName = $"Briefcase.DeceiveInc.{target}.Sdk";
+            var metadataDirectory = Path.GetFullPath(Path.Combine(
+                coreDirectory,
+                "Sdk",
+                "Metadata"));
+            var binarySnapshot = Path.Combine(
+                metadataDirectory,
+                $"DeceiveInc.{target}.{buildKey}.bserializer");
+            var jsonSnapshot = Path.Combine(
+                metadataDirectory,
+                $"DeceiveInc.{target}.{buildKey}.json");
             var outputDirectory = Path.GetFullPath(Path.Combine(
                 coreDirectory,
                 "Sdk",
                 "Generated",
                 target,
                 buildKey));
+            var snapshotPath = new[] { binarySnapshot, jsonSnapshot }
+                .Where(File.Exists)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .ThenBy(path => Path.GetExtension(path).Equals(
+                    ".bserializer", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault() ?? binarySnapshot;
             return new Candidate(
                 assemblyName,
                 target,
-                Path.GetFullPath(Path.Combine(
-                    coreDirectory,
-                    "Sdk",
-                    "Metadata",
-                    $"DeceiveInc.{target}.{buildKey}.json")),
+                snapshotPath,
                 Path.GetFullPath(Path.Combine(
                     outputDirectory,
                     "bin",

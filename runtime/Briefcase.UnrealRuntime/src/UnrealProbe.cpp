@@ -1,5 +1,6 @@
 #include "UnrealProbe.h"
 
+#include "BinarySnapshotWriter.h"
 #include "Log.h"
 #include "PeImageView.h"
 #include "RuntimeProfile.h"
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
@@ -1669,6 +1671,290 @@ struct ReflectedType {
     std::wstring Kind;
 };
 
+enum class SdkSnapshotFormat {
+    BSerializer,
+    Json
+};
+
+SdkSnapshotFormat configuredSnapshotFormat(const std::filesystem::path& root) {
+    constexpr std::uintmax_t MaximumConfigurationBytes = 1024 * 1024;
+    const auto path = root / L"Briefcase" / L"loader.json";
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size > MaximumConfigurationBytes) return SdkSnapshotFormat::BSerializer;
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return SdkSnapshotFormat::BSerializer;
+    std::string contents(static_cast<std::size_t>(size), '\0');
+    input.read(contents.data(), static_cast<std::streamsize>(contents.size()));
+    if (!input && !input.eof()) return SdkSnapshotFormat::BSerializer;
+
+    constexpr std::string_view Key = "\"sdkSnapshotFormat\"";
+    auto position = contents.find(Key);
+    if (position == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    position = contents.find(':', position + Key.size());
+    if (position == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    position = contents.find('"', position + 1);
+    if (position == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    const auto end = contents.find('"', position + 1);
+    if (end == std::string::npos) return SdkSnapshotFormat::BSerializer;
+
+    auto value = contents.substr(position + 1, end - position - 1);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    if (value == "json") return SdkSnapshotFormat::Json;
+    if (value != "bserializer")
+        briefcase::log(L"sdk snapshot: unknown sdkSnapshotFormat; using bserializer");
+    return SdkSnapshotFormat::BSerializer;
+}
+
+std::vector<const FProperty*> snapshotProperties(
+    const FField* first, bool parametersOnly) {
+    constexpr std::uint64_t ParameterFlag = 0x80;
+    std::vector<const FProperty*> properties;
+    auto* field = first;
+    for (unsigned visited = 0; field && visited < 4096; ++visited) {
+        if (!readable(field, sizeof(FProperty))) break;
+        const auto* property = reinterpret_cast<const FProperty*>(field);
+        if (!parametersOnly || (property->PropertyFlags & ParameterFlag) != 0)
+            properties.push_back(property);
+        field = field->Next;
+    }
+    return properties;
+}
+
+std::vector<const UFunction*> snapshotFunctions(const UField* first) {
+    std::vector<const UFunction*> functions;
+    auto* child = first;
+    for (unsigned visited = 0; child && visited < 4096; ++visited) {
+        if (!readable(child, sizeof(UField)) ||
+            !isRegisteredObject(child->ClassPrivate))
+            break;
+        if (nameToString(child->ClassPrivate->NamePrivate, RuntimeNameConverter) == L"Function" &&
+            readable(child, sizeof(UFunction)))
+            functions.push_back(reinterpret_cast<const UFunction*>(child));
+        child = child->Next;
+    }
+    return functions;
+}
+
+void writeBinaryString(
+    briefcase::snapshot::BinarySnapshotWriter& output, std::wstring_view value) {
+    output.writeString(utf8(value));
+}
+
+void writeBinaryNullableString(
+    briefcase::snapshot::BinarySnapshotWriter& output, std::wstring_view value) {
+    output.writeBoolean(!value.empty());
+    if (!value.empty()) writeBinaryString(output, value);
+}
+
+void writeBinaryPropertyType(
+    briefcase::snapshot::BinarySnapshotWriter& output,
+    const FProperty* property,
+    unsigned depth = 0) {
+    constexpr unsigned MaximumTypeDepth = 8;
+    const auto typeName = propertyTypeName(property);
+    writeBinaryString(output, typeName);
+    output.writeInt32(property ? property->ElementSize : 0);
+
+    std::wstring referencedTypePath;
+    const FProperty* innerType{};
+    const FProperty* keyType{};
+    const FProperty* valueType{};
+    const FProperty* underlyingType{};
+    const FBoolProperty* booleanLayout{};
+
+    if (property && depth < MaximumTypeDepth) {
+        const auto reference = [&](const UObject* object) {
+            return isRegisteredObject(object)
+                ? objectPath(object, RuntimeNameConverter)
+                : std::wstring{};
+        };
+        const auto nested = [](const FProperty* candidate) {
+            return candidate && readable(candidate, sizeof(FProperty)) ? candidate : nullptr;
+        };
+
+        if (typeName == L"BoolProperty" && readable(property, sizeof(FBoolProperty))) {
+            booleanLayout = reinterpret_cast<const FBoolProperty*>(property);
+        } else if (typeName == L"StructProperty" &&
+                   readable(property, sizeof(FStructProperty))) {
+            referencedTypePath = reference(
+                reinterpret_cast<const FStructProperty*>(property)->Struct);
+        } else if ((typeName == L"ObjectProperty" || typeName == L"WeakObjectProperty" ||
+                    typeName == L"LazyObjectProperty" || typeName == L"SoftObjectProperty") &&
+                   readable(property, sizeof(FObjectPropertyBase))) {
+            referencedTypePath = reference(
+                reinterpret_cast<const FObjectPropertyBase*>(property)->PropertyClass);
+        } else if ((typeName == L"ClassProperty" || typeName == L"SoftClassProperty") &&
+                   readable(property, sizeof(FClassProperty))) {
+            referencedTypePath = reference(
+                reinterpret_cast<const FClassProperty*>(property)->MetaClass);
+        } else if (typeName == L"InterfaceProperty" &&
+                   readable(property, sizeof(FInterfaceProperty))) {
+            referencedTypePath = reference(
+                reinterpret_cast<const FInterfaceProperty*>(property)->InterfaceClass);
+        } else if (typeName == L"EnumProperty" &&
+                   readable(property, sizeof(FEnumProperty))) {
+            const auto* enumeration = reinterpret_cast<const FEnumProperty*>(property);
+            referencedTypePath = reference(enumeration->Enum);
+            underlyingType = nested(enumeration->UnderlyingProperty);
+        } else if (typeName == L"ByteProperty" &&
+                   readable(property, sizeof(FByteProperty))) {
+            referencedTypePath = reference(
+                reinterpret_cast<const FByteProperty*>(property)->Enum);
+        } else if ((typeName == L"DelegateProperty" ||
+                    typeName == L"MulticastDelegateProperty" ||
+                    typeName == L"MulticastInlineDelegateProperty" ||
+                    typeName == L"MulticastSparseDelegateProperty") &&
+                   readable(property, sizeof(FDelegateProperty))) {
+            referencedTypePath = reference(
+                reinterpret_cast<const FDelegateProperty*>(property)->SignatureFunction);
+        } else if (typeName == L"FieldPathProperty" &&
+                   readable(property, sizeof(FFieldPathProperty))) {
+            const auto* fieldClass =
+                reinterpret_cast<const FFieldPathProperty*>(property)->PropertyClass;
+            if (fieldClass && readable(fieldClass, sizeof(FFieldClass))) {
+                const auto name = nameToString(fieldClass->Name, RuntimeNameConverter);
+                if (!name.empty()) referencedTypePath = L"FFieldClass:" + name;
+            }
+        }
+
+        if (typeName == L"ArrayProperty" && readable(property, sizeof(FArrayProperty))) {
+            innerType = nested(reinterpret_cast<const FArrayProperty*>(property)->Inner);
+        } else if (typeName == L"SetProperty" &&
+                   readable(property, sizeof(FSetProperty))) {
+            innerType = nested(
+                reinterpret_cast<const FSetProperty*>(property)->ElementProperty);
+        } else if (typeName == L"MapProperty" &&
+                   readable(property, sizeof(FMapProperty))) {
+            const auto* map = reinterpret_cast<const FMapProperty*>(property);
+            keyType = nested(map->KeyProperty);
+            valueType = nested(map->ValueProperty);
+        }
+    }
+
+    writeBinaryNullableString(output, referencedTypePath);
+    const auto writeNested = [&](const FProperty* nested) {
+        output.writeBoolean(nested != nullptr);
+        if (nested) writeBinaryPropertyType(output, nested, depth + 1);
+    };
+    writeNested(innerType);
+    writeNested(keyType);
+    writeNested(valueType);
+    writeNested(underlyingType);
+    output.writeBoolean(booleanLayout != nullptr);
+    if (booleanLayout) {
+        output.writeByte(booleanLayout->FieldSize);
+        output.writeByte(booleanLayout->ByteOffset);
+        output.writeByte(booleanLayout->ByteMask);
+        output.writeByte(booleanLayout->FieldMask);
+    }
+}
+
+void writeBinaryProperty(
+    briefcase::snapshot::BinarySnapshotWriter& output,
+    const FProperty* property) {
+    writeBinaryString(output, nameToString(property->NamePrivate, RuntimeNameConverter));
+    writeBinaryString(output, propertyTypeName(property));
+    output.writeInt32(property->OffsetInternal);
+    output.writeInt32(property->ElementSize);
+    output.writeInt32(property->ArrayDim);
+    output.writeUInt64(property->PropertyFlags);
+    // Legacy schema-2 fields are absent from schema-3 snapshots.
+    output.writeBoolean(false);
+    output.writeBoolean(false);
+    output.writeBoolean(true);
+    writeBinaryPropertyType(output, property);
+}
+
+void writeBinaryProperties(
+    briefcase::snapshot::BinarySnapshotWriter& output,
+    const FField* first,
+    bool parametersOnly) {
+    const auto properties = snapshotProperties(first, parametersOnly);
+    output.writeInt32(static_cast<std::int32_t>(properties.size()));
+    for (const auto* property : properties) writeBinaryProperty(output, property);
+}
+
+void writeBinaryFunctions(
+    briefcase::snapshot::BinarySnapshotWriter& output,
+    const UField* first) {
+    const auto functions = snapshotFunctions(first);
+    output.writeInt32(static_cast<std::int32_t>(functions.size()));
+    for (const auto* function : functions) {
+        writeBinaryString(
+            output, nameToString(function->NamePrivate, RuntimeNameConverter));
+        output.writeUInt32(function->FunctionFlags);
+        output.writeInt32(function->ParmsSize);
+        output.writeInt32(function->NumParms);
+        writeBinaryProperties(output, function->ChildProperties, true);
+    }
+}
+
+void writeBinaryEnumValues(
+    briefcase::snapshot::BinarySnapshotWriter& output,
+    const UEnum* enumeration) {
+    if (!enumeration || !readable(enumeration, sizeof(UEnum)) ||
+        enumeration->NamesNum < 0 || enumeration->NamesMax < enumeration->NamesNum ||
+        enumeration->NamesNum > 65'536 ||
+        (enumeration->NamesNum > 0 &&
+         (!enumeration->Names ||
+          !readable(enumeration->Names,
+              static_cast<std::size_t>(enumeration->NamesNum) * sizeof(FEnumNameValue))))) {
+        output.writeInt32(0);
+        return;
+    }
+    output.writeInt32(enumeration->NamesNum);
+    for (std::int32_t index = 0; index < enumeration->NamesNum; ++index) {
+        writeBinaryString(
+            output, nameToString(enumeration->Names[index].Name, RuntimeNameConverter));
+        output.writeInt64(enumeration->Names[index].Value);
+    }
+}
+
+void writeBinarySdkSnapshot(
+    std::ostream& stream,
+    const std::vector<ReflectedType>& types,
+    std::int32_t objectCount,
+    const briefcase::profile::RuntimeProfile& runtimeProfile) {
+    briefcase::snapshot::BinarySnapshotWriter output(stream);
+    output.writeHeader();
+    output.writeInt32(3);
+    writeBinaryString(output, runtimeProfile.TargetName);
+    writeBinaryString(output, runtimeProfile.SdkAssemblyName);
+    output.writeUInt32(runtimeProfile.PeTimestamp);
+    output.writeUInt32(runtimeProfile.ImageSize);
+    output.writeInt32(objectCount);
+    output.writeInt32(static_cast<std::int32_t>(types.size()));
+
+    for (const auto& type : types) {
+        const bool enumeration = type.Kind == L"Enum";
+        const auto* structure = reinterpret_cast<const UStruct*>(type.Object);
+        const auto* enumObject = reinterpret_cast<const UEnum*>(type.Object);
+        writeBinaryString(output, type.Path);
+        writeBinaryString(
+            output, nameToString(type.Object->NamePrivate, RuntimeNameConverter));
+        writeBinaryString(output, type.Kind);
+
+        std::wstring superPath;
+        if (!enumeration && structure->SuperStruct)
+            superPath = objectPath(structure->SuperStruct, RuntimeNameConverter);
+        writeBinaryNullableString(output, superPath);
+        output.writeInt32(enumeration ? 0 : structure->PropertiesSize);
+        if (enumeration) {
+            output.writeInt32(0);
+            output.writeInt32(0);
+            writeBinaryEnumValues(output, enumObject);
+        } else {
+            writeBinaryProperties(output, structure->ChildProperties, false);
+            writeBinaryFunctions(output, structure->Children);
+            output.writeInt32(0);
+        }
+    }
+}
+
 void writeSdkSnapshot(const std::filesystem::path& root,
                       const briefcase::profile::RuntimeProfile& runtimeProfile) {
     if (!RuntimeObjects || !RuntimeNameConverter) return;
@@ -1698,12 +1984,15 @@ void writeSdkSnapshot(const std::filesystem::path& root,
 
     const auto directory = root / L"Briefcase" / L"Core" / L"Sdk" / L"Metadata";
     std::filesystem::create_directories(directory);
-    std::wostringstream fileName;
-    fileName << L"DeceiveInc." << runtimeProfile.TargetName << L'.'
+    const auto format = configuredSnapshotFormat(root);
+    std::wostringstream fileStem;
+    fileStem << L"DeceiveInc." << runtimeProfile.TargetName << L'.'
              << std::uppercase << std::hex << std::setw(8) << std::setfill(L'0')
              << runtimeProfile.PeTimestamp << L'-' << std::setw(8)
-             << runtimeProfile.ImageSize << L".json";
-    const auto destination = directory / fileName.str();
+             << runtimeProfile.ImageSize;
+    const auto extension = format == SdkSnapshotFormat::Json
+        ? std::wstring_view(L".json") : std::wstring_view(L".bserializer");
+    const auto destination = directory / (fileStem.str() + extension.data());
     const auto temporary = destination.wstring() + L".tmp-" +
                            std::to_wstring(GetCurrentProcessId());
 
@@ -1712,50 +2001,54 @@ void writeSdkSnapshot(const std::filesystem::path& root,
         briefcase::log(L"sdk snapshot: unable to create " + temporary);
         return;
     }
-    output << "{\"schemaVersion\":3,\"target\":";
-    writeJsonString(output, runtimeProfile.TargetName);
-    output << ",\"sdkAssemblyName\":";
-    writeJsonString(output, runtimeProfile.SdkAssemblyName);
-    output << ",\"gameBuild\":{\"peTimestamp\":" << runtimeProfile.PeTimestamp
-           << ",\"imageSize\":" << runtimeProfile.ImageSize
-           << "},\"capturedObjectCount\":" << objectCount << ",\"types\":[";
+    if (format == SdkSnapshotFormat::BSerializer) {
+        writeBinarySdkSnapshot(output, types, objectCount, runtimeProfile);
+    } else {
+        output << "{\"schemaVersion\":3,\"target\":";
+        writeJsonString(output, runtimeProfile.TargetName);
+        output << ",\"sdkAssemblyName\":";
+        writeJsonString(output, runtimeProfile.SdkAssemblyName);
+        output << ",\"gameBuild\":{\"peTimestamp\":" << runtimeProfile.PeTimestamp
+               << ",\"imageSize\":" << runtimeProfile.ImageSize
+               << "},\"capturedObjectCount\":" << objectCount << ",\"types\":[";
 
-    bool needsTypeComma = false;
-    for (const auto& type : types) {
-        const bool enumeration = type.Kind == L"Enum";
-        const auto* structure = reinterpret_cast<const UStruct*>(type.Object);
-        const auto* enumObject = reinterpret_cast<const UEnum*>(type.Object);
-        if ((enumeration && !readable(enumObject, sizeof(UEnum))) ||
-            (!enumeration && !readable(structure, sizeof(UStruct))))
-            continue;
-        if (needsTypeComma) output.put(',');
-        output << "{\"path\":";
-        writeJsonString(output, type.Path);
-        output << ",\"name\":";
-        writeJsonString(output, nameToString(type.Object->NamePrivate, RuntimeNameConverter));
-        output << ",\"kind\":";
-        writeJsonString(output, type.Kind);
+        bool needsTypeComma = false;
+        for (const auto& type : types) {
+            const bool enumeration = type.Kind == L"Enum";
+            const auto* structure = reinterpret_cast<const UStruct*>(type.Object);
+            const auto* enumObject = reinterpret_cast<const UEnum*>(type.Object);
+            if ((enumeration && !readable(enumObject, sizeof(UEnum))) ||
+                (!enumeration && !readable(structure, sizeof(UStruct))))
+                continue;
+            if (needsTypeComma) output.put(',');
+            output << "{\"path\":";
+            writeJsonString(output, type.Path);
+            output << ",\"name\":";
+            writeJsonString(output, nameToString(type.Object->NamePrivate, RuntimeNameConverter));
+            output << ",\"kind\":";
+            writeJsonString(output, type.Kind);
 
-        if (enumeration) {
-            output << ",\"superPath\":null,\"size\":0,\"properties\":[],"
-                      "\"functions\":[],\"values\":[";
-            writeEnumValues(output, enumObject);
-            output << "]}";
-        } else {
-            output << ",\"superPath\":";
-            if (structure->SuperStruct && readable(structure->SuperStruct, sizeof(UStruct)))
-                writeJsonString(output, objectPath(structure->SuperStruct, RuntimeNameConverter));
-            else
-                output << "null";
-            output << ",\"size\":" << structure->PropertiesSize << ",\"properties\":[";
-            writeProperties(output, structure->ChildProperties, false);
-            output << "],\"functions\":[";
-            writeFunctions(output, structure->Children);
-            output << "],\"values\":[]}";
+            if (enumeration) {
+                output << ",\"superPath\":null,\"size\":0,\"properties\":[],"
+                          "\"functions\":[],\"values\":[";
+                writeEnumValues(output, enumObject);
+                output << "]}";
+            } else {
+                output << ",\"superPath\":";
+                if (structure->SuperStruct && readable(structure->SuperStruct, sizeof(UStruct)))
+                    writeJsonString(output, objectPath(structure->SuperStruct, RuntimeNameConverter));
+                else
+                    output << "null";
+                output << ",\"size\":" << structure->PropertiesSize << ",\"properties\":[";
+                writeProperties(output, structure->ChildProperties, false);
+                output << "],\"functions\":[";
+                writeFunctions(output, structure->Children);
+                output << "],\"values\":[]}";
+            }
+            needsTypeComma = true;
         }
-        needsTypeComma = true;
+        output << "]}";
     }
-    output << "]}";
     output.close();
     if (!output) {
         DeleteFileW(temporary.c_str());
@@ -1769,8 +2062,14 @@ void writeSdkSnapshot(const std::filesystem::path& root,
         briefcase::log(L"sdk snapshot: atomic replace failed error=" + std::to_wstring(error));
         return;
     }
+    const auto alternativeExtension = format == SdkSnapshotFormat::Json
+        ? std::wstring_view(L".bserializer") : std::wstring_view(L".json");
+    const auto alternative = directory / (fileStem.str() + alternativeExtension.data());
+    DeleteFileW(alternative.c_str());
     briefcase::log(L"sdk snapshot: wrote " + std::to_wstring(types.size()) +
-             L" reflected types to " + destination.wstring());
+             L" reflected types as " +
+             (format == SdkSnapshotFormat::Json ? L"json" : L"bserializer") +
+             L" to " + destination.wstring());
 }
 
 BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiFindObject(

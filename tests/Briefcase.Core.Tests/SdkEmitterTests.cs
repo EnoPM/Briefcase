@@ -7,6 +7,104 @@ namespace Briefcase.Core.Tests;
 public sealed class SdkEmitterTests
 {
     [Fact]
+    public void SnapshotReader_round_trips_the_compact_bserializer_contract()
+    {
+        var original = CreateSnapshot(schemaVersion: 3);
+        original.Types.Add(new TypeSnapshot
+        {
+            Path = "/Script/DeceiveInc.Settings",
+            Name = "Settings",
+            Kind = "Class",
+            Size = 64,
+            Properties =
+            [
+                new PropertySnapshot
+                {
+                    Name = "Weights",
+                    UnrealType = "ArrayProperty",
+                    Offset = 40,
+                    ElementSize = 16,
+                    ArrayDimension = 1,
+                    Type = new UnrealTypeSnapshot
+                    {
+                        UnrealType = "ArrayProperty",
+                        ElementSize = 16,
+                        InnerType = new UnrealTypeSnapshot
+                        {
+                            UnrealType = "FloatProperty",
+                            ElementSize = 4
+                        }
+                    }
+                }
+            ]
+        });
+
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "snapshot.bserializer");
+        using (var stream = File.Create(path))
+            BriefcaseSnapshotSerializer.WriteBinary(original, stream);
+
+        var snapshot = SnapshotReader.Read(path);
+
+        Assert.Equal("Client", snapshot.Target);
+        var property = Assert.Single(Assert.Single(snapshot.Types).Properties);
+        Assert.Equal("FloatProperty", property.Type?.InnerType?.UnrealType);
+        Assert.Equal("BRSK"u8.ToArray(), File.ReadAllBytes(path)[..4]);
+    }
+
+    [Fact]
+    public void Binary_snapshot_reader_rejects_unknown_versions_and_trailing_data()
+    {
+        var snapshot = CreateSnapshot(schemaVersion: 3);
+        using var stream = new MemoryStream();
+        BriefcaseSnapshotSerializer.WriteBinary(snapshot, stream);
+        var bytes = stream.ToArray();
+        bytes[4] = 2;
+        Assert.Throws<InvalidDataException>(() =>
+            BriefcaseSnapshotSerializer.ReadBinary(new MemoryStream(bytes)));
+
+        stream.SetLength(0);
+        stream.Position = 0;
+        BriefcaseSnapshotSerializer.WriteBinary(snapshot, stream);
+        stream.WriteByte(0xFF);
+        stream.Position = 0;
+        Assert.Throws<InvalidDataException>(() =>
+            BriefcaseSnapshotSerializer.ReadBinary(stream));
+    }
+
+    [Fact]
+    public void Binary_conversion_normalizes_legacy_null_collections()
+    {
+        using var source = TemporaryFile.Json("""
+            {
+              "schemaVersion": 2,
+              "target": "Server",
+              "sdkAssemblyName": "Briefcase.DeceiveInc.Server.Sdk",
+              "gameBuild": { "peTimestamp": 1, "imageSize": 2 },
+              "types": [{
+                "path": "/Script/DeceiveInc.Legacy",
+                "name": "Legacy",
+                "kind": "Class",
+                "properties": null,
+                "functions": null,
+                "values": null
+              }]
+            }
+            """);
+        var legacy = SnapshotReader.Read(source.Path);
+        using var binary = new MemoryStream();
+
+        BriefcaseSnapshotSerializer.WriteBinary(legacy, binary);
+        binary.Position = 0;
+        var normalized = BriefcaseSnapshotSerializer.ReadBinary(binary);
+
+        var type = Assert.Single(normalized.Types);
+        Assert.Empty(type.Properties);
+        Assert.Empty(type.Functions);
+        Assert.Empty(type.Values);
+    }
+
+    [Fact]
     public void SnapshotReader_accepts_the_versioned_client_contract()
     {
         using var file = TemporaryFile.Json("""

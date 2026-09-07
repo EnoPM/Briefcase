@@ -53,6 +53,23 @@ function Assert-EmptyModsDirectory([string]$PackageRoot) {
     }
 }
 
+function Assert-BinaryServerSnapshot([string]$PackageRoot) {
+    $metadataDirectory = Join-Path $PackageRoot 'Briefcase\Core\Sdk\Metadata'
+    if (-not (Test-Path -LiteralPath $metadataDirectory -PathType Container)) {
+        throw "Server SDK metadata directory is missing: $metadataDirectory"
+    }
+
+    $binarySnapshots = @(Get-ChildItem -LiteralPath $metadataDirectory -Filter '*.bserializer' -File)
+    if ($binarySnapshots.Count -ne 1) {
+        throw "Expected exactly one binary server SDK snapshot, found $($binarySnapshots.Count)."
+    }
+
+    $jsonSnapshots = @(Get-ChildItem -LiteralPath $metadataDirectory -Filter '*.json' -File)
+    if ($jsonSnapshots.Count -ne 0) {
+        throw "A release server package must not contain JSON SDK snapshots."
+    }
+}
+
 function New-ReleaseArchive(
     [string]$Source,
     [string]$Destination,
@@ -184,6 +201,7 @@ Briefcase\Mods.
         Assert-File $stage 'Briefcase\VERSION'
         Assert-File $stage 'Briefcase\Core\Briefcase.ManagedHost.dll'
         Assert-File $stage 'Briefcase\Core\Briefcase.ModApi.dll'
+        Assert-File $stage 'Briefcase\Core\Briefcase.SdkSnapshots.dll'
         Assert-File $stage 'Briefcase\Core\Native\Briefcase.UnrealRuntime.dll'
         Assert-EmptyModsDirectory $stage
         $packagedVersion = [IO.File]::ReadAllText((Join-Path $stage 'Briefcase\VERSION')).Trim()
@@ -192,6 +210,7 @@ Briefcase\Mods.
         }
     }
     Assert-File $serverStage 'StartBriefcaseServer.bat'
+    Assert-BinaryServerSnapshot $serverStage
 
     $forbiddenServerFiles = @(Get-ChildItem -LiteralPath $serverStage -File -Recurse |
         Where-Object { $_.Name -match '^(ImGui|cimgui|Briefcase\.Rendering|Vortice\.|SharpGen\.)' })
@@ -206,6 +225,7 @@ Briefcase\Mods.
         'Briefcase/loader.json',
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'README-Briefcase.txt')
     New-ReleaseArchive $serverStage $serverArchive @(
@@ -213,6 +233,7 @@ Briefcase\Mods.
         'Briefcase/loader.json',
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'StartBriefcaseServer.bat',
         'README-Briefcase.txt')

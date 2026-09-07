@@ -20,6 +20,7 @@ DeceiveInc/Binaries/Win64/
     |   |-- Briefcase.ManagedHost.dll
     |   |-- Briefcase.ModApi.dll
     |   |-- Briefcase.SdkEmitter.dll
+    |   |-- Briefcase.SdkSnapshots.dll
     |   |-- BuiltIns/
     |   |-- DotNet/
     |   |-- Sdk/
@@ -42,6 +43,10 @@ identity. `FName::ToString` is found by one masked function signature in `.text`
 UE 4.27 chunked-object lookup: every matching call site must resolve to the same
 address in `.data`. Missing, truncated, out-of-image, or conflicting results
 disable the Unreal API before any resolved address is dereferenced.
+
+Runtime snapshots use Briefcase's compact BSerializer-inspired binary format by
+default. Set `sdkSnapshotFormat` to `json` in `Briefcase/loader.json` when a
+human-readable snapshot is useful during reverse engineering or SDK development.
 
 The build-specific SDK describes classes, structures, enums, property offsets,
 packed booleans and recursive Unreal types such as arrays, sets and maps. Mods
@@ -165,6 +170,8 @@ publishes archives.
 - `managed/Briefcase.ModApi`: stable C# API used by mods.
 - `managed/Briefcase.ManagedHost`: SDK and managed mod lifecycle.
 - `managed/Briefcase.SdkEmitter`: persisted build-specific SDK emitter.
+- `managed/Briefcase.SdkSnapshots`: shared, bounded JSON and compact binary
+  snapshot contract.
 - `managed/Briefcase.SdkGenerator`: source-based validation oracle used by repository tests.
 - `managed/builtins/Briefcase.ServerBrowser.Client`: persistent community-server
   directory and game-thread-safe quick connection from the F1 menu.

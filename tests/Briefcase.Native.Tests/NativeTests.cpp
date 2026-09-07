@@ -1,3 +1,4 @@
+#include "BinarySnapshotWriter.h"
 #include "PeImageView.h"
 #include "RuntimeProfile.h"
 #include "RuntimeSymbolResolver.h"
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <iostream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -74,6 +76,30 @@ std::vector<std::byte> mappedPe() {
     writeSection(bytes, sectionTable, ".text", 0x200, 0x200, 0x60000020);
     writeSection(bytes, sectionTable + 40, ".data", 0x600, 0x200, 0xC0000040);
     return image;
+}
+
+void binarySnapshotWriterTests() {
+    test("binary snapshot writer uses a versioned little-endian header", [] {
+        std::ostringstream stream(std::ios::binary);
+        briefcase::snapshot::BinarySnapshotWriter writer(stream);
+        writer.writeHeader();
+        writer.writeUInt32(0x12345678);
+        const std::string expected{"BRSK\x01\x00\x00\x00\x78\x56\x34\x12", 12};
+        expect(stream.str() == expected, "binary header or integer encoding changed");
+    });
+
+    test("binary snapshot strings use BSerializer 7-bit UTF-8 lengths", [] {
+        std::ostringstream stream(std::ios::binary);
+        briefcase::snapshot::BinarySnapshotWriter writer(stream);
+        const std::string value(130, 'a');
+        writer.writeString(value);
+        const auto bytes = stream.str();
+        expect(bytes.size() == 132, "length prefix changed the string payload size");
+        expect(static_cast<unsigned char>(bytes[0]) == 0x82 &&
+               static_cast<unsigned char>(bytes[1]) == 0x01,
+               "string length is not 7-bit encoded");
+        expect(bytes.substr(2) == value, "string payload was altered");
+    });
 }
 
 void copyPattern(std::span<std::byte> destination, std::size_t offset, PatternView pattern) {
@@ -270,11 +296,12 @@ int wmain(int argc, wchar_t** argv) {
     patternTests();
     relativeTests();
     peTests();
+    binarySnapshotWriterTests();
     if (Failures != 0) {
         std::cerr << "[FAIL] " << Failures << " assertion(s) failed across "
                   << Tests << " native tests.\n";
         return 1;
     }
-    std::cout << "[OK] " << Tests << " native PE/signature tests passed.\n";
+    std::cout << "[OK] " << Tests << " native tests passed.\n";
     return 0;
 }

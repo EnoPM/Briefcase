@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\managed\Briefcase.ManagedHost\Briefcase.ManagedHost.csproj" />
     <ProjectReference Include="..\..\managed\Briefcase.ModApi\Briefcase.ModApi.csproj" />
     <ProjectReference Include="..\..\managed\Briefcase.SdkEmitter\Briefcase.SdkEmitter.csproj" />
+    <ProjectReference Include="..\..\managed\Briefcase.SdkSnapshots\Briefcase.SdkSnapshots.csproj" />
     <Compile Include="..\..\managed\builtins\ServerAdminControl.Shared\ServerAdminProtocol.cs"
              Link="Protocol\ServerAdminProtocol.cs" />
     <Compile Include="..\..\managed\builtins\ServerAdminControl.Shared\ServerAdminAuthentication.cs"
@@ -30,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="Briefcase.SdkSnapshots" />
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

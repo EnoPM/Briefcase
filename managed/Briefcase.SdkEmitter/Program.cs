@@ -6,11 +6,14 @@ internal static class Program
     {
         if (args is ["production", var productionSnapshot, var frameworkRoot])
             return RunProductionValidation(productionSnapshot, frameworkRoot);
+        if (args is ["convert", var sourceSnapshot, var binarySnapshot])
+            return ConvertSnapshot(sourceSnapshot, binarySnapshot);
         if (args.Length != 3)
         {
             Console.Error.WriteLine(
-                "Usage: Briefcase.SdkEmitter <snapshot.json> <current-sdk.dll> <prototype.dll>\n" +
-                "   or: Briefcase.SdkEmitter production <snapshot.json> <framework-root>");
+                "Usage: Briefcase.SdkEmitter <snapshot> <current-sdk.dll> <prototype.dll>\n" +
+                "   or: Briefcase.SdkEmitter production <snapshot> <framework-root>\n" +
+                "   or: Briefcase.SdkEmitter convert <snapshot.json> <snapshot.bserializer>");
             return 2;
         }
 
@@ -40,6 +43,30 @@ internal static class Program
                 $"{validation.PropertyCount} properties/fields, and " +
                 $"{validation.FunctionCount} functions with the current SDK.");
             Console.WriteLine("[OK] PE identity validated with System.Reflection.Metadata.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[ERROR] {exception}");
+            return 1;
+        }
+    }
+
+    private static int ConvertSnapshot(string sourcePath, string destinationPath)
+    {
+        try
+        {
+            sourcePath = Path.GetFullPath(sourcePath);
+            destinationPath = Path.GetFullPath(destinationPath);
+            if (!Path.GetExtension(destinationPath).Equals(
+                    ".bserializer", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException(
+                    "The converted snapshot must use the .bserializer extension.");
+            var snapshot = SnapshotReader.Read(sourcePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            using var destination = File.Create(destinationPath);
+            BriefcaseSnapshotSerializer.WriteBinary(snapshot, destination);
+            Console.WriteLine($"[OK] Compact snapshot: {destinationPath}");
             return 0;
         }
         catch (Exception exception)
