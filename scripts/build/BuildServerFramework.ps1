@@ -85,7 +85,7 @@ try {
     $serverBuildCore=Join-Path $artifactRoot 'server-sdk\Core'
     Remove-SafeDirectory $serverBuildCore $artifactRoot
     $jsonSnapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.json"
-    $snapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.bserializer"
+    $snapshot=Join-Path $serverBuildCore "Sdk\Metadata\DeceiveInc.Server.$build.bsnap"
     New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($snapshot)) -Force | Out-Null
     [IO.File]::WriteAllText(
         $jsonSnapshot,
@@ -165,7 +165,7 @@ try {
     # Server mods are built and distributed independently from Briefcase Core.
     [IO.File]::WriteAllText(
         (Join-Path $framework 'loader.json'),
-        "{`n  `"schemaVersion`": 1,`n  `"sdkSnapshotFormat`": `"bserializer`"`n}`n",
+        "{`n  `"schemaVersion`": 1,`n  `"sdkSnapshotFormat`": `"binary`"`n}`n",
         [Text.UTF8Encoding]::new($false))
 
     $forbidden=@(Get-ChildItem -LiteralPath $framework -File -Recurse | Where-Object {

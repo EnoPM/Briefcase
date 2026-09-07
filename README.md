@@ -44,7 +44,7 @@ UE 4.27 chunked-object lookup: every matching call site must resolve to the same
 address in `.data`. Missing, truncated, out-of-image, or conflicting results
 disable the Unreal API before any resolved address is dereferenced.
 
-Runtime snapshots use Briefcase's compact BSerializer-inspired binary format by
+Runtime snapshots use the compact Briefcase Snapshot binary format by
 default. Set `sdkSnapshotFormat` to `json` in `Briefcase/loader.json` when a
 human-readable snapshot is useful during reverse engineering or SDK development.
 

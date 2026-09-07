@@ -5,9 +5,9 @@ namespace Briefcase.SdkSnapshots;
 
 /// <summary>
 /// Reads the development JSON format and Briefcase's compact production format.
-/// The binary layout follows BSerializer's length-prefixed UTF-8 strings and
-/// count-prefixed collections, but uses the fixed SDK schema to avoid embedding
-/// reflection metadata in every snapshot.
+/// The Briefcase Snapshot binary layout uses length-prefixed UTF-8 strings and
+/// count-prefixed collections. Its fixed SDK schema avoids embedding reflection
+/// metadata in every snapshot.
 /// </summary>
 public static class BriefcaseSnapshotSerializer
 {
@@ -37,7 +37,7 @@ public static class BriefcaseSnapshotSerializer
                 ?? throw new InvalidDataException("The SDK snapshot is empty.");
         }
         else if (Path.GetExtension(path).Equals(
-                     ".bserializer", StringComparison.OrdinalIgnoreCase))
+                     ".bsnap", StringComparison.OrdinalIgnoreCase))
         {
             snapshot = ReadBinary(stream);
         }

@@ -127,7 +127,7 @@ build-specific IL assembly with `PersistedAssemblyBuilder`:
 
 ```text
 Briefcase/Core/Sdk/
-|-- Metadata/DeceiveInc.<Target>.<Build>.bserializer
+|-- Metadata/DeceiveInc.<Target>.<Build>.bsnap
 `-- Generated/<Target>/
     |-- Current.props
     `-- <Build>/

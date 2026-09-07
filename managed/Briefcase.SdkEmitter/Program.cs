@@ -13,7 +13,7 @@ internal static class Program
             Console.Error.WriteLine(
                 "Usage: Briefcase.SdkEmitter <snapshot> <current-sdk.dll> <prototype.dll>\n" +
                 "   or: Briefcase.SdkEmitter production <snapshot> <framework-root>\n" +
-                "   or: Briefcase.SdkEmitter convert <snapshot.json> <snapshot.bserializer>");
+                "   or: Briefcase.SdkEmitter convert <snapshot.json> <snapshot.bsnap>");
             return 2;
         }
 
@@ -59,9 +59,9 @@ internal static class Program
             sourcePath = Path.GetFullPath(sourcePath);
             destinationPath = Path.GetFullPath(destinationPath);
             if (!Path.GetExtension(destinationPath).Equals(
-                    ".bserializer", StringComparison.OrdinalIgnoreCase))
+                    ".bsnap", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException(
-                    "The converted snapshot must use the .bserializer extension.");
+                    "The converted snapshot must use the .bsnap extension.");
             var snapshot = SnapshotReader.Read(sourcePath);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             using var destination = File.Create(destinationPath);

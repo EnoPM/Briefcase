@@ -193,7 +193,7 @@ try {
     $loaderConfiguration = @'
 {
   "schemaVersion": 1,
-  "sdkSnapshotFormat": "bserializer"
+  "sdkSnapshotFormat": "binary"
 }
 '@
     [IO.File]::WriteAllText(

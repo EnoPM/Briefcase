@@ -103,7 +103,7 @@ internal static class GeneratedSdkLoader
                 "Metadata"));
             var binarySnapshot = Path.Combine(
                 metadataDirectory,
-                $"DeceiveInc.{target}.{buildKey}.bserializer");
+                $"DeceiveInc.{target}.{buildKey}.bsnap");
             var jsonSnapshot = Path.Combine(
                 metadataDirectory,
                 $"DeceiveInc.{target}.{buildKey}.json");
@@ -117,7 +117,7 @@ internal static class GeneratedSdkLoader
                 .Where(File.Exists)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .ThenBy(path => Path.GetExtension(path).Equals(
-                    ".bserializer", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                    ".bsnap", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
                 .FirstOrDefault() ?? binarySnapshot;
             return new Candidate(
                 assemblyName,

@@ -1672,7 +1672,7 @@ struct ReflectedType {
 };
 
 enum class SdkSnapshotFormat {
-    BSerializer,
+    Binary,
     Json
 };
 
@@ -1681,32 +1681,32 @@ SdkSnapshotFormat configuredSnapshotFormat(const std::filesystem::path& root) {
     const auto path = root / L"Briefcase" / L"loader.json";
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
-    if (error || size > MaximumConfigurationBytes) return SdkSnapshotFormat::BSerializer;
+    if (error || size > MaximumConfigurationBytes) return SdkSnapshotFormat::Binary;
 
     std::ifstream input(path, std::ios::binary);
-    if (!input) return SdkSnapshotFormat::BSerializer;
+    if (!input) return SdkSnapshotFormat::Binary;
     std::string contents(static_cast<std::size_t>(size), '\0');
     input.read(contents.data(), static_cast<std::streamsize>(contents.size()));
-    if (!input && !input.eof()) return SdkSnapshotFormat::BSerializer;
+    if (!input && !input.eof()) return SdkSnapshotFormat::Binary;
 
     constexpr std::string_view Key = "\"sdkSnapshotFormat\"";
     auto position = contents.find(Key);
-    if (position == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    if (position == std::string::npos) return SdkSnapshotFormat::Binary;
     position = contents.find(':', position + Key.size());
-    if (position == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    if (position == std::string::npos) return SdkSnapshotFormat::Binary;
     position = contents.find('"', position + 1);
-    if (position == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    if (position == std::string::npos) return SdkSnapshotFormat::Binary;
     const auto end = contents.find('"', position + 1);
-    if (end == std::string::npos) return SdkSnapshotFormat::BSerializer;
+    if (end == std::string::npos) return SdkSnapshotFormat::Binary;
 
     auto value = contents.substr(position + 1, end - position - 1);
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
         return static_cast<char>(std::tolower(character));
     });
     if (value == "json") return SdkSnapshotFormat::Json;
-    if (value != "bserializer")
-        briefcase::log(L"sdk snapshot: unknown sdkSnapshotFormat; using bserializer");
-    return SdkSnapshotFormat::BSerializer;
+    if (value != "binary")
+        briefcase::log(L"sdk snapshot: unknown sdkSnapshotFormat; using binary");
+    return SdkSnapshotFormat::Binary;
 }
 
 std::vector<const FProperty*> snapshotProperties(
@@ -1991,7 +1991,7 @@ void writeSdkSnapshot(const std::filesystem::path& root,
              << runtimeProfile.PeTimestamp << L'-' << std::setw(8)
              << runtimeProfile.ImageSize;
     const auto extension = format == SdkSnapshotFormat::Json
-        ? std::wstring_view(L".json") : std::wstring_view(L".bserializer");
+        ? std::wstring_view(L".json") : std::wstring_view(L".bsnap");
     const auto destination = directory / (fileStem.str() + extension.data());
     const auto temporary = destination.wstring() + L".tmp-" +
                            std::to_wstring(GetCurrentProcessId());
@@ -2001,7 +2001,7 @@ void writeSdkSnapshot(const std::filesystem::path& root,
         briefcase::log(L"sdk snapshot: unable to create " + temporary);
         return;
     }
-    if (format == SdkSnapshotFormat::BSerializer) {
+    if (format == SdkSnapshotFormat::Binary) {
         writeBinarySdkSnapshot(output, types, objectCount, runtimeProfile);
     } else {
         output << "{\"schemaVersion\":3,\"target\":";
@@ -2063,12 +2063,12 @@ void writeSdkSnapshot(const std::filesystem::path& root,
         return;
     }
     const auto alternativeExtension = format == SdkSnapshotFormat::Json
-        ? std::wstring_view(L".bserializer") : std::wstring_view(L".json");
+        ? std::wstring_view(L".bsnap") : std::wstring_view(L".json");
     const auto alternative = directory / (fileStem.str() + alternativeExtension.data());
     DeleteFileW(alternative.c_str());
     briefcase::log(L"sdk snapshot: wrote " + std::to_wstring(types.size()) +
              L" reflected types as " +
-             (format == SdkSnapshotFormat::Json ? L"json" : L"bserializer") +
+             (format == SdkSnapshotFormat::Json ? L"json" : L"binary") +
              L" to " + destination.wstring());
 }
 

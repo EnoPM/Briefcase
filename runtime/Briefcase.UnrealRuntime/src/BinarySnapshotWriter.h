@@ -7,7 +7,7 @@
 namespace briefcase::snapshot {
 
 // Primitive writer shared by the native Unreal collector and its unit tests.
-// Strings intentionally use BSerializer's UTF-8 + 7-bit byte-count convention.
+// Briefcase Snapshot strings use UTF-8 with a 7-bit encoded byte count.
 class BinarySnapshotWriter {
 public:
     explicit BinarySnapshotWriter(std::ostream& output) noexcept;

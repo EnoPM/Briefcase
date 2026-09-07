@@ -7,7 +7,7 @@ namespace Briefcase.Core.Tests;
 public sealed class SdkEmitterTests
 {
     [Fact]
-    public void SnapshotReader_round_trips_the_compact_bserializer_contract()
+    public void SnapshotReader_round_trips_the_compact_binary_contract()
     {
         var original = CreateSnapshot(schemaVersion: 3);
         original.Types.Add(new TypeSnapshot
@@ -40,7 +40,7 @@ public sealed class SdkEmitterTests
         });
 
         using var directory = new TemporaryDirectory();
-        var path = Path.Combine(directory.Path, "snapshot.bserializer");
+        var path = Path.Combine(directory.Path, "snapshot.bsnap");
         using (var stream = File.Create(path))
             BriefcaseSnapshotSerializer.WriteBinary(original, stream);
 

@@ -59,7 +59,7 @@ function Assert-BinaryServerSnapshot([string]$PackageRoot) {
         throw "Server SDK metadata directory is missing: $metadataDirectory"
     }
 
-    $binarySnapshots = @(Get-ChildItem -LiteralPath $metadataDirectory -Filter '*.bserializer' -File)
+    $binarySnapshots = @(Get-ChildItem -LiteralPath $metadataDirectory -Filter '*.bsnap' -File)
     if ($binarySnapshots.Count -ne 1) {
         throw "Expected exactly one binary server SDK snapshot, found $($binarySnapshots.Count)."
     }

@@ -35,7 +35,7 @@ The generated files live beside the executable:
 
 ```text
 Briefcase/Core/Sdk/
-  Metadata/DeceiveInc.<Target>.<Timestamp>-<ImageSize>.bserializer
+  Metadata/DeceiveInc.<Target>.<Timestamp>-<ImageSize>.bsnap
   Generated/<Target>/<Timestamp>-<ImageSize>/
     bin/Release/net10.0/Briefcase.DeceiveInc.<Target>.Sdk.dll
     snapshot.txt
@@ -60,8 +60,8 @@ built before a process has produced its first schema 3 snapshot.
 
 ### Snapshot format
 
-The runtime uses `bserializer` by default. This is a specialized Briefcase
-format inspired by BSerializer: integers are little-endian, UTF-8 strings use a
+The runtime uses the Briefcase Snapshot format (`binary`) by default. Integers
+are little-endian, UTF-8 strings use a
 7-bit encoded byte length, collections start with a signed 32-bit element count,
 and nullable nodes have an explicit presence byte. A `BRSK` signature and a
 separate binary-format version make incompatible files fail before allocation.
@@ -77,7 +77,7 @@ For development, switch one setting in `Briefcase/loader.json`:
 }
 ```
 
-Accepted values are `bserializer` and `json`. After an atomic write succeeds,
+Accepted values are `binary` and `json`. After an atomic write succeeds,
 the runtime removes the snapshot for the same target and build in the other
 format, so switching formats never leaves two production copies. Repository
 reference snapshots remain JSON and are read by the same shared contract.

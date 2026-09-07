@@ -88,7 +88,7 @@ void binarySnapshotWriterTests() {
         expect(stream.str() == expected, "binary header or integer encoding changed");
     });
 
-    test("binary snapshot strings use BSerializer 7-bit UTF-8 lengths", [] {
+    test("Briefcase Snapshot strings use 7-bit UTF-8 lengths", [] {
         std::ostringstream stream(std::ios::binary);
         briefcase::snapshot::BinarySnapshotWriter writer(stream);
         const std::string value(130, 'a');
