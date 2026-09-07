@@ -1,8 +1,8 @@
 # Standalone Unreal reflection
 
-This note describes exactly what the first UE4SS-independent runtime does. The
-runtime is intentionally read-only. It proves that we can bootstrap Unreal
-reflection ourselves before we reuse that information in the gameplay mods.
+This note describes the UE4SS-independent runtime and its value ABI. Reflection
+discovery is read-only; generated property and function operations are enabled
+only for value categories whose copying and lifetime rules are implemented.
 
 ## 1. How our DLL enters the process
 
@@ -131,29 +131,37 @@ The schema 3 collector now decodes the concrete metadata payload that begins at
 - `UEnum` names and signed 64-bit values.
 
 Container properties form a recursive tree. For example, a reflected map can be
-described as `TMap<FName, TArray<Vector>>` without copying a `TMap` or exposing
-an engine pointer to managed code. Recursion is bounded to eight levels, enum
-arrays are bounded to 65,536 entries, and every nested pointer passes the same
-readability checks as the root property. An unknown property class remains in
-the snapshot as `Unknown` with its original Unreal class name.
+described as `TMap<FName, TArray<Vector>>`. When a mod reads it, the native
+runtime walks the live `TArray`, `TSet` or `TMap`, validates every allocation and
+copies it into the pointer-free BVC1 value format. Recursion is bounded to eight
+levels, values are capped at 32 MiB, containers at 100,000 entries, and every
+nested pointer passes the same readability checks as the root property.
 
 The generated SDK exposes this data through `Type.Reflection`,
 `Type.Metadata.Properties` and `Type.Metadata.Functions`. Function parameters
-retain their Unreal flags, so mods can distinguish input, output, reference,
-const and return parameters even before a writable `out/ref` ABI is added.
+retain their Unreal flags. The generated methods consequently expose ordinary
+inputs, C# `out` parameters and writable C# `ref` parameters directly.
 
-## 6. Why no values are modified yet
+## 6. Reading and writing values safely
 
 Writing `base + offset` is mechanically easy and semantically dangerous. An
 Unreal field may be a packed boolean, an object reference tracked by garbage
 collection, a replicated property, or state that must be changed through a
 `UFunction` to preserve invariants.
 
-The reflection layer now inventories names, sizes, offsets and complete type
-descriptions. The callable ABI still exposes only the value categories whose
-copying and ownership rules Briefcase implements explicitly. Additional
-container and multi-result function contracts can be added one category at a
-time without changing the snapshot format.
+Briefcase resolves the live `FProperty` by owner and name for every operation,
+then checks its cached offset, size, array dimension and property kind. Scalar,
+packed boolean, object-handle, `FName` and reflected struct properties can be
+assigned. `FString` and `FText` assignments use the property's initialize and
+destroy operations, so the old and new engine-owned values retain valid
+lifetimes. Writes must run on the Unreal game thread.
+
+Containers are exposed as immutable `UnrealArray<T>`, `UnrealSet<T>` and
+`UnrealMap<TKey,TValue>` snapshots. Interfaces, lazy/soft references, delegates,
+multicast delegates and field paths likewise become address-free managed value
+objects. Mutating these owning structures directly is deliberately unsupported;
+mods call generated UFunctions so Unreal can preserve hashing, allocation,
+garbage-collection and replication invariants.
 
 ## 7. Current source map
 
@@ -170,6 +178,3 @@ time without changing the snapshot format.
 The complete package is produced under `dist/Briefcase`. Its `version.dll` is
 placed beside the game executable, while `Briefcase.UnrealRuntime.dll` is stored
 under `Briefcase/Core/Native`; the rest of the `Briefcase` directory remains intact.
-
-The next ABI milestone can use these descriptors to add safe container reads and
-multi-result calls without returning to fixed RVAs or guessing native layouts.

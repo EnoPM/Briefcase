@@ -15,10 +15,10 @@
 #endif
 
 #define BRIEFCASE_HOST_API_VERSION 1u
-#define BRIEFCASE_UNREAL_API_VERSION 7u
+#define BRIEFCASE_UNREAL_API_VERSION 8u
 #define BRIEFCASE_RENDERING_API_VERSION 4u
 #define BRIEFCASE_INPUT_API_VERSION 1u
-#define BRIEFCASE_PATCHING_API_VERSION 4u
+#define BRIEFCASE_PATCHING_API_VERSION 5u
 #define BRIEFCASE_GAME_THREAD_API_VERSION 1u
 #define BRIEFCASE_MOD_ID_CAPACITY 64u
 #define BRIEFCASE_MOD_NAME_CAPACITY 96u
@@ -107,7 +107,17 @@ enum BriefcasePropertyKind : uint32_t {
     BRIEFCASE_PROPERTY_INT8 = 13,
     BRIEFCASE_PROPERTY_INT16 = 14,
     BRIEFCASE_PROPERTY_UINT16 = 15,
-    BRIEFCASE_PROPERTY_NAME = 16
+    BRIEFCASE_PROPERTY_NAME = 16,
+    BRIEFCASE_PROPERTY_ARRAY = 17,
+    BRIEFCASE_PROPERTY_SET = 18,
+    BRIEFCASE_PROPERTY_MAP = 19,
+    BRIEFCASE_PROPERTY_INTERFACE = 20,
+    BRIEFCASE_PROPERTY_LAZY_OBJECT = 21,
+    BRIEFCASE_PROPERTY_SOFT_OBJECT = 22,
+    BRIEFCASE_PROPERTY_SOFT_CLASS = 23,
+    BRIEFCASE_PROPERTY_DELEGATE = 24,
+    BRIEFCASE_PROPERTY_MULTICAST_DELEGATE = 25,
+    BRIEFCASE_PROPERTY_FIELD_PATH = 26
 };
 
 enum BriefcaseTextArgumentFlags : uint32_t {
@@ -191,6 +201,29 @@ typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseReadTextPropertyFn)(
 typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseInvokeNativeBooleanFn)(
     void* context, BriefcaseObjectHandle object, BriefcaseGameBuild expectedBuild,
     uint64_t functionRva, BriefcaseBool* result);
+// Copies an owning or aggregate property into Briefcase's recursive, pointer-free
+// value wire format. The first sizing call may use a null destination.
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseReadValuePropertyFn)(
+    void* context, BriefcaseObjectHandle object, BriefcaseObjectHandle ownerClass,
+    const char* utf8Name, uint32_t nameLength, int32_t expectedOffset,
+    int32_t expectedElementSize, int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, uint8_t* destination, uint32_t capacity,
+    uint32_t* requiredBytes);
+// Writes pointer-free scalar, object-handle, bool, FName or reflected struct
+// storage. The runtime validates the reflected layout before touching the object.
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePropertyFn)(
+    void* context, BriefcaseObjectHandle object, BriefcaseObjectHandle ownerClass,
+    const char* utf8Name, uint32_t nameLength, int32_t expectedOffset,
+    int32_t expectedElementSize, int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, const void* input, uint32_t inputSize);
+// FString and FText writes cross the ABI as UTF-16. version.dll constructs and
+// destroys the owning Unreal value with FProperty lifecycle functions.
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWriteTextPropertyFn)(
+    void* context, BriefcaseObjectHandle object, BriefcaseObjectHandle ownerClass,
+    const char* utf8Name, uint32_t nameLength, int32_t expectedOffset,
+    int32_t expectedElementSize, int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, const uint16_t* characters,
+    uint32_t characterCount);
 struct BriefcaseUnrealApi {
     uint32_t StructSize;
     uint32_t ApiVersion;
@@ -214,7 +247,10 @@ struct BriefcaseUnrealApi {
     // UObject address across the ABI. The runtime validates the object handle,
     // executable image range, and exact PE identity before making the call.
     BriefcaseInvokeNativeBooleanFn InvokeNativeBoolean;
-    void* Reserved[3];
+    // API v8 consumes all three v7 reserved slots without moving older fields.
+    BriefcaseReadValuePropertyFn ReadValueProperty;
+    BriefcaseWritePropertyFn WriteProperty;
+    BriefcaseWriteTextPropertyFn WriteTextProperty;
 };
 
 struct BriefcaseRenderFrame {
@@ -396,6 +432,17 @@ typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseCopyPatchStringFn)(
 typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseCopyPatchTextFn)(
     void* context, const BriefcasePatchCall* call, uint32_t parameterOffset,
     uint16_t* destination, uint32_t capacityCharacters, uint32_t* requiredCharacters);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseCopyPatchValueFn)(
+    void* context, const BriefcasePatchCall* call, uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, uint8_t* destination, uint32_t capacity,
+    uint32_t* requiredBytes);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePatchValueFn)(
+    void* context, const BriefcasePatchCall* call, uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, const void* input, uint32_t inputSize);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePatchTextFn)(
+    void* context, const BriefcasePatchCall* call, uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, const uint16_t* characters,
+    uint32_t characterCount);
 
 struct BriefcasePatchingApi {
     uint32_t StructSize;
@@ -409,7 +456,10 @@ struct BriefcasePatchingApi {
     BriefcaseCopyPatchByteArrayFn CopyByteArray;
     BriefcaseCopyPatchStringFn CopyString;
     BriefcaseCopyPatchTextFn CopyText;
-    void* Reserved[3];
+    // API v5 consumes all three v4 reserved slots.
+    BriefcaseCopyPatchValueFn CopyValue;
+    BriefcaseWritePatchValueFn WriteValue;
+    BriefcaseWritePatchTextFn WriteText;
 };
 
 // Future services are separate versioned tables. Adding a field to reflection,
@@ -465,6 +515,7 @@ struct BriefcaseHostApi {
 
 #if defined(__cplusplus)
 static_assert(sizeof(BriefcaseGameThreadFrame) == 64);
+static_assert(sizeof(BriefcaseUnrealApi) == 144);
 static_assert(sizeof(BriefcaseGameThreadApi) == 112);
 static_assert(sizeof(BriefcaseHostApi) == 112);
 #endif

@@ -25,6 +25,19 @@ public readonly record struct UnrealPropertyMetadata(
     int ArrayDimension,
     ulong Flags);
 
+/// <summary>
+/// Opaque result of one ProcessEvent call. Generated wrappers use it to copy
+/// every out/ref value before returning to mod code.
+/// </summary>
+public sealed class UnrealInvocationResult
+{
+    internal UnrealInvocationResult(
+        byte[] buffer, IReadOnlyDictionary<int, string> textOutputs) =>
+        (Buffer, TextOutputs) = (buffer, textOutputs);
+    internal byte[] Buffer { get; }
+    internal IReadOnlyDictionary<int, string> TextOutputs { get; }
+}
+
 public readonly unsafe partial struct UnrealApi
 {
     private const uint ApiVersion = 1;
@@ -32,6 +45,8 @@ public readonly unsafe partial struct UnrealApi
     private const uint StringPropertyApiVersion = 3;
     private const uint TextApiVersion = 5;
     private const uint NativeInvocationApiVersion = 6;
+    private const uint ValueApiVersion = 8;
+    private const uint MaximumValueBytes = 32u * 1024u * 1024u;
     private const int MaximumTextCharacters = 65_536;
     private const uint MaximumEnumeration = 100_000;
     private static readonly ConcurrentDictionary<string, UnrealObjectHandle> MetadataHandles =
@@ -389,6 +404,147 @@ public readonly unsafe partial struct UnrealApi
         return new UnrealText(new string(characters, 0, length));
     }
 
+    internal TValue ReadAggregate<TValue>(
+        UnrealObjectHandle objectHandle,
+        UnrealProperty<TValue> property)
+    {
+        EnsureAvailable();
+        if (_api->ApiVersion < ValueApiVersion || _api->ReadValueProperty == null)
+            throw new InvalidOperationException(
+                "The host does not expose bounded Unreal value copies.");
+        var kind = AggregateKind(typeof(TValue));
+        var ownerClass = FindMetadata(property.OwnerPath);
+        var encoded = Encode(property.Name);
+        uint required = 0;
+        NativeUnrealResult status;
+        fixed (byte* namePointer = encoded)
+        {
+            status = _api->ReadValueProperty(
+                _api->Context, objectHandle, ownerClass, namePointer,
+                checked((uint)encoded.Length), property.Offset, property.Size, 1,
+                kind, null, 0, &required);
+            if (status == NativeUnrealResult.StaleHandle)
+            {
+                ownerClass = RefreshMetadata(property.OwnerPath);
+                status = _api->ReadValueProperty(
+                    _api->Context, objectHandle, ownerClass, namePointer,
+                    checked((uint)encoded.Length), property.Offset, property.Size, 1,
+                    kind, null, 0, &required);
+            }
+        }
+        if (status != NativeUnrealResult.BufferTooSmall)
+            EnsureSuccess($"ReadValueProperty({property.Name}, size)", status);
+        if (required is < 12 or > MaximumValueBytes)
+            throw new InvalidOperationException(
+                $"Unreal returned an invalid value-copy size: {required}.");
+        var bytes = new byte[required];
+        fixed (byte* namePointer = encoded)
+        fixed (byte* destination = bytes)
+        {
+            status = _api->ReadValueProperty(
+                _api->Context, objectHandle, ownerClass, namePointer,
+                checked((uint)encoded.Length), property.Offset, property.Size, 1,
+                kind, destination, checked((uint)bytes.Length), &required);
+        }
+        EnsureSuccess($"ReadValueProperty({property.Name})", status);
+        if (required != bytes.Length)
+            throw new InvalidOperationException("The Unreal value changed size while being copied.");
+        return UnrealValueWire.Decode<TValue>(bytes);
+    }
+
+    internal void Write<TValue>(
+        UnrealObjectHandle objectHandle,
+        UnrealProperty<TValue> property,
+        TValue value) where TValue : unmanaged
+    {
+        EnsureValueWriteAvailable();
+        var kind = KindOf<TValue>();
+        var ownerClass = FindMetadata(property.OwnerPath);
+        var encoded = Encode(property.Name);
+        NativeUnrealResult status;
+        fixed (byte* namePointer = encoded)
+        {
+            if (kind == UnrealPropertyKind.Bool)
+            {
+                var native = Unsafe.As<TValue, bool>(ref value) ? (byte)1 : (byte)0;
+                status = _api->WriteProperty(
+                    _api->Context, objectHandle, ownerClass, namePointer,
+                    checked((uint)encoded.Length), property.Offset, property.Size, 1,
+                    kind, &native, 1);
+            }
+            else
+            {
+                status = _api->WriteProperty(
+                    _api->Context, objectHandle, ownerClass, namePointer,
+                    checked((uint)encoded.Length), property.Offset, property.Size, 1,
+                    kind, &value, checked((uint)sizeof(TValue)));
+            }
+            if (status == NativeUnrealResult.StaleHandle)
+            {
+                ownerClass = RefreshMetadata(property.OwnerPath);
+                status = kind == UnrealPropertyKind.Bool
+                    ? WriteBooleanRetry(_api, objectHandle, ownerClass, namePointer,
+                        checked((uint)encoded.Length), property, value)
+                    : _api->WriteProperty(
+                        _api->Context, objectHandle, ownerClass, namePointer,
+                        checked((uint)encoded.Length), property.Offset, property.Size, 1,
+                        kind, &value, checked((uint)sizeof(TValue)));
+            }
+        }
+        EnsureSuccess($"WriteProperty({property.Name})", status);
+    }
+
+    private static NativeUnrealResult WriteBooleanRetry<TValue>(
+        NativeUnrealApi* api, UnrealObjectHandle objectHandle,
+        UnrealObjectHandle ownerClass, byte* name, uint nameLength,
+        UnrealProperty<TValue> property, TValue value) where TValue : unmanaged
+    {
+        var native = Unsafe.As<TValue, bool>(ref value) ? (byte)1 : (byte)0;
+        return api->WriteProperty(
+            api->Context, objectHandle, ownerClass, name, nameLength,
+            property.Offset, property.Size, 1, UnrealPropertyKind.Bool, &native, 1);
+    }
+
+    internal void WriteString(
+        UnrealObjectHandle objectHandle, UnrealProperty<string> property, string value) =>
+        WriteCharacters(objectHandle, property.OwnerPath, property.Name,
+            property.Offset, property.Size, UnrealPropertyKind.String, value);
+
+    internal void WriteText(
+        UnrealObjectHandle objectHandle, UnrealProperty<UnrealText> property, UnrealText value) =>
+        WriteCharacters(objectHandle, property.OwnerPath, property.Name,
+            property.Offset, property.Size, UnrealPropertyKind.Text, value.Value ?? string.Empty);
+
+    private void WriteCharacters(
+        UnrealObjectHandle objectHandle, string ownerPath, string name,
+        int offset, int size, UnrealPropertyKind kind, string value)
+    {
+        EnsureValueWriteAvailable();
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Length >= MaximumTextCharacters || value.IndexOf('\0') >= 0)
+            throw new ArgumentOutOfRangeException(nameof(value));
+        var ownerClass = FindMetadata(ownerPath);
+        var encoded = Encode(name);
+        NativeUnrealResult status;
+        fixed (byte* namePointer = encoded)
+        fixed (char* characters = value)
+        {
+            status = _api->WriteTextProperty(
+                _api->Context, objectHandle, ownerClass, namePointer,
+                checked((uint)encoded.Length), offset, size, 1, kind,
+                characters, checked((uint)value.Length));
+            if (status == NativeUnrealResult.StaleHandle)
+            {
+                ownerClass = RefreshMetadata(ownerPath);
+                status = _api->WriteTextProperty(
+                    _api->Context, objectHandle, ownerClass, namePointer,
+                    checked((uint)encoded.Length), offset, size, 1, kind,
+                    characters, checked((uint)value.Length));
+            }
+        }
+        EnsureSuccess($"WriteTextProperty({name})", status);
+    }
+
     internal void InvokeVoid(
         UnrealObjectHandle objectHandle,
         UnrealFunction function,
@@ -428,13 +584,25 @@ public readonly unsafe partial struct UnrealApi
         return new UnrealText(text);
     }
 
-    private sealed record InvocationResult(
-        byte[] Buffer, IReadOnlyDictionary<int, string> TextOutputs);
+    internal UnrealInvocationResult InvokeWithOutputs(
+        UnrealObjectHandle objectHandle,
+        UnrealFunction function,
+        IReadOnlyList<object?> arguments) => InvokeBuffer(objectHandle, function, arguments);
+
+    internal static TValue ReadOutput<TValue>(
+        UnrealInvocationResult invocation, UnrealParameter parameter) where TValue : unmanaged =>
+        ReadValue<TValue>(invocation.Buffer, parameter);
+
+    internal static UnrealText ReadTextOutput(
+        UnrealInvocationResult invocation, UnrealParameter parameter) =>
+        invocation.TextOutputs.TryGetValue(parameter.Offset, out var text)
+            ? new UnrealText(text)
+            : throw new InvalidOperationException($"No FText output was returned for {parameter.Name}.");
 
     private readonly record struct TextOutputAllocation(
         int ParameterOffset, nint Buffer, nint RequiredCharacters);
 
-    private InvocationResult InvokeBuffer(
+    private UnrealInvocationResult InvokeBuffer(
         UnrealObjectHandle objectHandle,
         UnrealFunction function,
         IReadOnlyList<object?> arguments)
@@ -444,7 +612,8 @@ public readonly unsafe partial struct UnrealApi
         if (function.ParameterBufferSize is < 0 or > 65_535)
             throw new InvalidOperationException(
                 $"{function.OwnerPath}.{function.Name} has an invalid parameter buffer size.");
-        var inputCount = function.Parameters.Count(parameter => !parameter.IsOut);
+        var inputCount = function.Parameters.Count(
+            parameter => !parameter.IsOut || parameter.IsReference);
         if (inputCount != arguments.Count)
             throw new ArgumentException(
                 $"{function.OwnerPath}.{function.Name} expects {inputCount} input arguments; " +
@@ -463,7 +632,7 @@ public readonly unsafe partial struct UnrealApi
                     parameter.Offset > buffer.Length - parameter.Size)
                     throw new InvalidOperationException(
                         $"Generated layout for parameter {parameter.Name} is outside the parameter buffer.");
-                if (parameter.IsOut) continue;
+                if (parameter.IsOut && !parameter.IsReference) continue;
                 WriteArgument(
                     buffer.AsSpan(parameter.Offset, parameter.Size),
                     parameter.ManagedType,
@@ -480,8 +649,8 @@ public readonly unsafe partial struct UnrealApi
                 throw new InvalidOperationException(
                     $"Generated return layout for {function.Name} is outside the parameter buffer.");
 
-            if (function.ReturnParameter is { ManagedType: var returnType } textReturn &&
-                returnType == typeof(UnrealText))
+            foreach (var textReturn in function.Parameters.Where(parameter =>
+                         parameter.IsOut && parameter.ManagedType == typeof(UnrealText)))
             {
                 var output = (char*)NativeMemory.AllocZeroed(
                     checked((nuint)(MaximumTextCharacters * sizeof(char))));
@@ -573,7 +742,7 @@ public readonly unsafe partial struct UnrealApi
                     output.ParameterOffset,
                     length == 0 ? "" : new string(characters, 0, length));
             }
-            return new InvocationResult(buffer, returnedTexts);
+            return new UnrealInvocationResult(buffer, returnedTexts);
         }
         finally
         {
@@ -780,6 +949,33 @@ public readonly unsafe partial struct UnrealApi
         throw new NotSupportedException($"Property reads for {typeof(T).FullName} are not implemented.");
     }
 
+    private static UnrealPropertyKind AggregateKind(Type type)
+    {
+        if (type == typeof(byte[])) return UnrealPropertyKind.Array;
+        if (type == typeof(UnrealInterfaceReference)) return UnrealPropertyKind.Interface;
+        if (type == typeof(UnrealLazyObjectReference)) return UnrealPropertyKind.LazyObject;
+        if (type == typeof(UnrealSoftObjectReference)) return UnrealPropertyKind.SoftObject;
+        if (type == typeof(UnrealSoftClassReference)) return UnrealPropertyKind.SoftClass;
+        if (type == typeof(UnrealDelegate)) return UnrealPropertyKind.Delegate;
+        if (type == typeof(UnrealMulticastDelegate)) return UnrealPropertyKind.MulticastDelegate;
+        if (type == typeof(UnrealFieldPath)) return UnrealPropertyKind.FieldPath;
+        if (!type.IsGenericType)
+            throw new NotSupportedException($"Aggregate reads for {type.FullName} are not implemented.");
+        var definition = type.GetGenericTypeDefinition();
+        if (definition == typeof(UnrealArray<>)) return UnrealPropertyKind.Array;
+        if (definition == typeof(UnrealSet<>)) return UnrealPropertyKind.Set;
+        if (definition == typeof(UnrealMap<,>)) return UnrealPropertyKind.Map;
+        throw new NotSupportedException($"Aggregate reads for {type.FullName} are not implemented.");
+    }
+
+    private void EnsureValueWriteAvailable()
+    {
+        EnsureAvailable();
+        if (_api->ApiVersion < ValueApiVersion || _api->WriteProperty == null ||
+            _api->WriteTextProperty == null)
+            throw new InvalidOperationException("The host does not expose Unreal property writes.");
+    }
+
     private void EnsureAvailable()
     {
         if (!IsAvailable)
@@ -809,11 +1005,23 @@ public class UnrealObject
     public TValue Read<TValue>(UnrealProperty<TValue> property) where TValue : unmanaged =>
         _api.Read(Handle, property);
 
+    protected TValue ReadAggregate<TValue>(UnrealProperty<TValue> property) =>
+        _api.ReadAggregate(Handle, property);
+
     protected string ReadString(UnrealProperty<string> property) =>
         _api.ReadString(Handle, property);
 
     protected UnrealText ReadText(UnrealProperty<UnrealText> property) =>
         _api.ReadText(Handle, property);
+
+    public void Write<TValue>(UnrealProperty<TValue> property, TValue value)
+        where TValue : unmanaged => _api.Write(Handle, property, value);
+
+    public void Write(UnrealProperty<string> property, string value) =>
+        _api.WriteString(Handle, property, value);
+
+    public void Write(UnrealProperty<UnrealText> property, UnrealText value) =>
+        _api.WriteText(Handle, property, value);
 
     // The generated SDK exposes Unreal UFunctions as ordinary C# instance
     // methods. The native ProcessEvent bridge marshals the generated
@@ -828,4 +1036,16 @@ public class UnrealObject
 
     protected UnrealText InvokeText(UnrealFunction function, params object?[] arguments) =>
         _api.InvokeText(Handle, function, arguments);
+
+    protected UnrealInvocationResult InvokeWithOutputs(
+        UnrealFunction function, params object?[] arguments) =>
+        _api.InvokeWithOutputs(Handle, function, arguments);
+
+    protected static TValue ReadOutput<TValue>(
+        UnrealInvocationResult result, UnrealParameter parameter)
+        where TValue : unmanaged => UnrealApi.ReadOutput<TValue>(result, parameter);
+
+    protected static UnrealText ReadTextOutput(
+        UnrealInvocationResult result, UnrealParameter parameter) =>
+        UnrealApi.ReadTextOutput(result, parameter);
 }

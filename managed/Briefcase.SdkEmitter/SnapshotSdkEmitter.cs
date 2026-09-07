@@ -469,7 +469,7 @@ internal static class SnapshotSdkEmitter
         {
             var valueType = types.Resolve(property.Type, _builders);
             var descriptorType = types.UnrealProperty.MakeGenericType(valueType);
-            var descriptorConstructor = property.Type.Kind == ManagedTypeKind.GeneratedStruct
+            var descriptorConstructor = property.Type.UsesGeneratedType
                 ? TypeBuilder.GetConstructor(
                     descriptorType, types.UnrealProperty.GetConstructors().Single())
                 : descriptorType.GetConstructors().Single();
@@ -501,15 +501,61 @@ internal static class SnapshotSdkEmitter
                 : valueType == types.UnrealText
                     ? types.UnrealObject.GetMethod(
                         "ReadText", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    : IsAddressFreeSnapshot(property.Type.Kind)
+                        ? types.UnrealObject.GetMethod(
+                            "ReadAggregate", BindingFlags.Instance | BindingFlags.NonPublic)!
+                            .MakeGenericMethod(valueType)
                     : types.UnrealObject.GetMethod("Read")!.MakeGenericMethod(valueType);
             var il = getter.GetILGenerator();
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, descriptorGetter);
             il.Emit(OpCodes.Call, read);
             il.Emit(OpCodes.Ret);
-            owner.DefineProperty(property.MemberName, PropertyAttributes.None, valueType, null)
-                .SetGetMethod(getter);
+            var generatedProperty = owner.DefineProperty(
+                property.MemberName, PropertyAttributes.None, valueType, null);
+            generatedProperty.SetGetMethod(getter);
+            if (!IsAddressFreeSnapshot(property.Type.Kind))
+            {
+                var setter = owner.DefineMethod(
+                    "set_" + property.MemberName,
+                    MethodAttributes.Public | MethodAttributes.HideBySig |
+                    MethodAttributes.SpecialName,
+                    types.Void,
+                    [valueType]);
+                var write = property.Type.Kind switch
+                {
+                    ManagedTypeKind.String => types.UnrealObject.GetMethods()
+                        .Single(candidate => candidate.Name == "Write" &&
+                                             !candidate.IsGenericMethod &&
+                                             candidate.GetParameters()[0].ParameterType ==
+                                                types.UnrealProperty.MakeGenericType(types.String)),
+                    ManagedTypeKind.Text => types.UnrealObject.GetMethods()
+                        .Single(candidate => candidate.Name == "Write" &&
+                                             !candidate.IsGenericMethod &&
+                                             candidate.GetParameters()[0].ParameterType ==
+                                                types.UnrealProperty.MakeGenericType(types.UnrealText)),
+                    _ => types.UnrealObject.GetMethods()
+                        .Single(candidate => candidate.Name == "Write" &&
+                                             candidate.IsGenericMethodDefinition)
+                        .MakeGenericMethod(valueType)
+                };
+                var setterIl = setter.GetILGenerator();
+                setterIl.Emit(OpCodes.Ldarg_0);
+                setterIl.Emit(OpCodes.Call, descriptorGetter);
+                setterIl.Emit(OpCodes.Ldarg_1);
+                setterIl.Emit(OpCodes.Call, write);
+                setterIl.Emit(OpCodes.Ret);
+                generatedProperty.SetSetMethod(setter);
+            }
         }
+
+        private static bool IsAddressFreeSnapshot(ManagedTypeKind kind) => kind is
+            ManagedTypeKind.Array or ManagedTypeKind.Set or ManagedTypeKind.Map or
+            ManagedTypeKind.ByteArray or ManagedTypeKind.InterfaceReference or
+            ManagedTypeKind.LazyObjectReference or ManagedTypeKind.SoftObjectReference or
+            ManagedTypeKind.SoftClassReference or
+            ManagedTypeKind.Delegate or ManagedTypeKind.MulticastDelegate or
+            ManagedTypeKind.FieldPath;
 
         private void DefineFunction(
             TypeBuilder owner,
@@ -517,8 +563,12 @@ internal static class SnapshotSdkEmitter
             string unrealPath,
             PlannedFunction function)
         {
-            var inputTypes = function.Inputs.Select(parameter =>
-                types.Resolve(parameter.Type, _builders)).ToArray();
+            var methodParameters = function.MethodParameters.ToArray();
+            var parameterTypes = methodParameters.Select(parameter =>
+            {
+                var valueType = types.Resolve(parameter.Type, _builders);
+                return parameter.IsOutput ? valueType.MakeByRefType() : valueType;
+            }).ToArray();
             var returnType = function.ReturnParameter is { } returned
                 ? types.Resolve(returned.Type, _builders)
                 : types.Void;
@@ -539,15 +589,67 @@ internal static class SnapshotSdkEmitter
                 function.MemberName,
                 MethodAttributes.Public | MethodAttributes.HideBySig,
                 returnType,
-                inputTypes);
-            var inputs = function.Inputs.ToArray();
-            for (var index = 0; index < inputs.Length; index++)
-                method.DefineParameter(index + 1, ParameterAttributes.None, inputs[index].Snapshot.Name);
+                parameterTypes);
+            for (var index = 0; index < methodParameters.Length; index++)
+            {
+                var parameter = methodParameters[index];
+                var attributes = parameter.IsOutput
+                    ? parameter.IsReference
+                        ? ParameterAttributes.In | ParameterAttributes.Out
+                        : ParameterAttributes.Out
+                    : ParameterAttributes.None;
+                method.DefineParameter(index + 1, attributes, parameter.Snapshot.Name);
+            }
 
             var il = method.GetILGenerator();
+            if (function.Outputs.Any())
+            {
+                var invocation = il.DeclareLocal(types.UnrealInvocationResult);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Call, descriptorGetter);
+                EmitInvocationArgumentArray(il, methodParameters);
+                il.Emit(OpCodes.Call, types.UnrealObject.GetMethod(
+                    "InvokeWithOutputs", BindingFlags.Instance | BindingFlags.NonPublic)!);
+                il.Emit(OpCodes.Stloc, invocation);
+
+                var parameterConstructor = types.UnrealParameter.GetConstructors().Single();
+                for (var index = 0; index < methodParameters.Length; index++)
+                {
+                    var parameter = methodParameters[index];
+                    if (!parameter.IsOutput) continue;
+                    var valueType = types.Resolve(parameter.Type, _builders);
+                    il.Emit(OpCodes.Ldarg, index + 1);
+                    il.Emit(OpCodes.Ldloc, invocation);
+                    EmitParameter(il, parameter, parameterConstructor);
+                    var readOutput = valueType == types.UnrealText
+                        ? types.UnrealObject.GetMethod(
+                            "ReadTextOutput", BindingFlags.Static | BindingFlags.NonPublic)!
+                        : types.UnrealObject.GetMethod(
+                            "ReadOutput", BindingFlags.Static | BindingFlags.NonPublic)!
+                            .MakeGenericMethod(valueType);
+                    il.Emit(OpCodes.Call, readOutput);
+                    il.Emit(OpCodes.Stobj, valueType);
+                }
+
+                if (function.ReturnParameter is { } returnedParameter)
+                {
+                    il.Emit(OpCodes.Ldloc, invocation);
+                    EmitParameter(il, returnedParameter, parameterConstructor);
+                    var readReturn = returnType == types.UnrealText
+                        ? types.UnrealObject.GetMethod(
+                            "ReadTextOutput", BindingFlags.Static | BindingFlags.NonPublic)!
+                        : types.UnrealObject.GetMethod(
+                            "ReadOutput", BindingFlags.Static | BindingFlags.NonPublic)!
+                            .MakeGenericMethod(returnType);
+                    il.Emit(OpCodes.Call, readReturn);
+                }
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, descriptorGetter);
-            EmitArgumentArray(il, inputTypes);
+            EmitInvocationArgumentArray(il, methodParameters);
             if (function.ReturnParameter is null)
             {
                 il.Emit(OpCodes.Call, types.UnrealObject.GetMethod(
@@ -623,8 +725,17 @@ internal static class SnapshotSdkEmitter
             EmitTypeObject(il, types.Resolve(parameter.Type, _builders));
             il.Emit(OpCodes.Ldc_I4, parameter.Snapshot.Offset);
             il.Emit(OpCodes.Ldc_I4, parameter.Snapshot.ElementSize);
-            il.Emit(parameter.IsReturn ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0);
+            il.Emit(parameter.IsReturn || parameter.IsOutput ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Newobj, constructor);
+            if (parameter.IsReference)
+            {
+                var local = il.DeclareLocal(types.UnrealParameter);
+                il.Emit(OpCodes.Stloc, local);
+                il.Emit(OpCodes.Ldloca, local);
+                il.Emit(OpCodes.Ldc_I4_1);
+                il.Emit(OpCodes.Call, types.UnrealParameter.GetProperty("IsReference")!.SetMethod!);
+                il.Emit(OpCodes.Ldloc, local);
+            }
         }
 
         private void EmitTypeObject(ILGenerator il, Type type)
@@ -633,16 +744,24 @@ internal static class SnapshotSdkEmitter
             il.Emit(OpCodes.Call, types.Type.GetMethod("GetTypeFromHandle")!);
         }
 
-        private void EmitArgumentArray(ILGenerator il, IReadOnlyList<Type> inputTypes)
+        private void EmitInvocationArgumentArray(
+            ILGenerator il, IReadOnlyList<PlannedParameter> methodParameters)
         {
-            il.Emit(OpCodes.Ldc_I4, inputTypes.Count);
+            var inputs = methodParameters
+                .Select((parameter, index) => (Parameter: parameter, Index: index))
+                .Where(item => !item.Parameter.IsOutput || item.Parameter.IsReference)
+                .ToArray();
+            il.Emit(OpCodes.Ldc_I4, inputs.Length);
             il.Emit(OpCodes.Newarr, types.Object);
-            for (var index = 0; index < inputTypes.Count; index++)
+            for (var index = 0; index < inputs.Length; index++)
             {
+                var (parameter, methodIndex) = inputs[index];
+                var inputType = types.Resolve(parameter.Type, _builders);
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, index);
-                il.Emit(OpCodes.Ldarg, index + 1);
-                if (inputTypes[index].IsValueType) il.Emit(OpCodes.Box, inputTypes[index]);
+                il.Emit(OpCodes.Ldarg, methodIndex + 1);
+                if (parameter.IsReference) il.Emit(OpCodes.Ldobj, inputType);
+                if (inputType.IsValueType) il.Emit(OpCodes.Box, inputType);
                 il.Emit(OpCodes.Stelem_Ref);
             }
         }

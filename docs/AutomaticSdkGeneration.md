@@ -116,10 +116,8 @@ Console.WriteLine(function.Parameters[0].IsOutput);
 
 `Properties` and `Functions` on a generated class are the executable ABI
 surface. `Metadata.Properties` and `Metadata.Functions` are the complete,
-read-only reflection surface. A `TMap`, delegate or writable `out` parameter can
-therefore be inspected accurately without exposing a getter or method that
-would copy engine-owned memory incorrectly. Generated enums are real CLR enums
-with an `UnrealTypePathAttribute`; `FName` is represented by `UnrealName`.
+read-only reflection surface. Generated enums are real CLR enums with an
+`UnrealTypePathAttribute`; `FName` is represented by `UnrealName`.
 
 Generated UObject types are classes with inheritance and typed methods:
 ```csharp
@@ -137,11 +135,10 @@ private static void OnCoverRatioUpdatePostfix(Spy __instance)
 Calling the same patched function from its own postfix would create reentrancy,
 so the example deliberately calls a different generated method.
 
-The callable ABI currently covers UObject classes, reflected inheritance,
-scalar and object properties, `FName`, `ScriptStruct` value types, ordinary
-inputs, a single return value, `FString`, bounded `TArray<uint8>` inputs and
-object `TextProperty` values. It also transports `FText` function inputs and
-returns as `UnrealText`:
+The callable ABI covers UObject classes, reflected inheritance, scalar and
+object properties, `FName`, `ScriptStruct` value types, ordinary inputs,
+multiple `out/ref` values, `FString`, bounded `TArray<uint8>` inputs and `FText`.
+For example:
 
 ```csharp
 // Implicit string conversion keeps common calls concise.
@@ -161,11 +158,17 @@ a copied `ScriptStruct` remains metadata-only until field-by-field struct
 marshalling can provide the same ownership guarantee.
 
 Generated structs use explicit offsets and native size, including opaque
-structs whose native fields are not reflected. Arrays, sets, maps, delegates,
-interfaces, weak/lazy/soft references, field paths and all parameter directions
-are already described recursively. A dedicated ABI contract is still required
-before most of those values become directly readable or callable from managed
-code.
+structs whose native fields are not reflected. Arrays, sets and maps are copied
+recursively into immutable `UnrealArray<T>`, `UnrealSet<T>` and
+`UnrealMap<TKey,TValue>` snapshots. Interfaces, weak/lazy/soft references,
+delegates and field paths are exposed without native addresses. Scalar,
+object-handle, `FName`, generated struct, `FString` and `FText` properties have
+generated setters. Owning containers and delegate bindings remain read-only and
+are changed through generated game functions.
+
+Every aggregate copy uses the bounded BVC1 wire format. It has a 32 MiB value
+limit, 100,000-element container limit and eight-level recursion limit. Object
+pointers become serial-checked handles before managed code sees them.
 
 ## Development and runtime use
 
@@ -231,13 +234,9 @@ the game. The consumer exercises the intended mod syntax with `typeof`,
 `nameof`, patch attributes, generated method calls, a generated value struct,
 and a generic `T.FromObject` constraint.
 
-On the current schema 2 fallback snapshots, the client SDK describes 22,784
-properties or fields and 10,179 functions across 5,463 types. Its callable ABI
-surface contains 18,673 properties or fields and 8,751 functions. The server
-SDK describes 22,718 properties or fields and 10,120 functions across 5,452
-types; 18,613 properties or fields and 8,699 functions are callable. Schema 3
-adds richer nested type and enum information when the updated runtime next
-captures either executable.
+The exact generated surface is reported by the build validation because it
+depends on the current client and server snapshots. Schema 3 supplies the
+recursive type and enum information required for aggregate getters.
 
 At startup, `GeneratedSdkLoader` finds the snapshot for the current validated
 game build, invokes this same emitter synchronously, and loads the resulting SDK

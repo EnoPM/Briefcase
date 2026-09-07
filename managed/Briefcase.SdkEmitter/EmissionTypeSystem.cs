@@ -43,6 +43,17 @@ internal sealed class EmissionTypeSystem : IDisposable
     public Type IUnrealObject => typeof(IUnrealObject<>);
     public Type UnrealClass => typeof(UnrealClass<>);
     public Type UnrealProperty => typeof(UnrealProperty<>);
+    public Type UnrealArray => typeof(UnrealArray<>);
+    public Type UnrealSet => typeof(UnrealSet<>);
+    public Type UnrealMap => typeof(UnrealMap<,>);
+    public Type UnrealInterfaceReference => typeof(UnrealInterfaceReference);
+    public Type UnrealLazyObjectReference => typeof(UnrealLazyObjectReference);
+    public Type UnrealSoftObjectReference => typeof(UnrealSoftObjectReference);
+    public Type UnrealSoftClassReference => typeof(UnrealSoftClassReference);
+    public Type UnrealDelegate => typeof(UnrealDelegate);
+    public Type UnrealMulticastDelegate => typeof(UnrealMulticastDelegate);
+    public Type UnrealFieldPath => typeof(UnrealFieldPath);
+    public Type UnrealInvocationResult => typeof(UnrealInvocationResult);
     public Type UnrealReflectedType => typeof(UnrealReflectedType);
     public Type UnrealReflectedProperty => typeof(UnrealReflectedProperty);
     public Type UnrealReflectedFunction => typeof(UnrealReflectedFunction);
@@ -74,6 +85,21 @@ internal sealed class EmissionTypeSystem : IDisposable
             ManagedTypeKind.Text => UnrealText,
             ManagedTypeKind.Name => UnrealName,
             ManagedTypeKind.ByteArray => ByteArray,
+            ManagedTypeKind.Array when descriptor.InnerType is { } inner =>
+                UnrealArray.MakeGenericType(Resolve(inner, generatedTypes)),
+            ManagedTypeKind.Set when descriptor.InnerType is { } element =>
+                UnrealSet.MakeGenericType(Resolve(element, generatedTypes)),
+            ManagedTypeKind.Map when descriptor.KeyType is { } key &&
+                                     descriptor.ValueType is { } value =>
+                UnrealMap.MakeGenericType(
+                    Resolve(key, generatedTypes), Resolve(value, generatedTypes)),
+            ManagedTypeKind.InterfaceReference => UnrealInterfaceReference,
+            ManagedTypeKind.LazyObjectReference => UnrealLazyObjectReference,
+            ManagedTypeKind.SoftObjectReference => UnrealSoftObjectReference,
+            ManagedTypeKind.SoftClassReference => UnrealSoftClassReference,
+            ManagedTypeKind.Delegate => UnrealDelegate,
+            ManagedTypeKind.MulticastDelegate => UnrealMulticastDelegate,
+            ManagedTypeKind.FieldPath => UnrealFieldPath,
             ManagedTypeKind.GeneratedStruct when descriptor.ReferencedTypePath is { } path =>
                 generatedTypes[path],
             _ => throw new InvalidDataException($"Unsupported managed type {descriptor}.")

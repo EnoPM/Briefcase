@@ -12,7 +12,7 @@ internal readonly record struct GenerationResult(
 
 internal static class SourceSdkGenerator
 {
-    private const string GeneratorSchema = "9";
+    private const string GeneratorSchema = "10";
     private const ulong OutParameterFlag = 0x100;
     private const ulong ReturnParameterFlag = 0x400;
     private const ulong ReferenceParameterFlag = 0x08000000;
@@ -210,7 +210,8 @@ internal static class SourceSdkGenerator
         usedMembers.Add(generatedName.Name);
         var propertyCandidates = type.Properties
             .Select(property => (Property: property, Type: ManagedType(
-                property, names, allowStringProperty: true)))
+                property, names, allowReadContainers: true,
+                allowStringProperty: true, allowTextProperty: true)))
             .Where(item => item.Type is not null && item.Property.ArrayDimension == 1)
             .OrderBy(item => item.Property.Name, StringComparer.Ordinal)
             .ToArray();
@@ -221,7 +222,10 @@ internal static class SourceSdkGenerator
             supportedProperties.Add((item.Property, item.Type!, member));
             source.Append("    public ").Append(item.Type).Append(' ').Append(member)
                   .Append(item.Type == "string" ? " => ReadString(Properties." :
-                          item.Type == "UnrealText" ? " => ReadText(Properties." : " => Read(Properties.")
+                          item.Type == "UnrealText" ? " => ReadText(Properties." :
+                          IsAddressFreeSnapshot(item.Property)
+                              ? " => ReadAggregate(Properties."
+                              : " => Read(Properties.")
                   .Append(member).AppendLine(");");
         }
         if (supportedProperties.Count > 0) source.AppendLine();
@@ -235,6 +239,7 @@ internal static class SourceSdkGenerator
         {
             var parameters = item.Function.Parameters.OrderBy(parameter => parameter.Offset).ToArray();
             var inputs = parameters.Where(parameter => !IsReturnParameter(parameter)).ToArray();
+            var outputs = inputs.Where(IsWritableOutputParameter).ToArray();
             var returnParameter = parameters.SingleOrDefault(IsReturnParameter);
             var returnType = returnParameter is null
                 ? null
@@ -244,20 +249,58 @@ internal static class SourceSdkGenerator
             for (var index = 0; index < inputs.Length; index++)
             {
                 if (index > 0) source.Append(", ");
+                if (IsWritableOutputParameter(inputs[index]))
+                    source.Append(IsReferenceOutputParameter(inputs[index]) ? "ref " : "out ");
                 source.Append(ManagedType(inputs[index], names, allowInputContainers: true)).Append(' ')
                       .Append(ParameterIdentifier(inputs[index].Name));
             }
-            source.Append(") => ");
-            if (returnType is null)
-                source.Append("InvokeVoid(Functions.");
-            else if (returnType == "UnrealText")
-                source.Append("InvokeText(Functions.");
+            if (outputs.Length == 0)
+            {
+                source.Append(") => ");
+                if (returnType is null)
+                    source.Append("InvokeVoid(Functions.");
+                else if (returnType == "UnrealText")
+                    source.Append("InvokeText(Functions.");
+                else
+                    source.Append("Invoke<").Append(returnType).Append(">(Functions.");
+                source.Append(item.Member);
+                foreach (var parameter in inputs)
+                    source.Append(", ").Append(ParameterIdentifier(parameter.Name));
+                source.AppendLine(");");
+            }
             else
-                source.Append("Invoke<").Append(returnType).Append(">(Functions.");
-            source.Append(item.Member);
-            foreach (var parameter in inputs)
-                source.Append(", ").Append(ParameterIdentifier(parameter.Name));
-            source.AppendLine(");");
+            {
+                source.AppendLine(")")
+                      .AppendLine("    {")
+                      .Append("        var __result = InvokeWithOutputs(Functions.")
+                      .Append(item.Member);
+                foreach (var parameter in inputs.Where(parameter =>
+                             !IsWritableOutputParameter(parameter) ||
+                             IsReferenceOutputParameter(parameter)))
+                    source.Append(", ").Append(ParameterIdentifier(parameter.Name));
+                source.AppendLine(");");
+                foreach (var output in outputs)
+                {
+                    var outputType = ManagedType(output, names, allowTextProperty: true)!;
+                    var descriptorIndex = Array.IndexOf(parameters, output);
+                    source.Append("        ").Append(ParameterIdentifier(output.Name)).Append(" = ")
+                          .Append(outputType == "UnrealText"
+                              ? "ReadTextOutput(__result, "
+                              : $"ReadOutput<{outputType}>(__result, ")
+                          .Append("Functions.").Append(item.Member).Append(".Parameters[")
+                          .Append(descriptorIndex).AppendLine("]);");
+                }
+                if (returnParameter is not null)
+                {
+                    source.Append("        return ")
+                          .Append(returnType == "UnrealText"
+                              ? "ReadTextOutput(__result, "
+                              : $"ReadOutput<{returnType}>(__result, ")
+                          .Append("Functions.").Append(item.Member)
+                          .AppendLine(".ReturnParameter!.Value);");
+                }
+                source.AppendLine("    }");
+            }
         }
         if (supportedFunctions.Length > 0) source.AppendLine();
 
@@ -282,14 +325,18 @@ internal static class SourceSdkGenerator
             {
                 if (index > 0) source.Append(", ");
                 var parameter = parameters[index];
+                var isReturn = IsReturnParameter(parameter);
+                var isOutput = isReturn || IsWritableOutputParameter(parameter);
                 source.Append("new UnrealParameter(").Append(Literal(parameter.Name))
                       .Append(", typeof(").Append(ManagedType(
                           parameter, names,
-                          allowInputContainers: !IsReturnParameter(parameter),
+                          allowInputContainers: !isReturn,
                           allowTextProperty: true)).Append("), ")
                       .Append(parameter.Offset).Append(", ").Append(parameter.ElementSize);
-                if (IsReturnParameter(parameter)) source.Append(", true");
+                if (isOutput) source.Append(", true");
                 source.Append(')');
+                if (IsReferenceOutputParameter(parameter))
+                    source.Append(" { IsReference = true }");
             }
             var returnParameter = parameters.SingleOrDefault(IsReturnParameter);
             if (returnParameter is null)
@@ -458,9 +505,6 @@ internal static class SourceSdkGenerator
         foreach (var parameter in function.Parameters)
         {
             var isReturn = IsReturnParameter(parameter);
-            // A single ordinary return value is supported. Additional out/ref
-            // parameters still need a generated result type and are therefore
-            // deliberately excluded from this schema.
             var managedType = ManagedType(
                 parameter, names, allowInputContainers: !isReturn,
                 allowTextProperty: true);
@@ -469,16 +513,14 @@ internal static class SourceSdkGenerator
             var isConstReference =
                 (parameter.Flags & (ConstParameterFlag | ReferenceParameterFlag)) ==
                 (ConstParameterFlag | ReferenceParameterFlag);
-            if (!isReturn && (parameter.Flags & OutParameterFlag) != 0 &&
-                !isConstReference)
-                return false;
-            // A native const-reference struct is represented inline in the
-            // ProcessEvent parameter buffer. Its generated C# method accepts a
-            // blittable value; patch methods may request `ref` when they need
-            // the bridge to copy a changed value back before the original call.
-            if (!isReturn && (parameter.Flags & ReferenceParameterFlag) != 0 &&
-                managedType is not ("string" or "UnrealText" or "byte[]") &&
-                parameter.EffectiveType.UnrealType != "StructProperty")
+            var isOutput = !isReturn && !isConstReference &&
+                           (parameter.Flags & OutParameterFlag) != 0;
+            var isReference = isOutput &&
+                              (parameter.Flags & ReferenceParameterFlag) != 0;
+            if (isOutput && (managedType is "string" or "byte[]" ||
+                             parameter.EffectiveType.UnrealType is
+                                 "ArrayProperty" or "SetProperty" or "MapProperty") ||
+                isReference && managedType == "UnrealText")
                 return false;
             if (managedType is null ||
                 parameter.ArrayDimension != 1 ||
@@ -491,21 +533,68 @@ internal static class SourceSdkGenerator
     private static bool IsReturnParameter(PropertySnapshot parameter) =>
         (parameter.Flags & ReturnParameterFlag) != 0;
 
+    private static bool IsWritableOutputParameter(PropertySnapshot parameter)
+    {
+        var isConstReference =
+            (parameter.Flags & (ConstParameterFlag | ReferenceParameterFlag)) ==
+            (ConstParameterFlag | ReferenceParameterFlag);
+        return !IsReturnParameter(parameter) && !isConstReference &&
+               (parameter.Flags & OutParameterFlag) != 0;
+    }
+
+    private static bool IsReferenceOutputParameter(PropertySnapshot parameter) =>
+        IsWritableOutputParameter(parameter) &&
+        (parameter.Flags & ReferenceParameterFlag) != 0;
+
     private static string? ManagedType(
         PropertySnapshot property,
         IReadOnlyDictionary<string, GeneratedTypeName> names,
         bool allowInputContainers = false,
+        bool allowReadContainers = false,
         bool allowStringProperty = false,
         bool allowTextProperty = false)
     {
-        var typeShape = property.EffectiveType;
+        return ManagedType(
+            property.EffectiveType, property.ElementSize, names,
+            allowInputContainers, allowReadContainers,
+            allowStringProperty, allowTextProperty);
+    }
+
+    private static string? ManagedType(
+        UnrealTypeSnapshot typeShape,
+        int fallbackSize,
+        IReadOnlyDictionary<string, GeneratedTypeName> names,
+        bool allowInputContainers,
+        bool allowReadContainers,
+        bool allowStringProperty,
+        bool allowTextProperty)
+    {
         if (typeShape.UnrealType == "StructProperty" &&
             typeShape.ReferencedTypePath is { } path && names.TryGetValue(path, out var type))
             return $"global::{type.Namespace}.{type.Name}";
+        if (allowReadContainers &&
+            (typeShape.UnrealType is "ArrayProperty" or "SetProperty") &&
+            typeShape.InnerType is { } inner)
+        {
+            var item = ManagedType(
+                inner, inner.ElementSize, names, false, true, true, true);
+            if (item is null) return null;
+            return typeShape.UnrealType == "ArrayProperty"
+                ? $"UnrealArray<{item}>" : $"UnrealSet<{item}>";
+        }
+        if (allowReadContainers && typeShape.UnrealType == "MapProperty" &&
+            typeShape.KeyType is { } key && typeShape.ValueType is { } value)
+        {
+            var managedKey = ManagedType(key, key.ElementSize, names, false, true, true, true);
+            var managedValue = ManagedType(value, value.ElementSize, names, false, true, true, true);
+            return managedKey is null || managedValue is null
+                ? null : $"UnrealMap<{managedKey}, {managedValue}>";
+        }
         return typeShape.UnrealType switch
         {
-            "StrProperty" when allowInputContainers || allowStringProperty => "string",
-            "TextProperty" when allowInputContainers || allowStringProperty || allowTextProperty =>
+            "StrProperty" when allowInputContainers || allowReadContainers || allowStringProperty => "string",
+            "TextProperty" when allowInputContainers || allowReadContainers ||
+                                allowStringProperty || allowTextProperty =>
                 "UnrealText",
             "NameProperty" => "UnrealName",
             "ArrayProperty" when allowInputContainers &&
@@ -521,14 +610,31 @@ internal static class SourceSdkGenerator
             "FloatProperty" => "float",
             "DoubleProperty" => "double",
             "BoolProperty" => "bool",
-            "ObjectProperty" or "ClassProperty" => "UnrealObjectReference",
-            "EnumProperty" => property.ElementSize switch
+            "ObjectProperty" or "ClassProperty" or "WeakObjectProperty" =>
+                "UnrealObjectReference",
+            "InterfaceProperty" when allowReadContainers => "UnrealInterfaceReference",
+            "LazyObjectProperty" when allowReadContainers => "UnrealLazyObjectReference",
+            "SoftObjectProperty" when allowReadContainers => "UnrealSoftObjectReference",
+            "SoftClassProperty" when allowReadContainers => "UnrealSoftClassReference",
+            "DelegateProperty" when allowReadContainers => "UnrealDelegate",
+            "MulticastDelegateProperty" or "MulticastInlineDelegateProperty"
+                when allowReadContainers => "UnrealMulticastDelegate",
+            "FieldPathProperty" when allowReadContainers => "UnrealFieldPath",
+            "EnumProperty" => (typeShape.ElementSize > 0 ? typeShape.ElementSize : fallbackSize) switch
             {
                 1 => "byte", 2 => "ushort", 4 => "uint", 8 => "ulong", _ => null
             },
             _ => null
         };
     }
+
+    private static bool IsAddressFreeSnapshot(PropertySnapshot property) =>
+        property.EffectiveType.UnrealType is
+            "ArrayProperty" or "SetProperty" or "MapProperty" or
+            "InterfaceProperty" or "LazyObjectProperty" or
+            "SoftObjectProperty" or "SoftClassProperty" or
+            "DelegateProperty" or "MulticastDelegateProperty" or
+            "MulticastInlineDelegateProperty" or "FieldPathProperty";
     private static string NamespaceFor(string path, string target)
     {
         var moduleEnd = path.IndexOf('.', "/Script/".Length);

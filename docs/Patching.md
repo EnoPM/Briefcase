@@ -70,9 +70,9 @@ Patch method rules are intentionally small:
 `FText` parameters are exposed as `UnrealText`. Briefcase converts the value
 through Unreal's own text library and copies the UTF-16 result while the patch
 callback is active, so the managed mod never receives an Unreal pointer. Reading
-an `FText` works in prefixes and postfixes; `ref UnrealText` write-back is not
-part of the current contract because replacing an owned `FText` requires Unreal
-lifetime operations.
+and replacing an `FText` works in prefixes and postfixes. Write-back uses the
+reflected property's initialize and destroy operations instead of copying the
+private `FText` bytes.
 
 ## Optional behavior
 
@@ -192,7 +192,7 @@ the generated target and complete patch signature. Patch declarations retain
 `MethodInfo` and `Type` objects from the collectible mod assembly, so the
 registry clears them before hot reload unloads that assembly.
 
-Generated method invocation is implemented by Unreal API v2. The native side
+Generated method invocation is implemented by the versioned Unreal API. The native side
 resolves the object and owner handles, finds the named UFunction in reflected
 metadata, checks `UFunction::ParmsSize`, checks the ProcessEvent vtable entry,
 and only then invokes the function. UObject parameters cross the ABI as an
@@ -211,11 +211,10 @@ and postfixes afterward, and waits for an in-flight callback before a
 hot-reloaded assembly can unload. The detour stays installed for the process
 lifetime and forwards directly when no registrations match an event.
 
-Priority is deterministic inside one managed mod. The `Before`, `After`,
-`BeforeMods`, and `AfterMods` declarations are validated and retained, but
-cross-mod dependency sorting is not enabled yet. Primitive and generated value
-struct parameters support `ref` write-back. UObject, container, string and
-delegate parameter marshalling remain explicit future ABI additions.
+Priority and ordering are deterministic across loaded mods. Primitive,
+generated value struct, UObject-handle, `FString` and `FText` patch parameters
+use type-specific copying; writable values are copied back before native control
+returns. Aggregate containers and delegate binding mutation remain read-only.
 
 ## Generated value structs
 

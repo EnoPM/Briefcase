@@ -268,6 +268,8 @@ internal sealed unsafe class PatchRegistration : IDisposable
             return CopyString(call, parameter.Offset);
         if (parameter.ManagedType == typeof(UnrealText) && bytes.Length == 0x18)
             return new UnrealText(CopyText(call, parameter.Offset));
+        if (_backend == PatchBackend.Unreal && RequiresPointerFreeCopy(parameter.ManagedType))
+            return CopyValue(call, parameter);
         if (parameter.ManagedType == typeof(sbyte) && bytes.Length == 1) return (sbyte)bytes[0];
         if (parameter.ManagedType == typeof(byte) && bytes.Length == 1) return bytes[0];
         if (parameter.ManagedType == typeof(short)) return BinaryPrimitives.ReadInt16LittleEndian(bytes);
@@ -291,6 +293,30 @@ internal sealed unsafe class PatchRegistration : IDisposable
         }
         throw new NotSupportedException(
             $"Patch parameter {parameter.Name} of type {parameter.ManagedType.FullName} is unsupported.");
+    }
+
+    private object CopyValue(NativePatchCall* call, UnrealParameter parameter)
+    {
+        var api = _api;
+        if (api == null || api->ApiVersion < BriefcaseAbi.PatchingApiVersion ||
+            api->CopyValue == null)
+            throw new NotSupportedException("The host cannot copy pointer-free Unreal values.");
+        var kind = PropertyKind(parameter.ManagedType);
+        uint required = 0;
+        var status = api->CopyValue(
+            api->Context, call, checked((uint)parameter.Offset), kind,
+            null, 0, &required);
+        if (status != NativeUnrealResult.BufferTooSmall || required is < 12 or > 32u * 1024u * 1024u)
+            throw new InvalidOperationException($"Could not size Unreal patch value: {status}.");
+        var bytes = new byte[required];
+        fixed (byte* destination = bytes)
+            status = api->CopyValue(
+                api->Context, call, checked((uint)parameter.Offset), kind,
+                destination, checked((uint)bytes.Length), &required);
+        if (status != NativeUnrealResult.Ok || required != bytes.Length)
+            throw new InvalidOperationException($"Could not copy Unreal patch value: {status}.");
+        return UnrealValueWire.Decode(parameter.ManagedType, bytes)
+               ?? throw new InvalidOperationException("The copied Unreal value was null.");
     }
 
     private byte[] CopyByteArray(NativePatchCall* call, int parameterOffset)
@@ -363,9 +389,20 @@ internal sealed unsafe class PatchRegistration : IDisposable
         return new string(characters, 0, length);
     }
 
-    private static void WriteParameter(
+    private void WriteParameter(
         NativePatchCall* call, UnrealParameter parameter, object? value)
     {
+        if (_backend == PatchBackend.Unreal &&
+            (parameter.ManagedType == typeof(string) || parameter.ManagedType == typeof(UnrealText)))
+        {
+            WriteText(call, parameter, value);
+            return;
+        }
+        if (_backend == PatchBackend.Unreal && RequiresPointerFreeCopy(parameter.ManagedType))
+        {
+            WriteValue(call, parameter, value);
+            return;
+        }
         var bytes = ParameterSpan(call, parameter);
         if (parameter.ManagedType == typeof(sbyte) && value is sbyte int8 && bytes.Length == 1)
             bytes[0] = (byte)int8;
@@ -399,6 +436,88 @@ internal sealed unsafe class PatchRegistration : IDisposable
         else
             throw new NotSupportedException(
                 $"Patch parameter {parameter.Name} cannot be written as {parameter.ManagedType.FullName}.");
+    }
+
+    private void WriteValue(NativePatchCall* call, UnrealParameter parameter, object? value)
+    {
+        var api = _api;
+        if (api == null || api->WriteValue == null || value is null ||
+            value.GetType() != parameter.ManagedType)
+            throw new NotSupportedException($"Patch value {parameter.Name} cannot be written.");
+        var kind = PropertyKind(parameter.ManagedType);
+        NativeUnrealResult status;
+        if (value is UnrealObjectReference objectReference)
+        {
+            status = api->WriteValue(
+                api->Context, call, checked((uint)parameter.Offset), kind,
+                &objectReference, checked((uint)sizeof(UnrealObjectReference)));
+        }
+        else if (value is IUnrealStructValue structure &&
+                 structure.Size == parameter.Size)
+        {
+            var bytes = new byte[parameter.Size];
+            structure.WriteTo(bytes);
+            fixed (byte* source = bytes)
+                status = api->WriteValue(
+                    api->Context, call, checked((uint)parameter.Offset), kind,
+                    source, checked((uint)bytes.Length));
+        }
+        else
+        {
+            throw new NotSupportedException(
+                $"Patch value {parameter.Name} cannot be written as {parameter.ManagedType.FullName}.");
+        }
+        if (status != NativeUnrealResult.Ok)
+            throw new InvalidOperationException($"Could not write Unreal patch value: {status}.");
+    }
+
+    private void WriteText(NativePatchCall* call, UnrealParameter parameter, object? value)
+    {
+        var api = _api;
+        if (api == null || api->WriteText == null)
+            throw new NotSupportedException("The host cannot write owning Unreal text values.");
+        var text = value switch
+        {
+            string characters => characters,
+            UnrealText unrealText => unrealText.Value ?? string.Empty,
+            _ => throw new NotSupportedException(
+                $"Patch value {parameter.Name} is not a string or UnrealText.")
+        };
+        if (text.Length >= 65_536 || text.IndexOf('\0') >= 0)
+            throw new ArgumentOutOfRangeException(parameter.Name);
+        fixed (char* characters = text)
+        {
+            var status = api->WriteText(
+                api->Context, call, checked((uint)parameter.Offset),
+                parameter.ManagedType == typeof(UnrealText)
+                    ? UnrealPropertyKind.Text : UnrealPropertyKind.String,
+                characters, checked((uint)text.Length));
+            if (status != NativeUnrealResult.Ok)
+                throw new InvalidOperationException($"Could not write Unreal patch text: {status}.");
+        }
+    }
+
+    private static bool RequiresPointerFreeCopy(Type type) =>
+        type == typeof(UnrealObjectReference) ||
+        typeof(IUnrealStructValue).IsAssignableFrom(type) ||
+        type == typeof(byte[]) ||
+        type.IsGenericType && type.GetGenericTypeDefinition() is var definition &&
+        (definition == typeof(UnrealArray<>) || definition == typeof(UnrealSet<>) ||
+         definition == typeof(UnrealMap<,>));
+
+    private static UnrealPropertyKind PropertyKind(Type type)
+    {
+        if (type == typeof(UnrealObjectReference)) return UnrealPropertyKind.Object;
+        if (typeof(IUnrealStructValue).IsAssignableFrom(type)) return UnrealPropertyKind.Struct;
+        if (type == typeof(byte[])) return UnrealPropertyKind.Array;
+        if (type.IsGenericType)
+        {
+            var definition = type.GetGenericTypeDefinition();
+            if (definition == typeof(UnrealArray<>)) return UnrealPropertyKind.Array;
+            if (definition == typeof(UnrealSet<>)) return UnrealPropertyKind.Set;
+            if (definition == typeof(UnrealMap<,>)) return UnrealPropertyKind.Map;
+        }
+        throw new NotSupportedException($"{type.FullName} has no pointer-free Unreal value kind.");
     }
 
     private static Span<byte> ParameterSpan(NativePatchCall* call, UnrealParameter parameter)

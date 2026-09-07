@@ -537,6 +537,9 @@ void __fastcall processEventHook(
     BriefcasePatchCall call{
         sizeof(BriefcasePatchCall), BRIEFCASE_PATCH_PREFIX, instance, 0,
         parameters, parameterSize, 0, {}};
+    // Reserved0 remains opaque to mods. Native copy/write helpers use it only
+    // during this callback to recover the reflected FProperty safely.
+    call.Reserved[0] = reinterpret_cast<std::uint64_t>(function);
     invokePatchCallbacks(registrations.Prefixes, call, runOriginal);
 
     if (runOriginal != 0) {
@@ -1302,11 +1305,412 @@ BriefcasePropertyKind propertyKind(const FProperty* property) {
         return BRIEFCASE_PROPERTY_UNKNOWN;
     }
     if (type == L"ObjectProperty" || type == L"ClassProperty") return BRIEFCASE_PROPERTY_OBJECT;
+    if (type == L"WeakObjectProperty") return BRIEFCASE_PROPERTY_OBJECT;
     if (type == L"StructProperty") return BRIEFCASE_PROPERTY_STRUCT;
     if (type == L"StrProperty") return BRIEFCASE_PROPERTY_STRING;
     if (type == L"TextProperty") return BRIEFCASE_PROPERTY_TEXT;
     if (type == L"NameProperty") return BRIEFCASE_PROPERTY_NAME;
+    if (type == L"ArrayProperty") return BRIEFCASE_PROPERTY_ARRAY;
+    if (type == L"SetProperty") return BRIEFCASE_PROPERTY_SET;
+    if (type == L"MapProperty") return BRIEFCASE_PROPERTY_MAP;
+    if (type == L"InterfaceProperty") return BRIEFCASE_PROPERTY_INTERFACE;
+    if (type == L"LazyObjectProperty") return BRIEFCASE_PROPERTY_LAZY_OBJECT;
+    if (type == L"SoftObjectProperty") return BRIEFCASE_PROPERTY_SOFT_OBJECT;
+    if (type == L"SoftClassProperty") return BRIEFCASE_PROPERTY_SOFT_CLASS;
+    if (type == L"DelegateProperty") return BRIEFCASE_PROPERTY_DELEGATE;
+    if (type == L"MulticastDelegateProperty" ||
+        type == L"MulticastInlineDelegateProperty")
+        return BRIEFCASE_PROPERTY_MULTICAST_DELEGATE;
+    if (type == L"FieldPathProperty") return BRIEFCASE_PROPERTY_FIELD_PATH;
     return BRIEFCASE_PROPERTY_UNKNOWN;
+}
+
+constexpr std::uint32_t ValueWireMagic = 0x31435642u; // "BVC1"
+constexpr std::size_t MaximumValueWireBytes = 32u * 1024u * 1024u;
+constexpr std::int32_t MaximumContainerElements = 100'000;
+constexpr unsigned MaximumValueDepth = 8;
+
+struct ValueWireBuilder {
+    std::vector<std::byte> Bytes;
+
+    bool append(const void* source, std::size_t size) {
+        if (size > MaximumValueWireBytes || Bytes.size() > MaximumValueWireBytes - size)
+            return false;
+        const auto start = Bytes.size();
+        Bytes.resize(start + size);
+        return size == 0 || safeCopy(Bytes.data() + start, source, size);
+    }
+
+    template <typename TValue>
+    bool append(const TValue& value) { return append(&value, sizeof(value)); }
+
+    std::size_t beginNode(BriefcasePropertyKind kind) {
+        const auto start = Bytes.size();
+        const auto numericKind = static_cast<std::uint32_t>(kind);
+        const std::uint32_t payloadSize = 0;
+        return append(numericKind) && append(payloadSize) ? start : SIZE_MAX;
+    }
+
+    bool endNode(std::size_t start) {
+        if (start == SIZE_MAX || start > Bytes.size() || Bytes.size() - start < 8)
+            return false;
+        const auto payload = Bytes.size() - start - 8;
+        if (payload > std::numeric_limits<std::uint32_t>::max()) return false;
+        const auto size = static_cast<std::uint32_t>(payload);
+        std::memcpy(Bytes.data() + start + 4, &size, sizeof(size));
+        return true;
+    }
+};
+
+bool reflectedTypeName(const FProperty* property, std::wstring& result) {
+    if (!property || !readable(property, sizeof(FProperty)) ||
+        !readable(property->ClassPrivate, sizeof(FFieldClass))) return false;
+    result = nameToString(
+        reinterpret_cast<const FFieldClass*>(property->ClassPrivate)->Name,
+        RuntimeNameConverter);
+    return !result.empty();
+}
+
+bool appendWideString(ValueWireBuilder& output, const std::wstring& value) {
+    if (value.size() > static_cast<std::size_t>(MaximumContainerElements) ||
+        value.size() > std::numeric_limits<std::uint32_t>::max()) return false;
+    const auto count = static_cast<std::uint32_t>(value.size());
+    return output.append(count) &&
+           output.append(value.data(), value.size() * sizeof(wchar_t));
+}
+
+bool appendStringBuffer(ValueWireBuilder& output, const FStringBuffer& value) {
+    if (value.Num < 0 || value.Max < value.Num ||
+        value.Num > MaximumContainerElements) return false;
+    const auto count = static_cast<std::uint32_t>(value.Num > 0 ? value.Num - 1 : 0);
+    return output.append(count) &&
+           (count == 0 || (value.Data && output.append(
+               value.Data, static_cast<std::size_t>(count) * sizeof(wchar_t))));
+}
+
+bool appendWeakHandle(ValueWireBuilder& output, const FWeakObjectPtr& weak) {
+    BriefcaseObjectHandle handle{
+        std::numeric_limits<std::uint32_t>::max(), 0};
+    if (weak.ObjectIndex >= 0) {
+        BriefcaseObjectHandle candidate{
+            static_cast<std::uint32_t>(weak.ObjectIndex),
+            static_cast<std::uint32_t>(weak.ObjectSerialNumber)};
+        if (resolveObject(candidate)) handle = candidate;
+    }
+    return output.append(handle);
+}
+
+bool copyCanonicalFixedValue(
+    const FProperty* property, const std::byte* source,
+    std::byte* destination, std::size_t destinationSize, unsigned depth);
+
+bool copyCanonicalStruct(
+    const UStruct* structure, const std::byte* source,
+    std::byte* destination, std::size_t destinationSize, unsigned depth) {
+    if (!structure || depth > MaximumValueDepth ||
+        !readable(structure, sizeof(UStruct))) return false;
+    for (auto* current = structure; current; current = current->SuperStruct) {
+        if (!readable(current, sizeof(UStruct))) return false;
+        auto* field = current->ChildProperties;
+        for (unsigned visited = 0; field && visited < 4096; ++visited) {
+            if (!readable(field, sizeof(FProperty))) return false;
+            const auto* property = reinterpret_cast<const FProperty*>(field);
+            if (property->ArrayDim != 1 || property->OffsetInternal < 0 ||
+                property->ElementSize <= 0 ||
+                static_cast<std::size_t>(property->OffsetInternal) > destinationSize ||
+                static_cast<std::size_t>(property->ElementSize) >
+                    destinationSize - static_cast<std::size_t>(property->OffsetInternal)) {
+                field = field->Next;
+                continue;
+            }
+            if (!copyCanonicalFixedValue(
+                    property, source + property->OffsetInternal,
+                    destination + property->OffsetInternal,
+                    static_cast<std::size_t>(property->ElementSize), depth + 1))
+                return false;
+            field = field->Next;
+        }
+    }
+    return true;
+}
+
+bool copyCanonicalFixedValue(
+    const FProperty* property, const std::byte* source,
+    std::byte* destination, std::size_t destinationSize, unsigned depth) {
+    if (!property || !source || !destination || depth > MaximumValueDepth) return false;
+    std::wstring type;
+    if (!reflectedTypeName(property, type)) return false;
+    if (type == L"BoolProperty") {
+        if (destinationSize < 1 || !readable(property, sizeof(FBoolProperty))) return false;
+        const auto* boolean = reinterpret_cast<const FBoolProperty*>(property);
+        std::uint8_t storage{};
+        if (boolean->ByteOffset >= static_cast<std::uint8_t>(property->ElementSize) ||
+            !safeCopy(&storage, source + boolean->ByteOffset, sizeof(storage))) return false;
+        destination[0] = static_cast<std::byte>((storage & boolean->ByteMask) != 0 ? 1 : 0);
+        return true;
+    }
+    if (type == L"ObjectProperty" || type == L"ClassProperty") {
+        if (destinationSize != sizeof(BriefcaseObjectHandle)) return false;
+        UObject* object{};
+        BriefcaseObjectHandle handle{};
+        return safeCopy(&object, source, sizeof(object)) && makeHandle(object, handle) &&
+               safeCopy(destination, &handle, sizeof(handle));
+    }
+    if (type == L"WeakObjectProperty") {
+        if (destinationSize != sizeof(BriefcaseObjectHandle)) return false;
+        BriefcaseObjectHandle weak{};
+        if (!safeCopy(&weak, source, sizeof(weak))) return false;
+        if (weak.Index != std::numeric_limits<std::uint32_t>::max() && !resolveObject(weak))
+            weak = {std::numeric_limits<std::uint32_t>::max(), 0};
+        return safeCopy(destination, &weak, sizeof(weak));
+    }
+    if (type == L"StructProperty") {
+        if (!readable(property, sizeof(FStructProperty))) return false;
+        const auto* structure = reinterpret_cast<const FStructProperty*>(property)->Struct;
+        return copyCanonicalStruct(
+            structure, source, destination, destinationSize, depth + 1);
+    }
+    const auto kind = propertyKind(property);
+    if (kind == BRIEFCASE_PROPERTY_UNKNOWN || kind == BRIEFCASE_PROPERTY_STRING ||
+        kind == BRIEFCASE_PROPERTY_TEXT || kind == BRIEFCASE_PROPERTY_ARRAY ||
+        kind == BRIEFCASE_PROPERTY_SET || kind == BRIEFCASE_PROPERTY_MAP ||
+        kind == BRIEFCASE_PROPERTY_INTERFACE ||
+        kind == BRIEFCASE_PROPERTY_LAZY_OBJECT ||
+        kind == BRIEFCASE_PROPERTY_SOFT_OBJECT ||
+        kind == BRIEFCASE_PROPERTY_SOFT_CLASS ||
+        kind == BRIEFCASE_PROPERTY_DELEGATE ||
+        kind == BRIEFCASE_PROPERTY_MULTICAST_DELEGATE ||
+        kind == BRIEFCASE_PROPERTY_FIELD_PATH)
+        return true; // Owning fields remain zero in the address-free struct image.
+    return destinationSize == static_cast<std::size_t>(property->ElementSize) &&
+           safeCopy(destination, source, destinationSize);
+}
+
+bool appendValueNode(
+    const FProperty* property, const std::byte* source,
+    ValueWireBuilder& output, unsigned depth);
+
+bool validScriptArray(const FScriptArray& value, std::int32_t elementSize) {
+    if (value.Num < 0 || value.Max < value.Num || value.Num > MaximumContainerElements ||
+        elementSize <= 0) return false;
+    if (value.Num == 0) return true;
+    const auto bytes = static_cast<std::uint64_t>(value.Num) *
+                       static_cast<std::uint64_t>(elementSize);
+    return bytes <= MaximumValueWireBytes && value.Data &&
+           readable(value.Data, static_cast<std::size_t>(bytes));
+}
+
+const std::uint32_t* bitArrayData(const FScriptBitArray& flags) {
+    return flags.Allocator.SecondaryData
+        ? flags.Allocator.SecondaryData
+        : flags.Allocator.InlineData;
+}
+
+bool appendArrayNode(
+    const FArrayProperty* property, const std::byte* source,
+    ValueWireBuilder& output, unsigned depth) {
+    if (!property || !readable(property, sizeof(FArrayProperty)) ||
+        !readable(property->Inner, sizeof(FProperty))) return false;
+    FScriptArray value{};
+    if (!safeCopy(&value, source, sizeof(value)) ||
+        !validScriptArray(value, property->Inner->ElementSize)) return false;
+    const auto start = output.beginNode(BRIEFCASE_PROPERTY_ARRAY);
+    const auto count = static_cast<std::uint32_t>(value.Num);
+    if (start == SIZE_MAX || !output.append(count)) return false;
+    const auto* data = reinterpret_cast<const std::byte*>(value.Data);
+    for (std::int32_t index = 0; index < value.Num; ++index) {
+        if (!appendValueNode(
+                property->Inner,
+                data + static_cast<std::size_t>(index) * property->Inner->ElementSize,
+                output, depth + 1)) return false;
+    }
+    return output.endNode(start);
+}
+
+bool validSparseSet(
+    const FScriptSet& set, const FScriptSetLayout& layout,
+    std::int32_t& validCount, const std::uint32_t*& flags) {
+    const auto& elements = set.Elements;
+    if (layout.Size <= 0 || layout.Size > 65'535 ||
+        layout.SparseArrayLayout.Size != layout.Size ||
+        elements.Data.Num < 0 || elements.Data.Max < elements.Data.Num ||
+        elements.Data.Num > MaximumContainerElements ||
+        elements.NumFreeIndices < 0 || elements.NumFreeIndices > elements.Data.Num ||
+        elements.AllocationFlags.NumBits < elements.Data.Num ||
+        elements.AllocationFlags.MaxBits < elements.AllocationFlags.NumBits)
+        return false;
+    validCount = elements.Data.Num - elements.NumFreeIndices;
+    if (!validScriptArray(elements.Data, layout.Size)) return false;
+    flags = bitArrayData(elements.AllocationFlags);
+    const auto words = (static_cast<std::size_t>(elements.Data.Num) + 31) / 32;
+    return words == 0 || (flags && readable(flags, words * sizeof(std::uint32_t)));
+}
+
+bool appendSetNode(
+    const FSetProperty* property, const std::byte* source,
+    ValueWireBuilder& output, unsigned depth) {
+    if (!property || !readable(property, sizeof(FSetProperty)) ||
+        !readable(property->ElementProperty, sizeof(FProperty))) return false;
+    FScriptSet set{};
+    if (!safeCopy(&set, source, sizeof(set))) return false;
+    std::int32_t count{};
+    const std::uint32_t* flags{};
+    if (!validSparseSet(set, property->SetLayout, count, flags)) return false;
+    const auto start = output.beginNode(BRIEFCASE_PROPERTY_SET);
+    const auto encodedCount = static_cast<std::uint32_t>(count);
+    if (start == SIZE_MAX || !output.append(encodedCount)) return false;
+    const auto* data = reinterpret_cast<const std::byte*>(set.Elements.Data.Data);
+    for (std::int32_t index = 0; index < set.Elements.Data.Num; ++index) {
+        if ((flags[index / 32] & (1u << (index & 31))) == 0) continue;
+        if (!appendValueNode(
+                property->ElementProperty,
+                data + static_cast<std::size_t>(index) * property->SetLayout.Size,
+                output, depth + 1)) return false;
+    }
+    return output.endNode(start);
+}
+
+bool appendMapNode(
+    const FMapProperty* property, const std::byte* source,
+    ValueWireBuilder& output, unsigned depth) {
+    if (!property || !readable(property, sizeof(FMapProperty)) ||
+        !readable(property->KeyProperty, sizeof(FProperty)) ||
+        !readable(property->ValueProperty, sizeof(FProperty)) ||
+        property->MapLayout.ValueOffset < 0 ||
+        property->MapLayout.ValueOffset > property->MapLayout.SetLayout.Size -
+            property->ValueProperty->ElementSize)
+        return false;
+    FScriptSet set{};
+    if (!safeCopy(&set, source, sizeof(set))) return false;
+    std::int32_t count{};
+    const std::uint32_t* flags{};
+    if (!validSparseSet(set, property->MapLayout.SetLayout, count, flags)) return false;
+    const auto start = output.beginNode(BRIEFCASE_PROPERTY_MAP);
+    const auto encodedCount = static_cast<std::uint32_t>(count);
+    if (start == SIZE_MAX || !output.append(encodedCount)) return false;
+    const auto* data = reinterpret_cast<const std::byte*>(set.Elements.Data.Data);
+    for (std::int32_t index = 0; index < set.Elements.Data.Num; ++index) {
+        if ((flags[index / 32] & (1u << (index & 31))) == 0) continue;
+        const auto* pair = data + static_cast<std::size_t>(index) *
+                                   property->MapLayout.SetLayout.Size;
+        if (!appendValueNode(property->KeyProperty, pair, output, depth + 1) ||
+            !appendValueNode(
+                property->ValueProperty, pair + property->MapLayout.ValueOffset,
+                output, depth + 1)) return false;
+    }
+    return output.endNode(start);
+}
+
+bool appendValueNode(
+    const FProperty* property, const std::byte* source,
+    ValueWireBuilder& output, unsigned depth) {
+    if (!property || !source || depth > MaximumValueDepth ||
+        !readable(property, sizeof(FProperty))) return false;
+    const auto kind = propertyKind(property);
+    if (kind == BRIEFCASE_PROPERTY_ARRAY)
+        return appendArrayNode(reinterpret_cast<const FArrayProperty*>(property), source, output, depth);
+    if (kind == BRIEFCASE_PROPERTY_SET)
+        return appendSetNode(reinterpret_cast<const FSetProperty*>(property), source, output, depth);
+    if (kind == BRIEFCASE_PROPERTY_MAP)
+        return appendMapNode(reinterpret_cast<const FMapProperty*>(property), source, output, depth);
+
+    const auto start = output.beginNode(kind);
+    if (start == SIZE_MAX || kind == BRIEFCASE_PROPERTY_UNKNOWN) return false;
+    if (kind == BRIEFCASE_PROPERTY_STRING) {
+        FStringBuffer value{};
+        if (!safeCopy(&value, source, sizeof(value)) || value.Num < 0 ||
+            value.Max < value.Num || value.Num > MaximumContainerElements) return false;
+        auto count = value.Num > 0 ? value.Num - 1 : 0;
+        if (!output.append(static_cast<std::uint32_t>(count))) return false;
+        if (count && (!value.Data ||
+            !output.append(value.Data, static_cast<std::size_t>(count) * sizeof(std::uint16_t))))
+            return false;
+    } else if (kind == BRIEFCASE_PROPERTY_TEXT) {
+        TextConversionRuntime runtime{};
+        if (!resolveTextConversionRuntime(runtime)) return false;
+        std::uint32_t required{};
+        auto status = textToUtf16(runtime, source, nullptr, 0, &required);
+        if (status == BRIEFCASE_UNREAL_OK && required == 0) {
+            if (!output.append(required)) return false;
+        } else {
+            if (status != BRIEFCASE_UNREAL_BUFFER_TOO_SMALL || required > 65'536) return false;
+            std::vector<std::uint16_t> text(required);
+            status = textToUtf16(runtime, source, text.data(), required, &required);
+            if (status != BRIEFCASE_UNREAL_OK) return false;
+            auto count = required > 0 && text[required - 1] == 0 ? required - 1 : required;
+            if (!output.append(count) ||
+                !output.append(text.data(), static_cast<std::size_t>(count) * sizeof(std::uint16_t)))
+                return false;
+        }
+    } else if (kind == BRIEFCASE_PROPERTY_BOOL) {
+        std::byte value{};
+        if (!copyCanonicalFixedValue(property, source, &value, 1, depth) ||
+            !output.append(value)) return false;
+    } else if (kind == BRIEFCASE_PROPERTY_OBJECT) {
+        BriefcaseObjectHandle handle{};
+        if (!copyCanonicalFixedValue(property, source,
+                reinterpret_cast<std::byte*>(&handle), sizeof(handle), depth) ||
+             !output.append(handle)) return false;
+    } else if (kind == BRIEFCASE_PROPERTY_INTERFACE) {
+        FScriptInterface value{};
+        BriefcaseObjectHandle handle{};
+        if (property->ElementSize != sizeof(value) ||
+            !safeCopy(&value, source, sizeof(value)) ||
+            !makeHandle(value.ObjectPointer, handle) || !output.append(handle)) return false;
+    } else if (kind == BRIEFCASE_PROPERTY_LAZY_OBJECT) {
+        FLazyObjectPtrView value{};
+        if (property->ElementSize != sizeof(value) ||
+            !safeCopy(&value, source, sizeof(value)) ||
+            !appendWeakHandle(output, value.WeakObject) ||
+            !output.append(value.Guid, sizeof(value.Guid))) return false;
+    } else if (kind == BRIEFCASE_PROPERTY_SOFT_OBJECT ||
+               kind == BRIEFCASE_PROPERTY_SOFT_CLASS) {
+        FSoftObjectPtrView value{};
+        if (property->ElementSize != sizeof(value) ||
+            !safeCopy(&value, source, sizeof(value)) ||
+            !appendWeakHandle(output, value.WeakObject) ||
+            !appendWideString(output, nameToString(value.AssetPathName, RuntimeNameConverter)) ||
+            !appendStringBuffer(output, value.SubPathString)) return false;
+    } else if (kind == BRIEFCASE_PROPERTY_DELEGATE) {
+        FScriptDelegate value{};
+        if (property->ElementSize != sizeof(value) ||
+            !safeCopy(&value, source, sizeof(value)) ||
+            !appendWeakHandle(output, value.Object) ||
+            !output.append(value.FunctionName)) return false;
+    } else if (kind == BRIEFCASE_PROPERTY_MULTICAST_DELEGATE) {
+        FScriptArray value{};
+        if (property->ElementSize != sizeof(value) ||
+            !safeCopy(&value, source, sizeof(value)) ||
+            !validScriptArray(value, sizeof(FScriptDelegate))) return false;
+        const auto count = static_cast<std::uint32_t>(value.Num);
+        if (!output.append(count)) return false;
+        const auto* bindings = reinterpret_cast<const FScriptDelegate*>(value.Data);
+        for (std::int32_t index = 0; index < value.Num; ++index) {
+            FScriptDelegate binding{};
+            if (!safeCopy(&binding, bindings + index, sizeof(binding)) ||
+                !appendWeakHandle(output, binding.Object) ||
+                !output.append(binding.FunctionName)) return false;
+        }
+    } else if (kind == BRIEFCASE_PROPERTY_FIELD_PATH) {
+        FFieldPathView value{};
+        if (property->ElementSize != sizeof(value) ||
+            !safeCopy(&value, source, sizeof(value)) ||
+            !validScriptArray(value.Path, sizeof(FName))) return false;
+        const auto count = static_cast<std::uint32_t>(value.Path.Num);
+        if (!output.append(count) ||
+            (count != 0 && !output.append(
+                value.Path.Data, static_cast<std::size_t>(count) * sizeof(FName))))
+            return false;
+    } else if (kind == BRIEFCASE_PROPERTY_STRUCT) {
+        const auto size = static_cast<std::uint32_t>(property->ElementSize);
+        std::vector<std::byte> canonical(size);
+        if (!copyCanonicalFixedValue(property, source, canonical.data(), canonical.size(), depth) ||
+            !output.append(size) || !output.append(canonical.data(), canonical.size())) return false;
+    } else {
+        if (property->ElementSize <= 0 ||
+            !output.append(source, static_cast<std::size_t>(property->ElementSize))) return false;
+    }
+    return output.endNode(start);
 }
 
 bool nativeValueLayout(
@@ -2247,10 +2651,10 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiReadProperty(
         if (!output || outputSize < sizeof(BriefcaseObjectHandle) ||
             !writable(output, sizeof(BriefcaseObjectHandle)))
             return BRIEFCASE_UNREAL_BUFFER_TOO_SMALL;
-        const UObject* referenced{};
-        if (!safeCopy(&referenced, source, sizeof(referenced))) return BRIEFCASE_UNREAL_UNREADABLE;
         BriefcaseObjectHandle referencedHandle{};
-        if (!makeHandle(referenced, referencedHandle)) return BRIEFCASE_UNREAL_STALE_HANDLE;
+        if (!copyCanonicalFixedValue(
+                property, source, reinterpret_cast<std::byte*>(&referencedHandle),
+                sizeof(referencedHandle), 0)) return BRIEFCASE_UNREAL_STALE_HANDLE;
         return safeCopy(output, &referencedHandle, sizeof(referencedHandle))
             ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
     }
@@ -2272,6 +2676,17 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiReadProperty(
         const auto value = (storage & boolean->FieldMask) != 0
             ? static_cast<BriefcaseBool>(1) : static_cast<BriefcaseBool>(0);
         return safeCopy(output, &value, sizeof(value))
+            ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
+    }
+
+    if (expectedKind == BRIEFCASE_PROPERTY_STRUCT) {
+        if (!output || outputSize < static_cast<std::uint32_t>(expectedElementSize) ||
+            !writable(output, static_cast<std::size_t>(expectedElementSize)))
+            return BRIEFCASE_UNREAL_BUFFER_TOO_SMALL;
+        std::memset(output, 0, static_cast<std::size_t>(expectedElementSize));
+        return copyCanonicalFixedValue(
+            property, source, reinterpret_cast<std::byte*>(output),
+            static_cast<std::size_t>(expectedElementSize), 0)
             ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
     }
 
@@ -2364,6 +2779,286 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiReadTextProperty(
         destination, capacityCharacters, requiredCharacters);
 }
 
+BriefcaseUnrealResult resolvePropertyAccess(
+    BriefcaseObjectHandle objectHandle, BriefcaseObjectHandle ownerClassHandle,
+    const char* utf8Name, std::uint32_t nameLength, std::int32_t expectedOffset,
+    std::int32_t expectedElementSize, std::int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, const UObject*& object,
+    const FProperty*& property, std::byte*& value) {
+    object = resolveObject(objectHandle);
+    const auto* ownerClass = resolveObject(ownerClassHandle);
+    if (!object || !ownerClass) return BRIEFCASE_UNREAL_STALE_HANDLE;
+    if (!isClassObject(ownerClass) || !objectIsA(object, ownerClass))
+        return BRIEFCASE_UNREAL_TYPE_MISMATCH;
+    std::wstring name;
+    if (!decodeUtf8(utf8Name, nameLength, name)) return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    property = findProperty(ownerClass, name);
+    if (!property) return BRIEFCASE_UNREAL_NOT_FOUND;
+    if (expectedOffset < 0 || expectedElementSize <= 0 || expectedArrayDimension != 1 ||
+        property->OffsetInternal != expectedOffset ||
+        property->ElementSize != expectedElementSize ||
+        property->ArrayDim != expectedArrayDimension || propertyKind(property) != expectedKind)
+        return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    const auto* actualClass = reinterpret_cast<const UStruct*>(object->ClassPrivate);
+    if (!readable(actualClass, sizeof(UStruct)) || actualClass->PropertiesSize < 0 ||
+        static_cast<std::uint64_t>(expectedOffset) +
+            static_cast<std::uint64_t>(expectedElementSize) >
+            static_cast<std::uint64_t>(actualClass->PropertiesSize))
+        return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    value = reinterpret_cast<std::byte*>(const_cast<UObject*>(object)) + expectedOffset;
+    return readable(value, static_cast<std::size_t>(expectedElementSize))
+        ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
+}
+
+BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiReadValueProperty(
+    void*, BriefcaseObjectHandle objectHandle, BriefcaseObjectHandle ownerClassHandle,
+    const char* utf8Name, std::uint32_t nameLength, std::int32_t expectedOffset,
+    std::int32_t expectedElementSize, std::int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, std::uint8_t* destination,
+    std::uint32_t capacity, std::uint32_t* requiredBytes) {
+    if (!requiredBytes || !writable(requiredBytes, sizeof(*requiredBytes)))
+        return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    *requiredBytes = 0;
+    const UObject* object{};
+    const FProperty* property{};
+    std::byte* value{};
+    const auto resolved = resolvePropertyAccess(
+        objectHandle, ownerClassHandle, utf8Name, nameLength, expectedOffset,
+        expectedElementSize, expectedArrayDimension, expectedKind,
+        object, property, value);
+    if (resolved != BRIEFCASE_UNREAL_OK) return resolved;
+
+    ValueWireBuilder wire;
+    if (!wire.append(ValueWireMagic) || !appendValueNode(property, value, wire, 0))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    if (wire.Bytes.size() > std::numeric_limits<std::uint32_t>::max())
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    *requiredBytes = static_cast<std::uint32_t>(wire.Bytes.size());
+    if (!destination || capacity < *requiredBytes)
+        return BRIEFCASE_UNREAL_BUFFER_TOO_SMALL;
+    if (!writable(destination, capacity)) return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    return safeCopy(destination, wire.Bytes.data(), wire.Bytes.size())
+        ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
+}
+
+bool writeCanonicalFixedValue(
+    const FProperty* property, std::byte* destination,
+    const std::byte* source, std::size_t sourceSize, unsigned depth);
+
+bool writeCanonicalStruct(
+    const UStruct* structure, std::byte* destination,
+    const std::byte* source, std::size_t sourceSize, unsigned depth) {
+    if (!structure || depth > MaximumValueDepth ||
+        !readable(structure, sizeof(UStruct))) return false;
+    for (auto* current = structure; current; current = current->SuperStruct) {
+        if (!readable(current, sizeof(UStruct))) return false;
+        auto* field = current->ChildProperties;
+        for (unsigned visited = 0; field && visited < 4096; ++visited) {
+            if (!readable(field, sizeof(FProperty))) return false;
+            const auto* property = reinterpret_cast<const FProperty*>(field);
+            if (property->ArrayDim == 1 && property->OffsetInternal >= 0 &&
+                property->ElementSize > 0 &&
+                static_cast<std::size_t>(property->OffsetInternal) <= sourceSize &&
+                static_cast<std::size_t>(property->ElementSize) <=
+                    sourceSize - static_cast<std::size_t>(property->OffsetInternal) &&
+                !writeCanonicalFixedValue(
+                    property, destination + property->OffsetInternal,
+                    source + property->OffsetInternal,
+                    static_cast<std::size_t>(property->ElementSize), depth + 1))
+                return false;
+            field = field->Next;
+        }
+    }
+
+    return true;
+}
+
+bool writeCanonicalFixedValue(
+    const FProperty* property, std::byte* destination,
+    const std::byte* source, std::size_t sourceSize, unsigned depth) {
+    if (!property || !destination || !source || depth > MaximumValueDepth) return false;
+    std::wstring type;
+    if (!reflectedTypeName(property, type)) return false;
+    if (type == L"BoolProperty") {
+        if (sourceSize < 1 || !readable(property, sizeof(FBoolProperty))) return false;
+        const auto* boolean = reinterpret_cast<const FBoolProperty*>(property);
+        std::uint8_t storage{};
+        if (boolean->ByteOffset >= static_cast<std::uint8_t>(property->ElementSize) ||
+            !safeCopy(&storage, destination + boolean->ByteOffset, 1)) return false;
+        const bool enabled = source[0] != std::byte{};
+        storage = enabled ? static_cast<std::uint8_t>(storage | boolean->ByteMask)
+                          : static_cast<std::uint8_t>(storage & ~boolean->ByteMask);
+        return safeCopy(destination + boolean->ByteOffset, &storage, 1);
+    }
+    if (type == L"ObjectProperty" || type == L"ClassProperty") {
+        if (sourceSize != sizeof(BriefcaseObjectHandle)) return false;
+        BriefcaseObjectHandle handle{};
+        if (!safeCopy(&handle, source, sizeof(handle))) return false;
+        UObject* object{};
+        if (handle.Index != std::numeric_limits<std::uint32_t>::max()) {
+            object = const_cast<UObject*>(resolveObject(handle));
+            if (!object) return false;
+        }
+        return safeCopy(destination, &object, sizeof(object));
+    }
+    if (type == L"WeakObjectProperty") {
+        if (sourceSize != sizeof(BriefcaseObjectHandle)) return false;
+        BriefcaseObjectHandle handle{};
+        if (!safeCopy(&handle, source, sizeof(handle)) ||
+            (handle.Index != std::numeric_limits<std::uint32_t>::max() &&
+             !resolveObject(handle))) return false;
+        return safeCopy(destination, &handle, sizeof(handle));
+    }
+    if (type == L"StructProperty") {
+        if (!readable(property, sizeof(FStructProperty))) return false;
+        return writeCanonicalStruct(
+            reinterpret_cast<const FStructProperty*>(property)->Struct,
+            destination, source, sourceSize, depth + 1);
+    }
+    const auto kind = propertyKind(property);
+    if (kind == BRIEFCASE_PROPERTY_UNKNOWN || kind == BRIEFCASE_PROPERTY_STRING ||
+        kind == BRIEFCASE_PROPERTY_TEXT || kind == BRIEFCASE_PROPERTY_ARRAY ||
+        kind == BRIEFCASE_PROPERTY_SET || kind == BRIEFCASE_PROPERTY_MAP ||
+        kind == BRIEFCASE_PROPERTY_INTERFACE ||
+        kind == BRIEFCASE_PROPERTY_LAZY_OBJECT ||
+        kind == BRIEFCASE_PROPERTY_SOFT_OBJECT ||
+        kind == BRIEFCASE_PROPERTY_SOFT_CLASS ||
+        kind == BRIEFCASE_PROPERTY_DELEGATE ||
+        kind == BRIEFCASE_PROPERTY_MULTICAST_DELEGATE ||
+        kind == BRIEFCASE_PROPERTY_FIELD_PATH)
+        return true; // Owning nested fields are mutated through UFunctions.
+    return sourceSize == static_cast<std::size_t>(property->ElementSize) &&
+           safeCopy(destination, source, sourceSize);
+}
+
+BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiWriteProperty(
+    void*, BriefcaseObjectHandle objectHandle, BriefcaseObjectHandle ownerClassHandle,
+    const char* utf8Name, std::uint32_t nameLength, std::int32_t expectedOffset,
+    std::int32_t expectedElementSize, std::int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, const void* input, std::uint32_t inputSize) {
+    if (!input || inputSize == 0 || !readable(input, inputSize))
+        return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    if (expectedKind == BRIEFCASE_PROPERTY_STRING || expectedKind == BRIEFCASE_PROPERTY_TEXT ||
+        expectedKind == BRIEFCASE_PROPERTY_ARRAY || expectedKind == BRIEFCASE_PROPERTY_SET ||
+        expectedKind == BRIEFCASE_PROPERTY_MAP)
+        return BRIEFCASE_UNREAL_UNSUPPORTED;
+    const UObject* object{};
+    const FProperty* property{};
+    std::byte* value{};
+    const auto resolved = resolvePropertyAccess(
+        objectHandle, ownerClassHandle, utf8Name, nameLength, expectedOffset,
+        expectedElementSize, expectedArrayDimension, expectedKind,
+        object, property, value);
+    if (resolved != BRIEFCASE_UNREAL_OK) return resolved;
+    const auto canonicalSize = expectedKind == BRIEFCASE_PROPERTY_BOOL ? 1u :
+        expectedKind == BRIEFCASE_PROPERTY_OBJECT
+            ? static_cast<std::uint32_t>(sizeof(BriefcaseObjectHandle))
+            : static_cast<std::uint32_t>(expectedElementSize);
+    if (inputSize != canonicalSize) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    if (!writable(value, static_cast<std::size_t>(expectedElementSize)))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    return writeCanonicalFixedValue(
+        property, value, reinterpret_cast<const std::byte*>(input), inputSize, 0)
+        ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
+}
+
+struct OwnedStringValue {
+    std::array<std::byte, 40> Parameters{};
+    const FProperty* Property{};
+    bool Initialized{};
+};
+
+bool constructString(
+    const TextConversionRuntime& runtime, const std::uint16_t* characters,
+    std::uint32_t characterCount, OwnedStringValue& result) {
+    OwnedTextValue text;
+    if (!constructText(runtime, characters, characterCount, text)) return false;
+    if (!safeCopy(result.Parameters.data(), text.Parameters.data() + 16, 24)) {
+        destroyText(text);
+        return false;
+    }
+    auto* output = result.Parameters.data() + 24;
+    result.Property = runtime.TextToStringReturn;
+    if (!initializePropertyValue(result.Property, output)) {
+        destroyText(text);
+        return false;
+    }
+    result.Initialized = true;
+    const auto processEvent = processEventFor(runtime.Library);
+    const auto ok = processEvent && safeProcessEvent(
+        processEvent, runtime.Library, runtime.TextToString, result.Parameters.data());
+    destroyText(text);
+    if (!ok) {
+        destroyPropertyValue(result.Property, output);
+        result.Initialized = false;
+    }
+    return ok;
+}
+
+BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiWriteTextProperty(
+    void*, BriefcaseObjectHandle objectHandle, BriefcaseObjectHandle ownerClassHandle,
+    const char* utf8Name, std::uint32_t nameLength, std::int32_t expectedOffset,
+    std::int32_t expectedElementSize, std::int32_t expectedArrayDimension,
+    BriefcasePropertyKind expectedKind, const std::uint16_t* characters,
+    std::uint32_t characterCount) {
+    if (expectedKind != BRIEFCASE_PROPERTY_STRING && expectedKind != BRIEFCASE_PROPERTY_TEXT)
+        return BRIEFCASE_UNREAL_TYPE_MISMATCH;
+    if (characterCount >= 65'536 ||
+        (characterCount && (!characters ||
+         !readable(characters, static_cast<std::size_t>(characterCount) * sizeof(std::uint16_t)))))
+        return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    std::vector<std::uint16_t> terminated(characterCount + 1);
+    if (characterCount && !safeCopy(
+            terminated.data(), characters,
+            static_cast<std::size_t>(characterCount) * sizeof(std::uint16_t)))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+
+    const UObject* object{};
+    const FProperty* property{};
+    std::byte* value{};
+    const auto resolved = resolvePropertyAccess(
+        objectHandle, ownerClassHandle, utf8Name, nameLength, expectedOffset,
+        expectedElementSize, expectedArrayDimension, expectedKind,
+        object, property, value);
+    if (resolved != BRIEFCASE_UNREAL_OK) return resolved;
+    if (!writable(value, static_cast<std::size_t>(expectedElementSize)))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    TextConversionRuntime runtime{};
+    if (!resolveTextConversionRuntime(runtime)) return BRIEFCASE_UNREAL_UNSUPPORTED;
+
+    if (expectedKind == BRIEFCASE_PROPERTY_TEXT) {
+        if (expectedElementSize != 24) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+        OwnedTextValue temporary;
+        if (!constructText(runtime, terminated.data(), characterCount, temporary))
+            return BRIEFCASE_UNREAL_UNREADABLE;
+        std::array<std::byte, 24> bytes{};
+        const auto copied = safeCopy(bytes.data(), temporary.Parameters.data() + 16, bytes.size());
+        if (!copied || !destroyPropertyValue(property, value) ||
+            !safeCopy(value, bytes.data(), bytes.size())) {
+            destroyText(temporary);
+            return BRIEFCASE_UNREAL_UNREADABLE;
+        }
+        temporary.Initialized = false; // ownership moved into the UObject property
+        return BRIEFCASE_UNREAL_OK;
+    }
+
+    if (expectedElementSize != sizeof(FStringBuffer))
+        return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    OwnedStringValue temporary;
+    if (!constructString(runtime, terminated.data(), characterCount, temporary))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    std::array<std::byte, sizeof(FStringBuffer)> bytes{};
+    const auto copied = safeCopy(bytes.data(), temporary.Parameters.data() + 24, bytes.size());
+    if (!copied || !destroyPropertyValue(property, value) ||
+        !safeCopy(value, bytes.data(), bytes.size())) {
+        if (temporary.Initialized)
+            destroyPropertyValue(temporary.Property, temporary.Parameters.data() + 24);
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    }
+    temporary.Initialized = false; // ownership moved into the UObject property
+    return BRIEFCASE_UNREAL_OK;
+}
+
 BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiInvokeFunction(
     void*, BriefcaseObjectHandle objectHandle, BriefcaseObjectHandle ownerClassHandle,
     const char* utf8Name, std::uint32_t nameLength,
@@ -2396,11 +3091,13 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiInvokeFunction(
         std::int32_t Offset{};
         BriefcaseObjectHandle Original{};
         bool Output{};
+        bool HasInput{};
     };
     std::vector<ObjectArgument> objectArguments;
     constexpr std::uint64_t ParameterFlag = 0x80;
     constexpr std::uint64_t OutParameterFlag = 0x100;
     constexpr std::uint64_t ReturnParameterFlag = 0x400;
+    constexpr std::uint64_t ReferenceParameterFlag = 0x08000000;
     auto* field = function->ChildProperties;
     for (unsigned visited = 0; field && visited < 4096; ++visited) {
         if (!readable(field, sizeof(FProperty))) return BRIEFCASE_UNREAL_UNREADABLE;
@@ -2417,9 +3114,11 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiInvokeFunction(
             auto* slot = reinterpret_cast<std::byte*>(parameters) + property->OffsetInternal;
             const bool output = (property->PropertyFlags &
                 (OutParameterFlag | ReturnParameterFlag)) != 0;
+            const bool hasInput = !output ||
+                (property->PropertyFlags & ReferenceParameterFlag) != 0;
             BriefcaseObjectHandle supplied{std::numeric_limits<std::uint32_t>::max(), 0};
             UObject* resolved{};
-            if (!output) {
+            if (hasInput) {
                 if (!safeCopy(&supplied, slot, sizeof(supplied))) return BRIEFCASE_UNREAL_UNREADABLE;
                 if (supplied.Index != std::numeric_limits<std::uint32_t>::max()) {
                     resolved = const_cast<UObject*>(resolveObject(supplied));
@@ -2427,7 +3126,7 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiInvokeFunction(
                 }
             }
             if (!safeCopy(slot, &resolved, sizeof(resolved))) return BRIEFCASE_UNREAL_UNREADABLE;
-            objectArguments.push_back({property->OffsetInternal, supplied, output});
+            objectArguments.push_back({property->OffsetInternal, supplied, output, hasInput});
         }
         field = field->Next;
     }
@@ -3028,6 +3727,132 @@ BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiCopyPatchText(
         runtime, value, destination, capacityCharacters, requiredCharacters);
 }
 
+const FProperty* patchProperty(
+    const BriefcasePatchCall* call, std::uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind) {
+    if (!call || call->StructSize < sizeof(BriefcasePatchCall) ||
+        call->Reserved[0] == 0 || !call->Parameters) return nullptr;
+    const auto* function = reinterpret_cast<const UFunction*>(call->Reserved[0]);
+    if (!readable(function, sizeof(UFunction)) || function->ParmsSize != call->ParameterSize)
+        return nullptr;
+    auto* field = function->ChildProperties;
+    constexpr std::uint64_t ParameterFlag = 0x80;
+    for (unsigned visited = 0; field && visited < 4096; ++visited) {
+        if (!readable(field, sizeof(FProperty))) return nullptr;
+        const auto* property = reinterpret_cast<const FProperty*>(field);
+        if ((property->PropertyFlags & ParameterFlag) != 0 &&
+            property->OffsetInternal == static_cast<std::int32_t>(parameterOffset) &&
+            property->ArrayDim == 1 && property->ElementSize > 0 &&
+            static_cast<std::uint64_t>(property->OffsetInternal) +
+                static_cast<std::uint64_t>(property->ElementSize) <= call->ParameterSize &&
+            propertyKind(property) == expectedKind)
+            return property;
+        field = field->Next;
+    }
+    return nullptr;
+}
+
+BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiCopyPatchValue(
+    void*, const BriefcasePatchCall* call, std::uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, std::uint8_t* destination,
+    std::uint32_t capacity, std::uint32_t* requiredBytes) {
+    if (!requiredBytes || !writable(requiredBytes, sizeof(*requiredBytes)))
+        return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    *requiredBytes = 0;
+    const auto* property = patchProperty(call, parameterOffset, expectedKind);
+    if (!property) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    const auto* source = static_cast<const std::byte*>(call->Parameters) + parameterOffset;
+    ValueWireBuilder wire;
+    if (!wire.append(ValueWireMagic) || !appendValueNode(property, source, wire, 0))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    *requiredBytes = static_cast<std::uint32_t>(wire.Bytes.size());
+    if (!destination || capacity < *requiredBytes)
+        return BRIEFCASE_UNREAL_BUFFER_TOO_SMALL;
+    if (!writable(destination, capacity)) return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    return safeCopy(destination, wire.Bytes.data(), wire.Bytes.size())
+        ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
+}
+
+BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiWritePatchValue(
+    void*, const BriefcasePatchCall* call, std::uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, const void* input, std::uint32_t inputSize) {
+    if (!input || inputSize == 0 || !readable(input, inputSize))
+        return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    const auto* property = patchProperty(call, parameterOffset, expectedKind);
+    if (!property) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    if (expectedKind == BRIEFCASE_PROPERTY_STRING || expectedKind == BRIEFCASE_PROPERTY_TEXT ||
+        expectedKind == BRIEFCASE_PROPERTY_ARRAY || expectedKind == BRIEFCASE_PROPERTY_SET ||
+        expectedKind == BRIEFCASE_PROPERTY_MAP)
+        return BRIEFCASE_UNREAL_UNSUPPORTED;
+    const auto canonicalSize = expectedKind == BRIEFCASE_PROPERTY_BOOL ? 1u :
+        expectedKind == BRIEFCASE_PROPERTY_OBJECT
+            ? static_cast<std::uint32_t>(sizeof(BriefcaseObjectHandle))
+            : static_cast<std::uint32_t>(property->ElementSize);
+    if (inputSize != canonicalSize) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    auto* destination = static_cast<std::byte*>(call->Parameters) + parameterOffset;
+    if (!writable(destination, static_cast<std::size_t>(property->ElementSize)))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    return writeCanonicalFixedValue(
+        property, destination, reinterpret_cast<const std::byte*>(input), inputSize, 0)
+        ? BRIEFCASE_UNREAL_OK : BRIEFCASE_UNREAL_UNREADABLE;
+}
+
+BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiWritePatchText(
+    void*, const BriefcasePatchCall* call, std::uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, const std::uint16_t* characters,
+    std::uint32_t characterCount) {
+    if (expectedKind != BRIEFCASE_PROPERTY_STRING && expectedKind != BRIEFCASE_PROPERTY_TEXT)
+        return BRIEFCASE_UNREAL_TYPE_MISMATCH;
+    if (characterCount >= 65'536 ||
+        (characterCount && (!characters || !readable(
+            characters, static_cast<std::size_t>(characterCount) * sizeof(std::uint16_t)))))
+        return BRIEFCASE_UNREAL_INVALID_ARGUMENT;
+    const auto* property = patchProperty(call, parameterOffset, expectedKind);
+    if (!property) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    auto* destination = static_cast<std::byte*>(call->Parameters) + parameterOffset;
+    if (!writable(destination, static_cast<std::size_t>(property->ElementSize)))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    std::vector<std::uint16_t> terminated(characterCount + 1);
+    if (characterCount && !safeCopy(
+            terminated.data(), characters,
+            static_cast<std::size_t>(characterCount) * sizeof(std::uint16_t)))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    TextConversionRuntime runtime{};
+    if (!resolveTextConversionRuntime(runtime)) return BRIEFCASE_UNREAL_UNSUPPORTED;
+
+    if (expectedKind == BRIEFCASE_PROPERTY_TEXT) {
+        if (property->ElementSize != 24) return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+        OwnedTextValue temporary;
+        if (!constructText(runtime, terminated.data(), characterCount, temporary))
+            return BRIEFCASE_UNREAL_UNREADABLE;
+        std::array<std::byte, 24> bytes{};
+        if (!safeCopy(bytes.data(), temporary.Parameters.data() + 16, bytes.size()) ||
+            !destroyPropertyValue(property, destination) ||
+            !safeCopy(destination, bytes.data(), bytes.size())) {
+            destroyText(temporary);
+            return BRIEFCASE_UNREAL_UNREADABLE;
+        }
+        temporary.Initialized = false;
+        return BRIEFCASE_UNREAL_OK;
+    }
+
+    if (property->ElementSize != sizeof(FStringBuffer))
+        return BRIEFCASE_UNREAL_LAYOUT_MISMATCH;
+    OwnedStringValue temporary;
+    if (!constructString(runtime, terminated.data(), characterCount, temporary))
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    std::array<std::byte, sizeof(FStringBuffer)> bytes{};
+    if (!safeCopy(bytes.data(), temporary.Parameters.data() + 24, bytes.size()) ||
+        !destroyPropertyValue(property, destination) ||
+        !safeCopy(destination, bytes.data(), bytes.size())) {
+        if (temporary.Initialized)
+            destroyPropertyValue(temporary.Property, temporary.Parameters.data() + 24);
+        return BRIEFCASE_UNREAL_UNREADABLE;
+    }
+    temporary.Initialized = false;
+    return BRIEFCASE_UNREAL_OK;
+}
+
 BriefcaseUnrealResult BRIEFCASE_MOD_CALL apiInvokeNativeBoolean(
     void*, BriefcaseObjectHandle objectHandle, BriefcaseGameBuild expectedBuild,
     std::uint64_t functionRva, BriefcaseBool* result) {
@@ -3061,7 +3886,8 @@ const BriefcaseUnrealApi UnrealApi{
     apiFindObject, apiFindObjectsOfClass, apiGetObjectName, apiGetObjectPath,
     apiGetObjectClass, apiIsObjectA, apiGetPropertyInfo, apiReadProperty,
     apiInvokeFunction, apiReadStringProperty,
-    apiInvokeFunctionText, apiReadTextProperty, apiInvokeNativeBoolean, {}};
+    apiInvokeFunctionText, apiReadTextProperty, apiInvokeNativeBoolean,
+    apiReadValueProperty, apiWriteProperty, apiWriteTextProperty};
 const BriefcaseGameThreadApi GameThreadApi{
     sizeof(BriefcaseGameThreadApi), BRIEFCASE_GAME_THREAD_API_VERSION, nullptr,
     apiRegisterGameThreadCallback, apiUnregisterGameThreadCallback,
@@ -3070,7 +3896,8 @@ const BriefcasePatchingApi PatchingApi{
     sizeof(BriefcasePatchingApi), BRIEFCASE_PATCHING_API_VERSION, nullptr,
     apiRegisterPatch, apiUnregisterPatch,
     apiRegisterNativePatch, apiUnregisterNativePatch,
-    apiCopyPatchByteArray, apiCopyPatchString, apiCopyPatchText, {}};
+    apiCopyPatchByteArray, apiCopyPatchString, apiCopyPatchText,
+    apiCopyPatchValue, apiWritePatchValue, apiWritePatchText};
 
 } // namespace
 

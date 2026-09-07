@@ -7,8 +7,9 @@ public static class BriefcaseAbi
     public const uint HostApiVersion = 1;
     public const uint RenderingApiVersion = 4;
     public const uint InputApiVersion = 1;
-    public const uint PatchingApiVersion = 4;
+    public const uint PatchingApiVersion = 5;
     public const uint GameThreadApiVersion = 1;
+    public const uint UnrealApiVersion = 8;
     public const ulong CoreCapability = 1UL << 0;
     public const ulong UnrealReflectionCapability = 1UL << 1;
     public const ulong UnrealInvocationCapability = 1UL << 2;
@@ -51,7 +52,17 @@ public enum UnrealPropertyKind : uint
     Int8,
     Int16,
     UInt16,
-    Name
+    Name,
+    Array,
+    Set,
+    Map,
+    Interface,
+    LazyObject,
+    SoftObject,
+    SoftClass,
+    Delegate,
+    MulticastDelegate,
+    FieldPath
 }
 
 [Flags]
@@ -183,7 +194,9 @@ public unsafe struct NativePatchingApi
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, byte*, uint, uint*, NativeUnrealResult> CopyByteArray;
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, char*, uint, uint*, NativeUnrealResult> CopyString;
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, char*, uint, uint*, NativeUnrealResult> CopyText;
-    public fixed ulong Reserved[3];
+    public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, byte*, uint, uint*, NativeUnrealResult> CopyValue;
+    public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, void*, uint, NativeUnrealResult> WriteValue;
+    public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, char*, uint, NativeUnrealResult> WriteText;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -283,7 +296,9 @@ public unsafe struct NativeUnrealApi
     public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, uint, void*, uint, NativeTextArgument*, uint, NativeUnrealResult> InvokeFunctionText;
     public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, char*, uint, uint*, NativeUnrealResult> ReadTextProperty;
     public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, NativeGameBuild, ulong, uint*, NativeUnrealResult> InvokeNativeBoolean;
-    public fixed ulong Reserved[3];
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, byte*, uint, uint*, NativeUnrealResult> ReadValueProperty;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, void*, uint, NativeUnrealResult> WriteProperty;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, char*, uint, NativeUnrealResult> WriteTextProperty;
 }
 
 [StructLayout(LayoutKind.Sequential)]

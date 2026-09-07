@@ -20,6 +20,112 @@ struct FStringBuffer {
 };
 static_assert(sizeof(FStringBuffer) == 16);
 
+// Pointer-bearing UE containers are observed only long enough to copy a
+// bounded snapshot. None of these views cross the public ABI.
+struct FScriptArray {
+    void* Data;
+    std::int32_t Num;
+    std::int32_t Max;
+};
+static_assert(sizeof(FScriptArray) == 16);
+
+struct FInlineBitAllocator {
+    std::uint32_t InlineData[4];
+    std::uint32_t* SecondaryData;
+};
+static_assert(sizeof(FInlineBitAllocator) == 24);
+
+struct FScriptBitArray {
+    FInlineBitAllocator Allocator;
+    std::int32_t NumBits;
+    std::int32_t MaxBits;
+};
+static_assert(sizeof(FScriptBitArray) == 32);
+
+struct FScriptSparseArray {
+    FScriptArray Data;
+    FScriptBitArray AllocationFlags;
+    std::int32_t FirstFreeIndex;
+    std::int32_t NumFreeIndices;
+};
+static_assert(sizeof(FScriptSparseArray) == 56);
+
+struct FInlineHashAllocator {
+    std::int32_t InlineData;
+    std::int32_t Padding04;
+    std::int32_t* SecondaryData;
+};
+static_assert(sizeof(FInlineHashAllocator) == 16);
+
+struct FScriptSet {
+    FScriptSparseArray Elements;
+    FInlineHashAllocator Hash;
+    std::int32_t HashSize;
+    std::int32_t Padding4C;
+};
+static_assert(sizeof(FScriptSet) == 80);
+
+struct FScriptSparseArrayLayout {
+    std::int32_t Alignment;
+    std::int32_t Size;
+};
+static_assert(sizeof(FScriptSparseArrayLayout) == 8);
+
+struct FScriptSetLayout {
+    std::int32_t HashNextIdOffset;
+    std::int32_t HashIndexOffset;
+    std::int32_t Size;
+    FScriptSparseArrayLayout SparseArrayLayout;
+};
+static_assert(sizeof(FScriptSetLayout) == 20);
+
+struct FScriptMapLayout {
+    std::int32_t ValueOffset;
+    FScriptSetLayout SetLayout;
+};
+static_assert(sizeof(FScriptMapLayout) == 24);
+
+struct FWeakObjectPtr {
+    std::int32_t ObjectIndex;
+    std::int32_t ObjectSerialNumber;
+};
+static_assert(sizeof(FWeakObjectPtr) == 8);
+
+struct FScriptInterface {
+    struct UObject* ObjectPointer;
+    void* InterfacePointer;
+};
+static_assert(sizeof(FScriptInterface) == 16);
+
+struct FLazyObjectPtrView {
+    FWeakObjectPtr WeakObject;
+    std::int32_t TagAtLastTest;
+    std::uint32_t Guid[4];
+};
+static_assert(sizeof(FLazyObjectPtrView) == 28);
+
+struct FSoftObjectPtrView {
+    FWeakObjectPtr WeakObject;
+    std::int32_t TagAtLastTest;
+    std::int32_t Padding0C;
+    FName AssetPathName;
+    FStringBuffer SubPathString;
+};
+static_assert(sizeof(FSoftObjectPtrView) == 40);
+
+struct FScriptDelegate {
+    FWeakObjectPtr Object;
+    FName FunctionName;
+};
+static_assert(sizeof(FScriptDelegate) == 16);
+
+struct FFieldPathView {
+    void* ResolvedField;
+    FWeakObjectPtr ResolvedOwner;
+    FScriptArray Path;
+};
+static_assert(sizeof(FFieldPathView) == 32);
+
 struct UObject {
     void* VTable;
     std::uint32_t ObjectFlags;
@@ -128,16 +234,22 @@ static_assert(offsetof(FArrayProperty, Inner) == 0x78);
 struct FSetProperty : FProperty {
     std::byte Padding60[0x18];
     FProperty* ElementProperty;
+    FScriptSetLayout SetLayout;
 };
 static_assert(offsetof(FSetProperty, ElementProperty) == 0x78);
+static_assert(offsetof(FSetProperty, SetLayout) == 0x80);
 
 struct FMapProperty : FProperty {
     std::byte Padding60[0x18];
     FProperty* KeyProperty;
     FProperty* ValueProperty;
+    FScriptMapLayout MapLayout;
+    std::uint32_t MapFlags;
+    std::uint32_t PaddingA4;
 };
 static_assert(offsetof(FMapProperty, KeyProperty) == 0x78);
 static_assert(offsetof(FMapProperty, ValueProperty) == 0x80);
+static_assert(offsetof(FMapProperty, MapLayout) == 0x88);
 
 struct FEnumProperty : FProperty {
     // UE 4.27 stores the numeric property first, followed by its UEnum.

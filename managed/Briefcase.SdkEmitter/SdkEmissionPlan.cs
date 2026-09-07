@@ -91,7 +91,9 @@ internal sealed class SdkEmissionPlan
                          StringComparer.Ordinal))
             {
                 var managedType = ManagedTypeDescriptor.TryCreate(
-                    property, knownPaths, allowStringProperty: type.Kind == "Class");
+                    property, knownPaths,
+                    allowReadContainers: type.Kind == "Class",
+                    allowStringProperty: type.Kind == "Class");
                 var validLayout = type.Kind == "Class" ||
                     property.Offset >= 0 && property.ElementSize > 0 &&
                     property.Offset <= type.Size - property.ElementSize;
@@ -171,19 +173,25 @@ internal sealed class SdkEmissionPlan
                 return null;
 
             // UE represents const FStruct& as ConstParm | OutParm | ReferenceParm.
-            // It remains an input in the ProcessEvent buffer. Writable out/ref
-            // values stay metadata-only until their ownership rules are modeled.
+            // It remains an ordinary input in the ProcessEvent buffer. Writable
+            // references are emitted as C# ref parameters and pure outputs as
+            // C# out parameters.
             var isConstReference =
                 (parameter.Flags & (ConstParameterFlag | ReferenceParameterFlag)) ==
                 (ConstParameterFlag | ReferenceParameterFlag);
-            if (!isReturn && (parameter.Flags & OutParameterFlag) != 0 &&
-                !isConstReference)
+            var isOutput = !isReturn && !isConstReference &&
+                           (parameter.Flags & OutParameterFlag) != 0;
+            var isReference = isOutput &&
+                              (parameter.Flags & ReferenceParameterFlag) != 0;
+            // FString/TArray outputs require allocator-aware copy-back, which is
+            // intentionally separate from scalar/struct/FText output storage.
+            if (isOutput && managedType.Kind is (ManagedTypeKind.String or
+                ManagedTypeKind.ByteArray or ManagedTypeKind.Array or
+                ManagedTypeKind.Set or ManagedTypeKind.Map) ||
+                isReference && managedType.Kind == ManagedTypeKind.Text)
                 return null;
-            if (!isReturn && (parameter.Flags & ReferenceParameterFlag) != 0 &&
-                managedType.Kind is not (ManagedTypeKind.String or ManagedTypeKind.Text or
-                    ManagedTypeKind.ByteArray or ManagedTypeKind.GeneratedStruct))
-                return null;
-            planned.Add(new PlannedParameter(parameter, managedType, isReturn));
+            planned.Add(new PlannedParameter(
+                parameter, managedType, isReturn, isOutput, isReference));
         }
 
         return new PlannedFunction(
@@ -312,36 +320,111 @@ internal sealed record PlannedFunction(
     FunctionSnapshot Snapshot, string MemberName, IReadOnlyList<PlannedParameter> Parameters)
 {
     public PlannedParameter? ReturnParameter => Parameters.SingleOrDefault(parameter => parameter.IsReturn);
-    public IEnumerable<PlannedParameter> Inputs => Parameters.Where(parameter => !parameter.IsReturn);
+    public IEnumerable<PlannedParameter> MethodParameters =>
+        Parameters.Where(parameter => !parameter.IsReturn);
+    public IEnumerable<PlannedParameter> InvocationInputs =>
+        Parameters.Where(parameter => !parameter.IsReturn &&
+                                      (!parameter.IsOutput || parameter.IsReference));
+    public IEnumerable<PlannedParameter> Outputs =>
+        Parameters.Where(parameter => parameter.IsOutput);
 }
 
 internal sealed record PlannedParameter(
-    PropertySnapshot Snapshot, ManagedTypeDescriptor Type, bool IsReturn);
+    PropertySnapshot Snapshot, ManagedTypeDescriptor Type, bool IsReturn,
+    bool IsOutput = false, bool IsReference = false);
 
-internal sealed record ManagedTypeDescriptor(ManagedTypeKind Kind, string? ReferencedTypePath = null)
+internal sealed record ManagedTypeDescriptor(
+    ManagedTypeKind Kind,
+    string? ReferencedTypePath = null,
+    ManagedTypeDescriptor? InnerType = null,
+    ManagedTypeDescriptor? KeyType = null,
+    ManagedTypeDescriptor? ValueType = null)
 {
+    public bool UsesGeneratedType => Kind == ManagedTypeKind.GeneratedStruct ||
+        InnerType?.UsesGeneratedType == true || KeyType?.UsesGeneratedType == true ||
+        ValueType?.UsesGeneratedType == true;
     public static ManagedTypeDescriptor? TryCreate(
         PropertySnapshot property,
         IReadOnlySet<string> knownPaths,
         bool allowInputContainers = false,
+        bool allowReadContainers = false,
         bool allowStringProperty = false,
         bool allowTextProperty = false)
     {
-        var type = property.EffectiveType;
+        return TryCreateType(
+            property.EffectiveType, property.ElementSize, knownPaths,
+            allowInputContainers, allowReadContainers,
+            allowStringProperty, allowTextProperty);
+    }
+
+    private static ManagedTypeDescriptor? TryCreateType(
+        UnrealTypeSnapshot type,
+        int fallbackSize,
+        IReadOnlySet<string> knownPaths,
+        bool allowInputContainers,
+        bool allowReadContainers,
+        bool allowString,
+        bool allowText)
+    {
         if (type.UnrealType == "StructProperty")
             return type.ReferencedTypePath is { } path && knownPaths.Contains(path)
                 ? new ManagedTypeDescriptor(ManagedTypeKind.GeneratedStruct, path)
                 : null;
 
+        if (allowInputContainers && type.UnrealType == "ArrayProperty" &&
+            type.InnerType?.UnrealType == "ByteProperty")
+            return new ManagedTypeDescriptor(ManagedTypeKind.ByteArray);
+
+        if (allowReadContainers && type.UnrealType is "ArrayProperty" or "SetProperty")
+        {
+            var inner = type.InnerType is null ? null : TryCreateType(
+                type.InnerType, type.InnerType.ElementSize, knownPaths,
+                allowInputContainers: false, allowReadContainers: true,
+                allowString: true, allowText: true);
+            if (inner is null) return null;
+            return new ManagedTypeDescriptor(
+                type.UnrealType == "ArrayProperty" ? ManagedTypeKind.Array : ManagedTypeKind.Set,
+                InnerType: inner);
+        }
+        if (allowReadContainers && type.UnrealType == "MapProperty")
+        {
+            var key = type.KeyType is null ? null : TryCreateType(
+                type.KeyType, type.KeyType.ElementSize, knownPaths,
+                allowInputContainers: false, allowReadContainers: true,
+                allowString: true, allowText: true);
+            var value = type.ValueType is null ? null : TryCreateType(
+                type.ValueType, type.ValueType.ElementSize, knownPaths,
+                allowInputContainers: false, allowReadContainers: true,
+                allowString: true, allowText: true);
+            return key is null || value is null ? null : new ManagedTypeDescriptor(
+                ManagedTypeKind.Map, KeyType: key, ValueType: value);
+        }
+
+        if (allowReadContainers)
+        {
+            var special = type.UnrealType switch
+            {
+                "InterfaceProperty" => ManagedTypeKind.InterfaceReference,
+                "LazyObjectProperty" => ManagedTypeKind.LazyObjectReference,
+                "SoftObjectProperty" => ManagedTypeKind.SoftObjectReference,
+                "SoftClassProperty" => ManagedTypeKind.SoftClassReference,
+                "DelegateProperty" => ManagedTypeKind.Delegate,
+                "MulticastDelegateProperty" or "MulticastInlineDelegateProperty" =>
+                    ManagedTypeKind.MulticastDelegate,
+                "FieldPathProperty" => ManagedTypeKind.FieldPath,
+                _ => ManagedTypeKind.Unsupported
+            };
+            if (special != ManagedTypeKind.Unsupported)
+                return new ManagedTypeDescriptor(special);
+        }
+
         var kind = type.UnrealType switch
         {
-            "StrProperty" when allowInputContainers || allowStringProperty => ManagedTypeKind.String,
-            "TextProperty" when allowInputContainers || allowStringProperty || allowTextProperty =>
+            "StrProperty" when allowInputContainers || allowReadContainers || allowString =>
+                ManagedTypeKind.String,
+            "TextProperty" when allowInputContainers || allowReadContainers || allowString || allowText =>
                 ManagedTypeKind.Text,
             "NameProperty" => ManagedTypeKind.Name,
-            "ArrayProperty" when allowInputContainers &&
-                                 type.InnerType?.UnrealType == "ByteProperty" =>
-                ManagedTypeKind.ByteArray,
             "IntProperty" => ManagedTypeKind.Int32,
             "Int8Property" => ManagedTypeKind.Int8,
             "Int16Property" => ManagedTypeKind.Int16,
@@ -353,8 +436,9 @@ internal sealed record ManagedTypeDescriptor(ManagedTypeKind Kind, string? Refer
             "FloatProperty" => ManagedTypeKind.Float,
             "DoubleProperty" => ManagedTypeKind.Double,
             "BoolProperty" => ManagedTypeKind.Boolean,
-            "ObjectProperty" or "ClassProperty" => ManagedTypeKind.ObjectReference,
-            "EnumProperty" => property.ElementSize switch
+            "ObjectProperty" or "ClassProperty" or "WeakObjectProperty" =>
+                ManagedTypeKind.ObjectReference,
+            "EnumProperty" => (type.ElementSize > 0 ? type.ElementSize : fallbackSize) switch
             {
                 1 => ManagedTypeKind.UInt8,
                 2 => ManagedTypeKind.UInt16,
@@ -387,5 +471,15 @@ internal enum ManagedTypeKind
     String,
     Text,
     Name,
-    ByteArray
+    ByteArray,
+    Array,
+    Set,
+    Map,
+    InterfaceReference,
+    LazyObjectReference,
+    SoftObjectReference,
+    SoftClassReference,
+    Delegate,
+    MulticastDelegate,
+    FieldPath
 }

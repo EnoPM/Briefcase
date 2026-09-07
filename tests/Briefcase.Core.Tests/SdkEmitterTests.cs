@@ -1,5 +1,6 @@
 using System.Reflection;
 using Briefcase.ModApi;
+using Briefcase.ModApi.Interop;
 using Briefcase.SdkEmitter;
 
 namespace Briefcase.Core.Tests;
@@ -202,7 +203,7 @@ public sealed class SdkEmitterTests
     }
 
     [Fact]
-    public void EmissionPlan_keeps_supported_returns_and_skips_writable_out_parameters()
+    public void EmissionPlan_keeps_supported_returns_and_writable_out_parameters()
     {
         const ulong outParameter = 0x100;
         const ulong returnParameter = 0x400;
@@ -232,10 +233,12 @@ public sealed class SdkEmitterTests
         var plan = SdkEmissionPlan.Create(snapshot);
         var spy = Assert.Single(plan.Types);
 
-        var function = Assert.Single(spy.Functions);
-        Assert.Equal("GetHealth", function.MemberName);
+        Assert.Equal(2, spy.Functions.Count);
+        var function = Assert.Single(spy.Functions, item => item.MemberName == "GetHealth");
         Assert.Equal(ManagedTypeKind.Int32, function.ReturnParameter?.Type.Kind);
-        Assert.Equal(1, plan.SkippedFunctionCount);
+        var output = Assert.Single(spy.Functions, item => item.MemberName == "GetLocation");
+        Assert.True(Assert.Single(output.Outputs).IsOutput);
+        Assert.Equal(0, plan.SkippedFunctionCount);
     }
 
     [Fact]
@@ -290,7 +293,7 @@ public sealed class SdkEmitterTests
     }
 
     [Fact]
-    public void EmissionPlan_describes_unsupported_containers_and_out_parameters()
+    public void EmissionPlan_emits_recursive_containers_and_out_parameters()
     {
         const ulong outParameter = 0x100;
         var snapshot = CreateSnapshot();
@@ -342,14 +345,140 @@ public sealed class SdkEmitterTests
         var plan = SdkEmissionPlan.Create(snapshot);
         var type = Assert.Single(plan.Types);
 
-        Assert.Empty(type.Properties);
-        Assert.Empty(type.Functions);
+        var property = Assert.Single(type.Properties);
+        Assert.Equal(ManagedTypeKind.Map, property.Type.Kind);
+        Assert.Equal(ManagedTypeKind.Name, property.Type.KeyType?.Kind);
+        Assert.Equal(ManagedTypeKind.Float, property.Type.ValueType?.Kind);
+        Assert.True(Assert.Single(Assert.Single(type.Functions).Outputs).IsOutput);
         Assert.Single(type.MetadataProperties);
         Assert.Single(type.MetadataFunctions);
         Assert.Equal(1, plan.DescribedPropertyCount);
         Assert.Equal(1, plan.DescribedFunctionCount);
         Assert.Equal(UnrealTypeKind.Map,
             SdkEmissionPlan.MetadataKind(type.MetadataProperties[0].Snapshot.EffectiveType));
+    }
+
+    [Fact]
+    public void Value_wire_decodes_nested_address_free_containers()
+    {
+        static byte[] Node(UnrealPropertyKind kind, byte[] payload)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write((uint)kind);
+            writer.Write((uint)payload.Length);
+            writer.Write(payload);
+            return stream.ToArray();
+        }
+
+        static byte[] IntNode(int value)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write(value);
+            return Node(UnrealPropertyKind.Int32, stream.ToArray());
+        }
+
+        using var payloadStream = new MemoryStream();
+        using (var writer = new BinaryWriter(payloadStream, System.Text.Encoding.UTF8, true))
+        {
+            writer.Write(2u);
+            writer.Write(IntNode(1337));
+            writer.Write(IntNode(900));
+        }
+        var root = Node(UnrealPropertyKind.Array, payloadStream.ToArray());
+        using var wireStream = new MemoryStream();
+        using (var writer = new BinaryWriter(wireStream, System.Text.Encoding.UTF8, true))
+        {
+            writer.Write(0x31435642u);
+            writer.Write(root);
+        }
+
+        var values = UnrealValueWire.Decode<UnrealArray<int>>(wireStream.ToArray());
+
+        Assert.Equal([1337, 900], values.ToArray());
+    }
+
+    [Fact]
+    public void Value_wire_decodes_Unreal_references_without_native_addresses()
+    {
+        static byte[] Wire(UnrealPropertyKind kind, Action<BinaryWriter> payload)
+        {
+            using var payloadStream = new MemoryStream();
+            using (var writer = new BinaryWriter(payloadStream, System.Text.Encoding.UTF8, true))
+                payload(writer);
+            using var stream = new MemoryStream();
+            using var root = new BinaryWriter(stream);
+            root.Write(0x31435642u);
+            root.Write((uint)kind);
+            root.Write((uint)payloadStream.Length);
+            root.Write(payloadStream.ToArray());
+            return stream.ToArray();
+        }
+
+        static void String(BinaryWriter writer, string value)
+        {
+            writer.Write((uint)value.Length);
+            writer.Write(System.Text.Encoding.Unicode.GetBytes(value));
+        }
+
+        var soft = UnrealValueWire.Decode<UnrealSoftObjectReference>(
+            Wire(UnrealPropertyKind.SoftObject, writer =>
+            {
+                writer.Write(42u);
+                writer.Write(7u);
+                String(writer, "/Game/Agents/Spy");
+                String(writer, "Default__Spy");
+            }));
+        var multicast = UnrealValueWire.Decode<UnrealMulticastDelegate>(
+            Wire(UnrealPropertyKind.MulticastDelegate, writer =>
+            {
+                writer.Write(1u);
+                writer.Write(42u);
+                writer.Write(7u);
+                writer.Write(11u);
+                writer.Write(2u);
+            }));
+
+        Assert.Equal((uint)42, soft.Object.Handle.Index);
+        Assert.Equal("/Game/Agents/Spy", soft.AssetPath);
+        Assert.Equal("Default__Spy", soft.SubPath);
+        var binding = Assert.Single(multicast);
+        Assert.Equal(new UnrealName(11, 2), binding.FunctionName);
+        Assert.Equal((uint)7, binding.Target.Handle.SerialNumber);
+    }
+
+    [Fact]
+    public void EmissionPlan_exposes_special_Unreal_values_as_read_only_snapshots()
+    {
+        var snapshot = CreateSnapshot();
+        snapshot.Types.Add(new TypeSnapshot
+        {
+            Path = "/Script/DeceiveInc.SpecialValues",
+            Name = "SpecialValues",
+            Kind = "Class",
+            Properties =
+            [
+                Property("Interface", "InterfaceProperty", 0, 16),
+                Property("Lazy", "LazyObjectProperty", 16, 28),
+                Property("Soft", "SoftObjectProperty", 48, 40),
+                Property("SoftClass", "SoftClassProperty", 88, 40),
+                Property("Callback", "DelegateProperty", 128, 16),
+                Property("Callbacks", "MulticastInlineDelegateProperty", 144, 16),
+                Property("Path", "FieldPathProperty", 160, 32)
+            ]
+        });
+
+        var properties = Assert.Single(SdkEmissionPlan.Create(snapshot).Types).Properties;
+
+        Assert.Collection(properties.OrderBy(property => property.Snapshot.Offset),
+            property => Assert.Equal(ManagedTypeKind.InterfaceReference, property.Type.Kind),
+            property => Assert.Equal(ManagedTypeKind.LazyObjectReference, property.Type.Kind),
+            property => Assert.Equal(ManagedTypeKind.SoftObjectReference, property.Type.Kind),
+            property => Assert.Equal(ManagedTypeKind.SoftClassReference, property.Type.Kind),
+            property => Assert.Equal(ManagedTypeKind.Delegate, property.Type.Kind),
+            property => Assert.Equal(ManagedTypeKind.MulticastDelegate, property.Type.Kind),
+            property => Assert.Equal(ManagedTypeKind.FieldPath, property.Type.Kind));
     }
 
     [Fact]

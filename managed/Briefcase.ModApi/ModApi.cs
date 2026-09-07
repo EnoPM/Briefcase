@@ -194,7 +194,16 @@ public readonly record struct UnrealClass<T>(string Path)
     where T : UnrealObject, IUnrealObject<T>;
 public readonly record struct UnrealProperty<T>(string OwnerPath, string Name, int Offset, int Size);
 public readonly record struct UnrealParameter(
-    string Name, Type ManagedType, int Offset, int Size, bool IsOut = false);
+    string Name, Type ManagedType, int Offset, int Size, bool IsOut = false)
+{
+    /// <summary>
+    /// True for a writable Unreal reference parameter. A reference parameter
+    /// contributes an input value and receives its final value after
+    /// ProcessEvent returns. A pure <c>out</c> parameter has
+    /// <see cref="IsOut"/> set and <see cref="IsReference"/> unset.
+    /// </summary>
+    public bool IsReference { get; init; }
+}
 public sealed record UnrealFunction(
     string OwnerPath,
     string Name,
@@ -222,6 +231,87 @@ public interface IUnrealStructValue
     void WriteTo(Span<byte> destination);
 }
 
-// TArray access will receive a dedicated bounded ABI. This placeholder carries
-// no game address and cannot be used to dereference memory from managed code.
-public readonly record struct UnrealArray(uint Reserved);
+/// <summary>
+/// An address-free snapshot of a native <c>TArray&lt;T&gt;</c>. The runtime copies
+/// every element while the containing UObject is validated; no Unreal pointer
+/// is retained by managed code.
+/// </summary>
+public sealed class UnrealArray<T> : IReadOnlyList<T>
+{
+    private readonly T[] _items;
+    internal UnrealArray(T[] items) => _items = items;
+    public int Count => _items.Length;
+    public T this[int index] => _items[index];
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _items.GetEnumerator();
+    public T[] ToArray() => (T[])_items.Clone();
+}
+
+public readonly record struct UnrealInterfaceReference(UnrealObjectReference Object);
+public readonly record struct UnrealGuid(uint A, uint B, uint C, uint D);
+public readonly record struct UnrealLazyObjectReference(
+    UnrealObjectReference Object, UnrealGuid Id);
+public sealed record UnrealSoftObjectReference(
+    UnrealObjectReference Object, string AssetPath, string SubPath);
+public sealed record UnrealSoftClassReference(
+    UnrealObjectReference Object, string AssetPath, string SubPath);
+public readonly record struct UnrealDelegate(
+    UnrealObjectReference Target, UnrealName FunctionName);
+
+public sealed class UnrealMulticastDelegate : IReadOnlyList<UnrealDelegate>
+{
+    private readonly UnrealDelegate[] _bindings;
+    internal UnrealMulticastDelegate(UnrealDelegate[] bindings) => _bindings = bindings;
+    public int Count => _bindings.Length;
+    public UnrealDelegate this[int index] => _bindings[index];
+    public IEnumerator<UnrealDelegate> GetEnumerator() =>
+        ((IEnumerable<UnrealDelegate>)_bindings).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _bindings.GetEnumerator();
+}
+
+public sealed class UnrealFieldPath : IReadOnlyList<UnrealName>
+{
+    private readonly UnrealName[] _segments;
+    internal UnrealFieldPath(UnrealName[] segments) => _segments = segments;
+    public int Count => _segments.Length;
+    public UnrealName this[int index] => _segments[index];
+    public IEnumerator<UnrealName> GetEnumerator() =>
+        ((IEnumerable<UnrealName>)_segments).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _segments.GetEnumerator();
+}
+
+/// <summary>An address-free snapshot of a native <c>TSet&lt;T&gt;</c>.</summary>
+public sealed class UnrealSet<T> : IReadOnlyCollection<T>
+{
+    private readonly T[] _items;
+    internal UnrealSet(T[] items) => _items = items;
+    public int Count => _items.Length;
+    public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _items.GetEnumerator();
+    public T[] ToArray() => (T[])_items.Clone();
+}
+
+public readonly record struct UnrealMapEntry<TKey, TValue>(TKey Key, TValue Value);
+
+/// <summary>
+/// An address-free snapshot of a native <c>TMap&lt;TKey,TValue&gt;</c>. A list of
+/// entries is used rather than Dictionary so malformed or custom Unreal key
+/// equality cannot silently discard data while crossing the ABI.
+/// </summary>
+public sealed class UnrealMap<TKey, TValue> : IReadOnlyList<UnrealMapEntry<TKey, TValue>>
+{
+    private readonly UnrealMapEntry<TKey, TValue>[] _entries;
+    internal UnrealMap(UnrealMapEntry<TKey, TValue>[] entries) => _entries = entries;
+    public int Count => _entries.Length;
+    public UnrealMapEntry<TKey, TValue> this[int index] => _entries[index];
+    public IEnumerator<UnrealMapEntry<TKey, TValue>> GetEnumerator() =>
+        ((IEnumerable<UnrealMapEntry<TKey, TValue>>)_entries).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _entries.GetEnumerator();
+    public UnrealMapEntry<TKey, TValue>[] ToArray() =>
+        (UnrealMapEntry<TKey, TValue>[])_entries.Clone();
+}
