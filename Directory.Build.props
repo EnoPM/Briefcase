@@ -1,5 +1,17 @@
 <Project>
   <PropertyGroup>
+    <!-- VERSION is the single source for every managed and native Briefcase build. -->
+    <BriefcaseVersionFile>$(MSBuildThisFileDirectory)VERSION</BriefcaseVersionFile>
+    <BriefcaseVersion>$([System.IO.File]::ReadAllText('$(BriefcaseVersionFile)').Trim())</BriefcaseVersion>
+    <BriefcaseVersionIsValid>$([System.Text.RegularExpressions.Regex]::IsMatch('$(BriefcaseVersion)', '^\d+\.\d+\.\d+$'))</BriefcaseVersionIsValid>
+    <BriefcaseVersionMajor>$([System.Text.RegularExpressions.Regex]::Replace('$(BriefcaseVersion)', '^([0-9]+)\..*$', '$1'))</BriefcaseVersionMajor>
+    <BriefcaseVersionMinor>$([System.Text.RegularExpressions.Regex]::Replace('$(BriefcaseVersion)', '^[0-9]+\.([0-9]+)\..*$', '$1'))</BriefcaseVersionMinor>
+    <BriefcaseVersionBuild>$([System.Text.RegularExpressions.Regex]::Replace('$(BriefcaseVersion)', '^.*\.([0-9]+)$', '$1'))</BriefcaseVersionBuild>
+    <Version>$(BriefcaseVersion)</Version>
+    <PackageVersion>$(BriefcaseVersion)</PackageVersion>
+    <InformationalVersion>$(BriefcaseVersion)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
     <BriefcaseInstalledClientSdkProps>D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase\Core\Sdk\Generated\Client\Current.props</BriefcaseInstalledClientSdkProps>
     <BriefcaseRepositoryClientSdkProps>$(MSBuildThisFileDirectory)artifacts\build-sdk\Core\Sdk\Generated\Client\Current.props</BriefcaseRepositoryClientSdkProps>
     <BriefcaseGeneratedClientProps Condition="'$(BriefcaseGeneratedClientProps)' == '' And Exists('$(BriefcaseInstalledClientSdkProps)')">$(BriefcaseInstalledClientSdkProps)</BriefcaseGeneratedClientProps>

@@ -11,6 +11,7 @@ DeceiveInc/Binaries/Win64/
 |-- version.dll
 `-- Briefcase/
     |-- loader.json
+    |-- VERSION
     |-- settings.json
     |-- Briefcase.log
     |-- Core/
@@ -65,8 +66,14 @@ Create the two end-user archives locally with:
 The command writes `Briefcase-Client-v<VERSION>.zip` and
 `Briefcase-Server-v<VERSION>.zip` to `artifacts/release`. Both archives are
 rooted for direct extraction into the corresponding `Binaries/Win64` directory.
-Pushing the matching `v<VERSION>` tag runs the same packaging checks and creates
-or updates the GitHub release with exactly those two archives.
+`VERSION` is the single source used by managed assemblies, the native runtime,
+installed packages, tags, and archive names.
+
+To publish, run the **Create Version** workflow from the Actions page. Enter the
+number of an open pull request targeting `main`, then choose `build`, `minor`, or
+`major`. The workflow updates `VERSION` on the pull request, waits for required
+checks, merges it through GitHub, creates the matching tag, and publishes both
+archives. The lower-level **Release** workflow can rebuild an existing tag.
 
 To install the built package with the game closed:
 

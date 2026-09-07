@@ -145,6 +145,9 @@ try {
     $modsDistribution=Join-Path $frameworkDistribution 'Mods'
     New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$builtInsDistribution,$modsDistribution -Force | Out-Null
 
+    Copy-Item -LiteralPath (Join-Path $root 'VERSION') `
+        -Destination (Join-Path $frameworkDistribution 'VERSION') -Force
+
     Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
         -Destination (Join-Path $distribution 'version.dll') -Force
     Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `

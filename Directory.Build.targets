@@ -1,4 +1,10 @@
 <Project>
+  <Target Name="ValidateBriefcaseVersion"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(BriefcaseVersionIsValid)' != 'True'">
+    <Error Text="VERSION must contain exactly three numeric components, for example 1.2.3." />
+  </Target>
+
   <Target Name="RequireBriefcaseGeneratedClientSdk"
           BeforeTargets="ResolveReferences"
           Condition="'$(BriefcaseRequiresGeneratedClientSdk)' == 'true' And !Exists('$(BriefcaseGeneratedClientProps)')">

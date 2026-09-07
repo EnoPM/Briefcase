@@ -89,7 +89,7 @@ function New-ReleaseArchive(
 try {
     $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
     $version = [IO.File]::ReadAllText((Join-Path $root 'VERSION')).Trim()
-    if ($version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
         throw "VERSION is not a valid release version: $version"
     }
 
@@ -181,10 +181,15 @@ Briefcase\Mods.
     foreach ($stage in @($clientStage, $serverStage)) {
         Assert-File $stage 'version.dll'
         Assert-File $stage 'Briefcase\loader.json'
+        Assert-File $stage 'Briefcase\VERSION'
         Assert-File $stage 'Briefcase\Core\Briefcase.ManagedHost.dll'
         Assert-File $stage 'Briefcase\Core\Briefcase.ModApi.dll'
         Assert-File $stage 'Briefcase\Core\Native\Briefcase.UnrealRuntime.dll'
         Assert-EmptyModsDirectory $stage
+        $packagedVersion = [IO.File]::ReadAllText((Join-Path $stage 'Briefcase\VERSION')).Trim()
+        if ($packagedVersion -ne $version) {
+            throw "Packaged VERSION '$packagedVersion' does not match '$version'."
+        }
     }
     Assert-File $serverStage 'StartBriefcaseServer.bat'
 
@@ -199,12 +204,14 @@ Briefcase\Mods.
     New-ReleaseArchive $clientStage $clientArchive @(
         'version.dll',
         'Briefcase/loader.json',
+        'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'README-Briefcase.txt')
     New-ReleaseArchive $serverStage $serverArchive @(
         'version.dll',
         'Briefcase/loader.json',
+        'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'StartBriefcaseServer.bat',

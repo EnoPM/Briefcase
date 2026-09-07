@@ -115,6 +115,8 @@ try {
     $mods=Join-Path $framework 'Mods'
     $dotnetDistribution=Join-Path $core 'DotNet'
     New-Item -ItemType Directory -Path $core,$native,$builtIns,$mods -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'VERSION') `
+        -Destination (Join-Path $framework 'VERSION') -Force
     Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
         -Destination (Join-Path $distribution 'version.dll')
     Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `

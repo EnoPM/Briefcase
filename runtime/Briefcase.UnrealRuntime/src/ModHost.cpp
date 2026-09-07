@@ -18,7 +18,19 @@
 #include <vector>
 
 namespace {
-constexpr BriefcaseVersion FrameworkVersion{0, 8, 0, 0};
+#if !defined(BRIEFCASE_VERSION_MAJOR) || !defined(BRIEFCASE_VERSION_MINOR) || \
+    !defined(BRIEFCASE_VERSION_BUILD)
+#error The Briefcase version must be supplied by Directory.Build.props.
+#endif
+
+// These macros are derived from the repository's plain-text VERSION file by
+// MSBuild. The native ABI and managed assemblies therefore report the same
+// framework version that is used for tags and release archive names.
+constexpr BriefcaseVersion FrameworkVersion{
+    BRIEFCASE_VERSION_MAJOR,
+    BRIEFCASE_VERSION_MINOR,
+    BRIEFCASE_VERSION_BUILD,
+    0};
 std::vector<HMODULE> LoadedMods;
 std::vector<HMODULE> ResidentModules;
 
