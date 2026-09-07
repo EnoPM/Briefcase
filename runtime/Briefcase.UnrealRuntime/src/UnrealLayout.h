@@ -140,12 +140,15 @@ static_assert(offsetof(FMapProperty, KeyProperty) == 0x78);
 static_assert(offsetof(FMapProperty, ValueProperty) == 0x80);
 
 struct FEnumProperty : FProperty {
+    // UE 4.27 stores the numeric property first, followed by its UEnum.
+    // Keep this order explicit: swapping both valid-looking pointers can make
+    // the metadata writer treat an FProperty as a UObject.
     std::byte Padding60[0x18];
-    UObject* Enum;
     FProperty* UnderlyingProperty;
+    UObject* Enum;
 };
-static_assert(offsetof(FEnumProperty, Enum) == 0x78);
-static_assert(offsetof(FEnumProperty, UnderlyingProperty) == 0x80);
+static_assert(offsetof(FEnumProperty, UnderlyingProperty) == 0x78);
+static_assert(offsetof(FEnumProperty, Enum) == 0x80);
 
 struct FByteProperty : FProperty {
     std::byte Padding60[0x18];

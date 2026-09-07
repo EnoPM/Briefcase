@@ -107,24 +107,44 @@ std::wstring hexadecimal(std::uintptr_t value) {
     return stream.str();
 }
 
+bool tryConvertName(const FName* name, FStringBuffer* result,
+                    FNameToString convert) noexcept {
+    if (!name || !result || !convert) return false;
+    __try {
+        convert(name, result);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 std::wstring nameToString(const FName& name, FNameToString convert) {
     // Supplying our own capacity avoids an engine allocation for normal names.
     // The function receives the normal Unreal FString layout: Data/Num/Max.
     std::array<wchar_t, 1024> storage{};
     FStringBuffer result{storage.data(), 0, static_cast<std::int32_t>(storage.size())};
-    convert(&name, &result);
+    // Runtime layouts are discovered from native memory. A bad or newly
+    // unsupported layout must make metadata incomplete, never crash the game.
+    if (!tryConvertName(&name, &result, convert)) return {};
     if (!result.Data || result.Num < 0 || result.Num > result.Max || result.Num > 1023) return L"<invalid-name>";
     if (!readable(result.Data, (static_cast<std::size_t>(result.Num) + 1) * sizeof(wchar_t))) return L"<unreadable-name>";
     const auto length = result.Num > 0 && result.Data[result.Num - 1] == L'\0' ? result.Num - 1 : result.Num;
     return std::wstring(result.Data, result.Data + length);
 }
 
+bool isRegisteredObject(const UObject* object);
+
 std::wstring objectPath(const UObject* object, FNameToString convert) {
     std::array<std::wstring, 32> parts{};
     std::size_t count = 0;
     for (auto* current = object; current && count < parts.size(); current = current->OuterPrivate) {
-        if (!readable(current, sizeof(UObject))) return L"<invalid-object-path>";
-        parts[count++] = nameToString(current->NamePrivate, convert);
+        // Readability alone is insufficient: an FProperty can reside in a
+        // committed page too. Only UObject instances present in GUObjectArray
+        // are allowed to participate in an object path.
+        if (!isRegisteredObject(current)) return {};
+        auto part = nameToString(current->NamePrivate, convert);
+        if (part.empty() || part.front() == L'<') return {};
+        parts[count++] = std::move(part);
     }
     std::wstring path;
     while (count) {
@@ -163,6 +183,14 @@ FUObjectItem* itemAt(const FChunkedFixedUObjectArray& array, std::int32_t index)
     auto* chunk = array.Objects[chunkIndex];
     if (!chunk || !readable(chunk + withinChunk, sizeof(FUObjectItem))) return nullptr;
     return chunk + withinChunk;
+}
+
+bool isRegisteredObject(const UObject* object) {
+    if (!RuntimeObjects || !readable(object, sizeof(UObject)) ||
+        object->InternalIndex < 0)
+        return false;
+    const auto* item = itemAt(RuntimeObjects->ObjObjects, object->InternalIndex);
+    return item && item->Object == object;
 }
 
 bool saneObjectArray(const FUObjectArray* objects) {
@@ -1470,7 +1498,7 @@ std::wstring propertyTypeName(const FProperty* property) {
 }
 
 void writeTypeReference(std::ostream& output, const UObject* object) {
-    if (!object || !readable(object, sizeof(UObject))) return;
+    if (!isRegisteredObject(object)) return;
     const auto path = objectPath(object, RuntimeNameConverter);
     if (path.empty()) return;
     output << ",\"referencedTypePath\":";
