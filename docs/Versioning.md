@@ -21,3 +21,22 @@ A framework major release may remove or change public contracts.
 Generated SDK assemblies are build artifacts. Their game-build identity and
 metadata schema version are authoritative; they do not receive an independent
 manually maintained Semantic Versioning number.
+
+## Publishing a release
+
+1. Update `VERSION` and commit the complete release revision.
+2. Build and inspect both archives locally with
+   `./scripts/release/PrepareRelease.ps1 -Configuration Release`.
+3. Create and push the exact matching tag, for example `v0.8.0` when `VERSION`
+   contains `0.8.0`.
+
+The `Release` GitHub Actions workflow checks out that tag, verifies the version,
+rebuilds both targets, and publishes these assets:
+
+- `Briefcase-Client-v<VERSION>.zip`
+- `Briefcase-Server-v<VERSION>.zip`
+
+Each ZIP is ready to extract directly into the matching
+`DeceiveInc/Binaries/Win64` directory. Release packaging strips PDB files,
+rejects bundled user mods, and verifies that the server archive contains no
+client rendering libraries.

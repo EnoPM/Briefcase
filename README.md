@@ -56,6 +56,18 @@ not modify the game installation. Framework packages intentionally contain an
 empty `Briefcase/Mods` directory; user mods have their own build and release
 lifecycles.
 
+Create the two end-user archives locally with:
+
+```powershell
+./scripts/release/PrepareRelease.ps1 -Configuration Release
+```
+
+The command writes `Briefcase-Client-v<VERSION>.zip` and
+`Briefcase-Server-v<VERSION>.zip` to `artifacts/release`. Both archives are
+rooted for direct extraction into the corresponding `Binaries/Win64` directory.
+Pushing the matching `v<VERSION>` tag runs the same packaging checks and creates
+or updates the GitHub release with exactly those two archives.
+
 To install the built package with the game closed:
 
 ```bat

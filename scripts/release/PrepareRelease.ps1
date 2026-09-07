@@ -1,0 +1,228 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Debug', 'Release')]
+    [string]$Configuration = 'Release',
+
+    [string]$OutputDirectory = 'artifacts\release',
+
+    [switch]$SkipBuild
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Remove-SafeDirectory([string]$Path, [string]$AllowedRoot) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $prefix = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\') + '\'
+    if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe cleanup path: $resolved"
+    }
+
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+}
+
+function Copy-DirectoryContents([string]$Source, [string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
+        throw "Package directory is missing: $Source"
+    }
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $Source -Force) {
+        Copy-Item -LiteralPath $item.FullName `
+            -Destination (Join-Path $Destination $item.Name) -Recurse -Force
+    }
+}
+
+function Assert-File([string]$Root, [string]$RelativePath) {
+    $path = Join-Path $Root $RelativePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Required release file is missing: $RelativePath"
+    }
+}
+
+function Assert-EmptyModsDirectory([string]$PackageRoot) {
+    $mods = Join-Path $PackageRoot 'Briefcase\Mods'
+    if (-not (Test-Path -LiteralPath $mods -PathType Container)) {
+        throw "Required empty mod directory is missing: $mods"
+    }
+
+    if (@(Get-ChildItem -LiteralPath $mods -Force).Count -ne 0) {
+        throw "A framework release must not contain user mods: $mods"
+    }
+}
+
+function New-ReleaseArchive(
+    [string]$Source,
+    [string]$Destination,
+    [string[]]$RequiredEntries) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory(
+        $Source,
+        $Destination,
+        [IO.Compression.CompressionLevel]::Optimal,
+        $false)
+
+    $archive = [IO.Compression.ZipFile]::OpenRead($Destination)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+        foreach ($required in $RequiredEntries) {
+            if ($entries -notcontains $required) {
+                throw "Archive entry is missing from $Destination`: $required"
+            }
+        }
+
+        if (@($entries | Where-Object { $_ -match '(^|/)Briefcase-(Client|Server)-v[^/]+/' }).Count -ne 0) {
+            throw "The archive contains an unwanted wrapper directory: $Destination"
+        }
+
+        if (@($entries | Where-Object { $_ -like '*.pdb' }).Count -ne 0) {
+            throw "The archive contains debug symbols: $Destination"
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+try {
+    $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+    $version = [IO.File]::ReadAllText((Join-Path $root 'VERSION')).Trim()
+    if ($version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+        throw "VERSION is not a valid release version: $version"
+    }
+
+    if (-not $SkipBuild) {
+        foreach ($buildScript in @(
+            'scripts\build\BuildFramework.ps1',
+            'scripts\build\BuildServerFramework.ps1')) {
+            $scriptPath = Join-Path $root $buildScript
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+                -File $scriptPath -Configuration $Configuration
+            if ($LASTEXITCODE -ne 0) {
+                throw "Build failed with exit code $LASTEXITCODE`: $buildScript"
+            }
+        }
+    }
+
+    $artifactRoot = Join-Path $root 'artifacts'
+    $outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
+        [IO.Path]::GetFullPath($OutputDirectory)
+    }
+    else {
+        [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
+    }
+    $artifactPrefix = [IO.Path]::GetFullPath($artifactRoot).TrimEnd('\') + '\'
+    if (-not $outputRoot.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Release output must stay below the artifacts directory: $outputRoot"
+    }
+
+    $stagingRoot = Join-Path $artifactRoot 'release-staging'
+    Remove-SafeDirectory $outputRoot $artifactRoot
+    Remove-SafeDirectory $stagingRoot $artifactRoot
+    New-Item -ItemType Directory -Path $outputRoot, $stagingRoot -Force | Out-Null
+
+    $clientStage = Join-Path $stagingRoot 'Client'
+    $serverStage = Join-Path $stagingRoot 'Server'
+    Copy-DirectoryContents (Join-Path $root 'dist\Briefcase') $clientStage
+    Copy-DirectoryContents (Join-Path $root 'dist\Briefcase.Server') $serverStage
+
+    # The build package contains launchers for both deployment locations. A
+    # release is extracted directly in Win64, so it exposes only that launcher
+    # under the short, obvious name below.
+    foreach ($launcher in @('StartBriefcaseServer.bat', 'StartBriefcaseServerNoUI.bat')) {
+        $packagedLauncher = Join-Path $serverStage $launcher
+        if (Test-Path -LiteralPath $packagedLauncher) {
+            Remove-Item -LiteralPath $packagedLauncher -Force
+        }
+    }
+    Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServerNoUI.bat') `
+        -Destination (Join-Path $serverStage 'StartBriefcaseServer.bat') -Force
+
+    Get-ChildItem -LiteralPath $clientStage, $serverStage -Filter '*.pdb' -File -Recurse |
+        Remove-Item -Force
+
+    $clientReadme = @"
+Briefcase Client $version
+
+Installation
+1. Close Deceive Inc.
+2. Extract this archive directly into DeceiveInc\Binaries\Win64.
+3. Start the game normally.
+
+The archive contains the version.dll proxy and the complete Briefcase runtime,
+including its private .NET runtime. Open the configuration menu with F1.
+Place user mod DLLs in Briefcase\Mods.
+"@
+    [IO.File]::WriteAllText(
+        (Join-Path $clientStage 'README-Briefcase.txt'),
+        $clientReadme,
+        [Text.UTF8Encoding]::new($false))
+
+    $serverReadme = @"
+Briefcase Server $version
+
+Installation
+1. Stop the Deceive Inc. dedicated server.
+2. Extract this archive directly into
+   DeceiveInc\Binaries\Win64 in the dedicated-server installation.
+3. Run StartBriefcaseServer.bat from that Win64 directory.
+
+The launcher starts DeceiveIncServer-Win64-Shipping.exe in the current terminal
+without the graphical configuration launcher. Place server mod DLLs in
+Briefcase\Mods.
+"@
+    [IO.File]::WriteAllText(
+        (Join-Path $serverStage 'README-Briefcase.txt'),
+        $serverReadme,
+        [Text.UTF8Encoding]::new($false))
+
+    foreach ($stage in @($clientStage, $serverStage)) {
+        Assert-File $stage 'version.dll'
+        Assert-File $stage 'Briefcase\loader.json'
+        Assert-File $stage 'Briefcase\Core\Briefcase.ManagedHost.dll'
+        Assert-File $stage 'Briefcase\Core\Briefcase.ModApi.dll'
+        Assert-File $stage 'Briefcase\Core\Native\Briefcase.UnrealRuntime.dll'
+        Assert-EmptyModsDirectory $stage
+    }
+    Assert-File $serverStage 'StartBriefcaseServer.bat'
+
+    $forbiddenServerFiles = @(Get-ChildItem -LiteralPath $serverStage -File -Recurse |
+        Where-Object { $_.Name -match '^(ImGui|cimgui|Briefcase\.Rendering|Vortice\.|SharpGen\.)' })
+    if ($forbiddenServerFiles.Count -ne 0) {
+        throw "The server archive contains rendering files: $($forbiddenServerFiles.Name -join ', ')"
+    }
+
+    $clientArchive = Join-Path $outputRoot "Briefcase-Client-v$version.zip"
+    $serverArchive = Join-Path $outputRoot "Briefcase-Server-v$version.zip"
+    New-ReleaseArchive $clientStage $clientArchive @(
+        'version.dll',
+        'Briefcase/loader.json',
+        'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
+        'README-Briefcase.txt')
+    New-ReleaseArchive $serverStage $serverArchive @(
+        'version.dll',
+        'Briefcase/loader.json',
+        'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
+        'StartBriefcaseServer.bat',
+        'README-Briefcase.txt')
+
+    $archives = @(Get-ChildItem -LiteralPath $outputRoot -Filter '*.zip' -File)
+    if ($archives.Count -ne 2) {
+        throw "Expected exactly two release archives, found $($archives.Count)."
+    }
+
+    Remove-SafeDirectory $stagingRoot $artifactRoot
+    foreach ($archive in $archives | Sort-Object Name) {
+        Write-Host "[OK] $($archive.Name) ($([Math]::Round($archive.Length / 1MB, 2)) MiB)"
+    }
+    exit 0
+}
+catch {
+    Write-Host "[ERROR] $($_.Exception.Message)"
+    Write-Host $_.ScriptStackTrace
+    exit 1
+}

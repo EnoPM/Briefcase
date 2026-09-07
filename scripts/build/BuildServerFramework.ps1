@@ -45,9 +45,41 @@ try {
 
     $build='6A966107-05B60000'
     $serverWin64='D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64'
-    $snapshotSource=Join-Path $serverWin64 "Briefcase\Core\Sdk\Metadata\DeceiveInc.Server.$build.json"
-    if(-not (Test-Path -LiteralPath $snapshotSource)) {
-        throw "The generated server snapshot is missing: $snapshotSource"
+    # CI and clean developer machines use the reviewed, address-free snapshot
+    # archive committed for this exact executable build. Keeping this large
+    # JSON as a ZIP saves repository space and makes Git treat it as binary.
+    $snapshotFileName="DeceiveInc.Server.$build.json"
+    $snapshotArchive=Join-Path $root "sdk\snapshots\$snapshotFileName.zip"
+    $installedSnapshot=Join-Path $serverWin64 "Briefcase\Core\Sdk\Metadata\$snapshotFileName"
+    $snapshotContents=$null
+    if(Test-Path -LiteralPath $snapshotArchive) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive=[IO.Compression.ZipFile]::OpenRead($snapshotArchive)
+        try {
+            $entries=@($archive.Entries)
+            if($entries.Count -ne 1 -or $entries[0].FullName -ne $snapshotFileName) {
+                throw "Server snapshot archive must contain only $snapshotFileName."
+            }
+            if($entries[0].Length -gt 32MB) {
+                throw "Server snapshot archive exceeds the 32 MiB safety limit."
+            }
+            $reader=[IO.StreamReader]::new(
+                $entries[0].Open(),
+                [Text.UTF8Encoding]::new($false),
+                $true)
+            try { $snapshotContents=$reader.ReadToEnd() }
+            finally { $reader.Dispose() }
+        }
+        finally { $archive.Dispose() }
+        Write-Host "Using repository server snapshot: $snapshotArchive"
+    }
+    elseif(Test-Path -LiteralPath $installedSnapshot) {
+        # A live installed-server snapshot remains a local development fallback.
+        $snapshotContents=[IO.File]::ReadAllText($installedSnapshot)
+        Write-Host "Using installed server snapshot: $installedSnapshot"
+    }
+    else {
+        throw "No server SDK snapshot is available for build $build."
     }
 
     $serverBuildCore=Join-Path $artifactRoot 'server-sdk\Core'
@@ -56,7 +88,7 @@ try {
     New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($snapshot)) -Force | Out-Null
     [IO.File]::WriteAllText(
         $snapshot,
-        [IO.File]::ReadAllText($snapshotSource),
+        $snapshotContents,
         [Text.UTF8Encoding]::new($false))
     $sdkEmitter=Join-Path $publishCore 'Briefcase.SdkEmitter.dll'
     $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
