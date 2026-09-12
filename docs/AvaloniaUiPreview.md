@@ -4,6 +4,21 @@ Avalonia 12 is Briefcase's only client UI and overlay renderer. The framework
 does not ship Dear ImGui, cimgui, DirectComposition, Vortice, or a second UI
 backend.
 
+The menu uses a dark, slightly transparent palette with a warm violet accent
+and the Inter typeface. Its layout has three stable levels:
+
+- **Client** opens the local framework home page and lists every installed mod,
+  including mods that only expose automatic configuration.
+- **Server** opens the remote administration home page and its registered
+  server tools.
+- **Mods** manages installation state, loading and dependencies for client
+  mods.
+
+The fixed-width navigation keeps Client and Server visible at all times. Pages
+use bordered cards with a violet strip, readable labels and descriptions on the
+left, and aligned editors on the right. Advanced groups can use expanders, and
+information-rich home cards automatically switch between one and two columns.
+
 The client package separates two responsibilities:
 
 - `Core/Ui/Avalonia/Briefcase.AvaloniaUi.dll` owns the transparent game overlay,
@@ -39,8 +54,15 @@ a fresh tree before every opening animation and dispose it after every closing
 animation.
 
 The full-client backdrop dims the game and consumes pointer input while the menu
-is open. When only mod overlay primitives are visible, the Avalonia window is
-click-through. F1 opens and closes the menu; Escape and **Close** hide it.
+is open. Opening uses a short fade, scale and vertical motion; closing reverses
+the same motion before the menu can be released. When only mod overlay
+primitives are visible, the Avalonia window is click-through. F1 opens and
+closes the menu; Escape and **Close** hide it.
+
+Automatic configuration pages use per-page session drafts. They remain pending
+when the user visits another page or closes F1, but are discarded when the mod
+unloads or the game exits. The bottom action bar applies or cancels only the
+current page, and an application error is displayed directly in that bar.
 
 Client mods describe configuration through `Briefcase.ClientModApi`. Primitive
 real-time drawings use `RenderFrame.Overlay`, which batches toolkit-neutral

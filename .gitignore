@@ -10,3 +10,4 @@ docs/obj/
 *.user
 *.DotSettings.user
 third_party/*.zip
+**/TestResults/

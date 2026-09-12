@@ -251,6 +251,7 @@ Briefcase\Mods.
     Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaMenu.dll'
     Assert-File $clientStage 'Briefcase\Core\ThirdPartyLibraries\Avalonia.Base.dll'
     Assert-File $clientStage 'Briefcase\Core\ThirdPartyLibraries\libSkiaSharp.dll'
+    Assert-File $clientStage 'Briefcase\Core\ThirdPartyLibraries\Inter.OFL.txt'
     Assert-File $serverStage 'StartBriefcaseServer.bat'
     Assert-BinaryServerSnapshot $serverStage
 
@@ -274,6 +275,7 @@ Briefcase\Mods.
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaMenu.dll',
         'Briefcase/Core/ThirdPartyLibraries/Avalonia.Base.dll',
         'Briefcase/Core/ThirdPartyLibraries/libSkiaSharp.dll',
+        'Briefcase/Core/ThirdPartyLibraries/Inter.OFL.txt',
         'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'LICENSE',

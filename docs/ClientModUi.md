@@ -183,6 +183,18 @@ a mod without referencing Avalonia. Custom class names are accepted as a future
 extension point, but only the classes documented by Briefcase receive built-in
 styling.
 
+Controls can provide a short plain-language explanation. Briefcase places it
+below the label and keeps the editor aligned on the right:
+
+```csharp
+Ui.Number("Scan radius", () => radius, value => radius = value, 1, 100, 1)
+    .WithDescription("Maximum distance, in metres, used to find nearby targets.");
+```
+
+Descriptions should explain the effect of a setting rather than repeat its
+name. This keeps generated pages useful to players who do not know the mod's
+implementation details.
+
 ## Components
 
 - `Ui.Column` and `Ui.Row` arrange child components.
@@ -191,7 +203,7 @@ styling.
 - `Ui.Expander` creates a collapsible group.
 - `Ui.Status` displays a semantic neutral, information, success, warning, or error state.
 - `Ui.Text` displays live or static text.
-- `Ui.Icon` displays a scalable semantic vector icon in Avalonia.
+- `Ui.Icon` displays a scalable filled vector icon in Avalonia.
 - `Ui.Button` invokes an action or command and can include an icon.
 - `Ui.Toggle` binds a Boolean value.
 - `Ui.TextField` binds text, with optional password masking and commit mode.
@@ -199,6 +211,17 @@ styling.
 - `Ui.Choice` binds one value from a list of choices.
 - `Ui.Dynamic` rebuilds a subtree when its revision changes.
 - `Ui.Separator` and `Ui.Spacer` control visual grouping.
+
+Briefcase groups automatic configuration by section in responsive cards. A
+page uses two columns when space permits and one column in a narrower game
+window. Changes stay in a session draft while the player moves between pages
+or closes the menu. **Apply changes** writes only the current page; **Cancel**
+restores that page's last applied values. A violet dot beside the mod name
+marks a pending draft.
+
+Custom panels keep the commit behavior defined by their components. Use
+`UiCommitMode.OnCommit` when an expensive value should wait for Enter or focus
+loss, or expose explicit Apply and Cancel commands for a complex workflow.
 
 Most components accept visibility, enabled-state, or tooltip delegates. Keep
 these delegates fast because the active panel evaluates them during UI refresh.

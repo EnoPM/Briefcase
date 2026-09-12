@@ -211,7 +211,11 @@ internal sealed partial class ConfigurationRegistry : IDisposable
                 ReferenceEquals(scope, registered))
                 removed = _scopes.Remove(scope.Info.Id);
         }
-        if (removed) NotifyUiChanged();
+        if (removed)
+        {
+            RemoveConfigurationDraft(scope.Info.Id);
+            NotifyUiChanged();
+        }
     }
 
     private void ScheduleSave() =>

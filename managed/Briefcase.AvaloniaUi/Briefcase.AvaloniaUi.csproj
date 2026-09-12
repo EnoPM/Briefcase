@@ -18,4 +18,8 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
     <PackageReference Include="Avalonia.Win32" Version="12.1.2" />
   </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\third_party\inter\Inter-Variable.ttf"
+                      Link="Fonts\Inter-Variable.ttf" />
+  </ItemGroup>
 </Project>

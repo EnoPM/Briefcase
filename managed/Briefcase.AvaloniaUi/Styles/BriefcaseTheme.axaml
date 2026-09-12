@@ -1,23 +1,53 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Button">
+    <Setter Property="Background" Value="#6619141F" />
+    <Setter Property="BorderBrush" Value="#72493455" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Foreground" Value="#F6F1F8" />
+    <Setter Property="Padding" Value="14,7" />
+    <Setter Property="MinHeight" Value="34" />
+  </Style>
+
+  <Style Selector="Button:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#B32E2037" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
+  </Style>
+
   <Style Selector="Button.briefcase-primary">
-    <Setter Property="Background" Value="#258A74" />
-    <Setter Property="Foreground" Value="#F6FFFC" />
+    <Setter Property="Background" Value="#A45BE0" />
+    <Setter Property="BorderBrush" Value="#B96CF0" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
   <Style Selector="Button.briefcase-primary:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#30A98F" />
+    <Setter Property="Background" Value="#B96CF0" />
+    <Setter Property="BorderBrush" Value="#C890F6" />
+  </Style>
+
+  <Style Selector="Button.briefcase-secondary">
+    <Setter Property="Background" Value="#5219141F" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
+    <Setter Property="Foreground" Value="#F6F1F8" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.briefcase-secondary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#A45BE0" />
+    <Setter Property="BorderBrush" Value="#B96CF0" />
   </Style>
 
   <Style Selector="Button.briefcase-danger">
-    <Setter Property="Background" Value="#A93643" />
+    <Setter Property="Background" Value="#7A321C2A" />
+    <Setter Property="BorderBrush" Value="#FF647C" />
     <Setter Property="Foreground" Value="#FFF7F8" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
   <Style Selector="Button.briefcase-danger:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#C74452" />
+    <Setter Property="Background" Value="#C9445864" />
   </Style>
 
   <Style Selector="Button.briefcase-compact">
@@ -25,40 +55,114 @@
     <Setter Property="MinHeight" Value="28" />
   </Style>
 
+  <Style Selector="Button.briefcase-navigation">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="MinHeight" Value="42" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="CornerRadius" Value="4" />
+  </Style>
+
+  <Style Selector="Button.briefcase-navigation:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#A32E2037" />
+    <Setter Property="BorderBrush" Value="#72493455" />
+  </Style>
+
+  <Style Selector="Button.briefcase-navigation-active">
+    <Setter Property="Background" Value="#B32E2037" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
+  </Style>
+
+  <Style Selector="Button.briefcase-navigation-root">
+    <Setter Property="MinHeight" Value="50" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Margin" Value="0,4" />
+  </Style>
+
   <Style Selector="Border.briefcase-card">
-    <Setter Property="Background" Value="#B5222933" />
-    <Setter Property="BorderBrush" Value="#394351" />
+    <Setter Property="Background" Value="#EB241A2B" />
+    <Setter Property="BorderBrush" Value="#72493455" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="14" />
-    <Setter Property="Margin" Value="0,4,0,8" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <Style Selector="Border.briefcase-card:pointerover">
+    <Setter Property="Background" Value="#F02E2037" />
+    <Setter Property="BorderBrush" Value="#9A654C75" />
+  </Style>
+
+  <Style Selector="Border.briefcase-card-accent">
+    <Setter Property="Background" Value="#A45BE0" />
+  </Style>
+
+  <Style Selector="Grid.briefcase-setting-row">
+    <Setter Property="Margin" Value="0,3" />
+  </Style>
+
+  <Style Selector="Border.briefcase-actionbar">
+    <Setter Property="Background" Value="#F52A2031" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
+    <Setter Property="BorderThickness" Value="1,1,1,0" />
+    <Setter Property="CornerRadius" Value="5,5,0,0" />
+    <Setter Property="Padding" Value="16,12" />
   </Style>
 
   <Style Selector="Border.briefcase-status">
-    <Setter Property="Background" Value="#303944" />
-    <Setter Property="BorderBrush" Value="#586473" />
+    <Setter Property="Background" Value="#68241A2B" />
+    <Setter Property="BorderBrush" Value="#72493455" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="9,3" />
   </Style>
 
   <Style Selector="Border.briefcase-status-information">
-    <Setter Property="Background" Value="#243F49" />
-    <Setter Property="BorderBrush" Value="#48DBB8" />
+    <Setter Property="Background" Value="#623C2452" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
   </Style>
 
   <Style Selector="Border.briefcase-status-success">
-    <Setter Property="Background" Value="#203F31" />
-    <Setter Property="BorderBrush" Value="#59D98A" />
+    <Setter Property="Background" Value="#52304B3E" />
+    <Setter Property="BorderBrush" Value="#59D69D" />
   </Style>
 
   <Style Selector="Border.briefcase-status-warning">
-    <Setter Property="Background" Value="#493A22" />
-    <Setter Property="BorderBrush" Value="#F5C56B" />
+    <Setter Property="Background" Value="#594A3724" />
+    <Setter Property="BorderBrush" Value="#F2B765" />
   </Style>
 
   <Style Selector="Border.briefcase-status-error">
-    <Setter Property="Background" Value="#4A252B" />
-    <Setter Property="BorderBrush" Value="#FF5964" />
+    <Setter Property="Background" Value="#663B202B" />
+    <Setter Property="BorderBrush" Value="#FF647C" />
+  </Style>
+
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="#C9151019" />
+    <Setter Property="BorderBrush" Value="#72493455" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="MinHeight" Value="34" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="#C9151019" />
+    <Setter Property="BorderBrush" Value="#72493455" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="MinHeight" Value="34" />
+  </Style>
+
+  <Style Selector="NumericUpDown">
+    <Setter Property="Background" Value="#C9151019" />
+    <Setter Property="BorderBrush" Value="#72493455" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="MinHeight" Value="34" />
+  </Style>
+
+  <Style Selector="Expander">
+    <Setter Property="Foreground" Value="#F6F1F8" />
   </Style>
 </Styles>

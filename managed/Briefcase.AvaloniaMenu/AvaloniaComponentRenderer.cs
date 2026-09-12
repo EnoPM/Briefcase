@@ -15,9 +15,9 @@ namespace Briefcase.AvaloniaMenu;
 /// </summary>
 internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
 {
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#48DBB8"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#98A2B3"));
-    private static readonly IBrush Warning = new SolidColorBrush(Color.Parse("#F5C56B"));
+    private static readonly IBrush Accent = BriefcaseTheme.Accent;
+    private static readonly IBrush Muted = BriefcaseTheme.Muted;
+    private static readonly IBrush Warning = BriefcaseTheme.Warning;
 
     public RenderedComponent Build(UiComponent component)
     {
@@ -43,8 +43,8 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         UiSeparator => Static(new Border
         {
             Height = 1,
-            Background = new SolidColorBrush(Color.Parse("#394351")),
-            Margin = new Thickness(0, 5)
+            Background = BriefcaseTheme.Border,
+            Margin = new Thickness(0, 7)
         }),
         UiSpacer => Static(new Border { Height = 8 }),
         UiDynamic dynamic => BuildDynamic(dynamic),
@@ -73,16 +73,11 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
     private RenderedComponent BuildSection(UiSection section)
     {
         var children = section.Children.Select(Build).ToArray();
-        var stack = new StackPanel { Spacing = 7 };
-        stack.Children.Add(new TextBlock
-        {
-            Text = section.Title,
-            FontSize = 16,
-            FontWeight = FontWeight.SemiBold,
-            Margin = new Thickness(0, 12, 0, 4)
-        });
-        foreach (var child in children) stack.Children.Add(child.Control);
-        return new RenderedComponent(stack, () =>
+        var card = BriefcaseControls.Card(
+            section.Title,
+            null,
+            children.Select(child => child.Control));
+        return new RenderedComponent(card, () =>
         {
             foreach (var child in children) child.Refresh();
         }, reportError, () => DisposeAll(children));
@@ -91,17 +86,12 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
     private RenderedComponent BuildCard(UiCard card)
     {
         var children = card.Children.Select(Build).ToArray();
-        var content = new StackPanel { Spacing = 7 };
-        if (!string.IsNullOrWhiteSpace(card.Title))
-            content.Children.Add(new TextBlock
-            {
-                Text = card.Title,
-                FontSize = 16,
-                FontWeight = FontWeight.SemiBold
-            });
-        foreach (var child in children) content.Children.Add(child.Control);
+        var control = BriefcaseControls.Card(
+            card.Title,
+            null,
+            children.Select(child => child.Control));
         return new RenderedComponent(
-            new Border { Child = content },
+            control,
             () =>
             {
                 foreach (var child in children) child.Refresh();
@@ -153,7 +143,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
                 UiTextTone.Muted => Muted,
                 UiTextTone.Accent => Accent,
                 UiTextTone.Warning => Warning,
-                UiTextTone.Error => Brushes.OrangeRed,
+                UiTextTone.Error => BriefcaseTheme.Error,
                 _ => null
             }
         };
@@ -176,11 +166,10 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
                 Children = { AvaloniaIcons.Create(icon), label }
             };
         }
-        var control = new Button
-        {
-            Padding = new Thickness(14, 7),
-            Content = content
-        };
+        var control = new Button { Content = content };
+        if (!button.StyleClasses.Any(style => style is
+                UiClasses.Primary or UiClasses.Secondary or UiClasses.Danger))
+            control.Classes.Add(UiClasses.Secondary);
         control.Click += (_, _) => Invoke(button.Execute);
         return new RenderedComponent(control, () =>
         {
@@ -191,16 +180,17 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
 
     private RenderedComponent BuildToggle(UiToggle toggle)
     {
-        var control = new CheckBox { Content = toggle.Label };
+        var input = new ToggleSwitch { HorizontalAlignment = HorizontalAlignment.Right };
         var updating = false;
-        control.IsCheckedChanged += (_, _) =>
+        input.IsCheckedChanged += (_, _) =>
         {
-            if (!updating) Invoke(() => toggle.Changed(control.IsChecked == true));
+            if (!updating) Invoke(() => toggle.Changed(input.IsChecked == true));
         };
-        return new RenderedComponent(control, () =>
+        var row = BriefcaseControls.SettingRow(toggle.Label, toggle.Description, input);
+        return new RenderedComponent(row, () =>
         {
             updating = true;
-            try { control.IsChecked = toggle.Value(); }
+            try { input.IsChecked = toggle.Value(); }
             finally { updating = false; }
         }, reportError);
     }
@@ -226,7 +216,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         {
             input.LostFocus += (_, _) => Invoke(() => field.Changed(input.Text ?? ""));
         }
-        var content = Labeled(field.Label, input);
+        var content = BriefcaseControls.SettingRow(field.Label, field.Description, input);
         return new RenderedComponent(content, () =>
         {
             if (input.IsFocused) return;
@@ -265,7 +255,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
                     Invoke(() => number.Changed(decimal.ToDouble(value)));
             };
         }
-        var content = Labeled(number.Label, input);
+        var content = BriefcaseControls.SettingRow(number.Label, number.Description, input);
         return new RenderedComponent(content, () =>
         {
             if (input.IsFocused) return;
@@ -291,7 +281,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
                 input.SelectedIndex >= choice.Items.Count) return;
             Invoke(choice.Items[input.SelectedIndex].Select);
         };
-        var content = Labeled(choice.Label, input);
+        var content = BriefcaseControls.SettingRow(choice.Label, choice.Description, input);
         return new RenderedComponent(content, () =>
         {
             var index = -1;
@@ -348,17 +338,6 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         }, reportError, rendered.Dispose);
     }
 
-    private static StackPanel Labeled(string label, Control editor)
-    {
-        var stack = new StackPanel { Spacing = 4 };
-        stack.Children.Add(new TextBlock
-        {
-            Text = label,
-            FontWeight = FontWeight.SemiBold
-        });
-        stack.Children.Add(editor);
-        return stack;
-    }
 
     private static RenderedComponent Static(Control control) => new(control, null, null);
 
@@ -378,7 +357,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         UiTextTone.Muted => Muted,
         UiTextTone.Accent => Accent,
         UiTextTone.Warning => Warning,
-        UiTextTone.Error => Brushes.OrangeRed,
+        UiTextTone.Error => BriefcaseTheme.Error,
         _ => null
     };
 
