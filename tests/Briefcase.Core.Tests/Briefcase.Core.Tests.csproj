@@ -30,6 +30,8 @@
              Link="Protocol\ServerAdminAuthentication.cs" />
     <Compile Include="..\..\managed\builtins\ServerAdminControl.Shared\ModHandshakeProtocol.cs"
              Link="Protocol\ModHandshakeProtocol.cs" />
+    <Compile Include="..\..\managed\builtins\Briefcase.ServerBrowser.Client\ServerDirectory.cs"
+             Link="ServerBrowser\ServerDirectory.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,28 +1,28 @@
 # Mod configuration
 
-F1 is reserved by Briefcase. It opens one framework-owned configuration window
-using the Avalonia backend selected in `loader.json`. A top switch
-selects **Client** or **Server**. The Server view is supplied by the Briefcase
-Core administration built-in.
+F1 is reserved by Briefcase. It opens one framework-owned Avalonia configuration
+window. Its stable navigation contains **Home**, **Servers**, and **Mods**.
+Briefcase controls that navigation so mods cannot add top-level tabs.
 
-The first client entry is `Mods`. It lists every DLL installed in
+The **Mods** page lists every DLL installed in
 `Briefcase/Mods`, renders simple settings declared with `Configuration.Bind`,
 and exposes each mod's persistent Enabled state plus the current session's Load,
 Reload, and Unload actions. Disabling a mod unloads it immediately and prevents
 automatic loading at the next game start. A manual Unload keeps the Enabled
 preference, while a manual Load can run a disabled mod for the current session.
 
-A mod receives a separate navigation entry only after it explicitly registers
-a complex client panel. Small mods therefore need no UI code.
+A configurable mod has a **Configure** action on its card. Its generated settings
+and any registered complex panel open as a detail view inside **Mods**, with a
+button to return to the catalogue. Small mods therefore need no UI code.
 
 Dependency state is part of this library. A dependency cannot be disabled,
 unloaded, or reloaded while an enabled dependent uses it. The disabled control's
 tooltip lists the mods that must be disabled first.
 
-The same tab can open the Mods directory or refresh it manually. The directory
+The same page can open the Mods directory or refresh it manually. The directory
 watcher discovers a newly copied DLL and hot reloads a replaced DLL when that
 mod is enabled or currently loaded. A remote catalogue and download/update UI
-can be added to this tab without changing the mod configuration API.
+can be added to this page without changing the mod configuration API.
 
 ## Typed settings
 
@@ -50,8 +50,8 @@ public override void Load(ModContext context)
 }
 ```
 
-Briefcase automatically places these settings in a collapsible Configuration
-section on the mod's card in the `Mods` page. It provides editors for `bool`,
+Briefcase automatically places these settings in the mod's detail view on the
+`Mods` page. It provides editors for `bool`,
 `int`, `float`, `double`, `string`, and enum values. Numeric ranges are
 inclusive. A string can set `secret: true` to use a password editor. Invalid
 persisted values fall back to the default supplied by the mod.
@@ -74,10 +74,10 @@ section, or key intentionally creates a new setting.
 
 ## Rich client configuration panels
 
-Client mods that need a dedicated page can register richer editors with the
-toolkit-neutral component API from `Briefcase.ClientModApi`. Registration adds
-the mod to the client navigation; the same component tree is rendered by
-Avalonia through the single Avalonia renderer:
+Client mods that need richer editors can register them with the toolkit-neutral
+component API from `Briefcase.ClientModApi`. Registration adds the content to
+that mod's detail view inside **Mods**; the same component tree is rendered by
+the single Avalonia renderer:
 
 ```csharp
 using Briefcase.ClientModApi;

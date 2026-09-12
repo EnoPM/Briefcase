@@ -5,19 +5,20 @@ does not ship Dear ImGui, cimgui, DirectComposition, Vortice, or a second UI
 backend.
 
 The menu uses a dark, slightly transparent palette with a warm violet accent
-and the Inter typeface. Its layout has three stable levels:
+and the Inter typeface. Its navigation has three stable entries:
 
-- **Client** opens the local framework home page and lists every installed mod,
-  including mods that only expose automatic configuration.
-- **Server** opens the remote administration home page and its registered
-  server tools.
-- **Mods** manages installation state, loading and dependencies for client
-  mods.
+- **Home** summarizes framework, server, and client-mod status.
+- **Servers** saves community servers, joins them, and opens authenticated
+  administration without leaving the Servers workspace.
+- **Mods** manages installation state, loading, dependencies, and configuration
+  for every client mod.
 
-The fixed-width navigation keeps Client and Server visible at all times. Pages
-use bordered cards with a violet strip, readable labels and descriptions on the
-left, and aligned editors on the right. Advanced groups can use expanders, and
-information-rich home cards automatically switch between one and two columns.
+Mods do not add top-level tabs. Their generated settings and complex panels open
+as detail views from the central Mods catalogue. The fixed-width navigation stays
+predictable while pages use bordered cards with a violet strip, readable labels
+and descriptions on the left, and aligned editors on the right. Advanced groups
+can use expanders, and information-rich home cards automatically switch between
+one and two columns.
 
 The client package separates two responsibilities:
 

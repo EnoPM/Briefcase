@@ -14,9 +14,10 @@ namespace Briefcase.AvaloniaMenu;
 
 internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
 {
-    private const string ClientHomeId = "$client-home";
-    private const string FrameworkTabId = "$briefcase";
-    private const string ServerHomeId = "$server-home";
+    private const string HomeId = "$home";
+    private const string ServersId = "$servers";
+    private const string ModsId = "$mods";
+    private const string ServerDirectoryModId = "briefcase.server-browser.client";
     private const string ServerPanelPrefix = "$server-panel:";
     private const string InstalledModPrefix = "$installed-mod:";
 
@@ -25,12 +26,12 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
     private readonly ContentControl _content = new();
     private readonly AvaloniaComponentRenderer _componentRenderer;
     private readonly List<RenderedComponent> _renderedComponents = [];
-    private readonly Dictionary<string, TextBlock> _draftIndicators =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly DispatcherTimer _refreshTimer;
+    private readonly IDisposable _serverWorkspaceSubscription;
     private long _observedUiRevision;
     private string _selectedId;
-    private bool _serverView;
+    private string? _selectedModId;
+    private string? _selectedServerPanelId;
     private bool _disposed;
 
     public AvaloniaConfigurationView(ConfigurationRegistry registry)
@@ -42,15 +43,15 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         AttachedToVisualTree += (_, _) => _refreshTimer.Start();
         DetachedFromVisualTree += (_, _) => _refreshTimer.Stop();
 
-        _serverView = string.Equals(
-            registry._document.Window.SelectedView,
-            "Server",
-            StringComparison.OrdinalIgnoreCase);
-        _selectedId = _serverView
-            ? ServerHomeId
-            : string.IsNullOrWhiteSpace(registry._document.Window.SelectedModId)
-                ? ClientHomeId
-                : registry._document.Window.SelectedModId;
+        _selectedId = NormalizeSelectedView(registry._document.Window.SelectedView);
+        if (_selectedId == ModsId &&
+            !string.IsNullOrWhiteSpace(registry._document.Window.SelectedModId))
+            _selectedModId = registry._document.Window.SelectedModId;
+        _serverWorkspaceSubscription = ServerWorkspace.Subscribe(notification =>
+        {
+            if (!notification.OpenAdministration) return;
+            Dispatcher.UIThread.Post(OpenFirstServerAdministration);
+        });
 
         Content = BuildRoot();
         RefreshAll();
@@ -95,131 +96,58 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         DisposeRenderedComponents();
         _observedUiRevision = _registry.UiRevision;
         _navigation.Children.Clear();
-        _draftIndicators.Clear();
 
-        if (_serverView)
-            RefreshServerNavigation();
-        else
-            RefreshClientNavigation();
-    }
-
-    private void RefreshClientNavigation()
-    {
         var pages = SnapshotClientPages();
-        if (_selectedId != ClientHomeId && _selectedId != FrameworkTabId &&
-            !pages.Any(page => string.Equals(
-                page.Id, _selectedId, StringComparison.OrdinalIgnoreCase)))
-            _selectedId = FrameworkTabId;
+        var serverPanels = SnapshotServerPanels();
+        if (_selectedModId is not null && !pages.Any(page => string.Equals(
+                page.Id, _selectedModId, StringComparison.OrdinalIgnoreCase)))
+            _selectedModId = null;
+        if (_selectedServerPanelId is not null && !serverPanels.Any(panel => string.Equals(
+                panel.Id, _selectedServerPanelId, StringComparison.OrdinalIgnoreCase)))
+            _selectedServerPanelId = null;
 
         AddNavigationButton(
-            "Client", ClientHomeId, UiIcon.Client, root: true,
-            () => SelectClientPage(ClientHomeId),
-            activeOverride: true);
+            "Home", HomeId, UiIcon.Briefcase, root: true,
+            () => SelectTopLevelPage(HomeId));
         AddNavigationButton(
-            "Server", ServerHomeId, UiIcon.Server, root: true,
-            () =>
-            {
-                _serverView = true;
-                _selectedId = ServerHomeId;
-                _registry.RememberSelectedView("Server");
-                RefreshAll();
-            }, activeOverride: false);
+            "Servers", ServersId, UiIcon.Server, root: true,
+            () => SelectTopLevelPage(ServersId));
         AddNavigationButton(
-            "Mods", FrameworkTabId, UiIcon.Mods, root: false,
-            () => SelectClientPage(FrameworkTabId));
+            "Mods", ModsId, UiIcon.Mods, root: true,
+            () => SelectTopLevelPage(ModsId));
 
-        if (pages.Length > 0)
-        {
-            AddNavigationGroup("MODS CLIENT");
-            foreach (var page in pages)
-            {
-                AddNavigationButton(
-                    page.Title, page.Id, UiIcon.Settings, root: false,
-                    () => SelectClientPage(page.Id),
-                    indented: true,
-                    draftId: page.Scope?.Info.Id);
-            }
-        }
-
-        ShowSelectedClientPage(pages);
+        ShowSelectedPage(pages, serverPanels);
     }
 
-    private void RefreshServerNavigation()
+    private void SelectTopLevelPage(string id)
     {
-        var panels = SnapshotServerPanels();
-        if (_selectedId != ServerHomeId && !panels.Any(panel => string.Equals(
-                panel.Id, _selectedId, StringComparison.OrdinalIgnoreCase)))
-            _selectedId = ServerHomeId;
-
-        AddNavigationButton(
-            "Client", ClientHomeId, UiIcon.Client, root: true,
-            () =>
-            {
-                _serverView = false;
-                _selectedId = ClientHomeId;
-                _registry.RememberSelectedView("Client");
-                RefreshAll();
-            }, activeOverride: false);
-        AddNavigationButton(
-            "Server", ServerHomeId, UiIcon.Server, root: true,
-            () => SelectServerPage(ServerHomeId),
-            activeOverride: true);
-        if (panels.Length > 0)
-        {
-            AddNavigationGroup("SERVER");
-            foreach (var panel in panels)
-            {
-                AddNavigationButton(
-                    panel.Name, panel.Id, UiIcon.Settings, root: false,
-                    () => SelectServerPage(panel.Id),
-                    indented: true);
-            }
-        }
-
-        ShowSelectedServerPage(panels);
-    }
-
-    private void SelectClientPage(string id)
-    {
-        _serverView = false;
         _selectedId = id;
-        _registry.RememberSelectedView("Client");
-        if (id != ClientHomeId) _registry.RememberSelectedMod(id);
-        RefreshAll();
-    }
-
-    private void SelectServerPage(string id)
-    {
-        _serverView = true;
-        _selectedId = id;
-        _registry.RememberSelectedView("Server");
-        RefreshAll();
-    }
-
-    private void AddNavigationGroup(string title)
-    {
-        _navigation.Children.Add(new TextBlock
+        if (id == ServersId) _selectedServerPanelId = null;
+        if (id == ModsId) _selectedModId = null;
+        _registry.RememberSelectedView(id switch
         {
-            Text = title,
-            FontSize = 11,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = BriefcaseTheme.Muted,
-            Margin = new Thickness(12, 16, 8, 4),
-            LetterSpacing = 1.1
+            ServersId => "Servers",
+            ModsId => "Mods",
+            _ => "Home"
         });
+        RefreshAll();
     }
+
+    private static string NormalizeSelectedView(string? view) => view switch
+    {
+        "Server" or "Servers" => ServersId,
+        "Mods" => ModsId,
+        _ => HomeId
+    };
 
     private void AddNavigationButton(
         string title,
         string id,
         UiIcon icon,
         bool root,
-        Action action,
-        bool indented = false,
-        string? draftId = null,
-        bool? activeOverride = null)
+        Action action)
     {
-        var active = activeOverride ?? string.Equals(
+        var active = string.Equals(
             id, _selectedId, StringComparison.OrdinalIgnoreCase);
         var label = new TextBlock
         {
@@ -227,43 +155,31 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
-        var dirty = new TextBlock
-        {
-            Text = "●",
-            FontSize = 10,
-            Foreground = BriefcaseTheme.Accent,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsVisible = draftId is not null && _registry.HasConfigurationDraft(draftId)
-        };
         var content = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("Auto,*"),
             Children =
             {
                 AvaloniaIcons.Create(
                     icon,
                     root ? 21 : 17,
                     active ? BriefcaseTheme.Accent : BriefcaseTheme.Muted),
-                label,
-                dirty
+                label
             }
         };
         Grid.SetColumn(label, 1);
-        label.Margin = new Thickness(10, 0, 8, 0);
-        Grid.SetColumn(dirty, 2);
+        label.Margin = new Thickness(10, 0, 0, 0);
 
         var button = new Button
         {
             Content = content,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Margin = indented ? new Thickness(10, 0, 0, 0) : default
+            HorizontalAlignment = HorizontalAlignment.Stretch
         };
         button.Classes.Add("briefcase-navigation");
         if (root) button.Classes.Add("briefcase-navigation-root");
         if (active) button.Classes.Add("briefcase-navigation-active");
         button.Click += (_, _) => action();
         _navigation.Children.Add(button);
-        if (draftId is not null) _draftIndicators[draftId] = dirty;
     }
 
     private ClientPage[] SnapshotClientPages()
@@ -305,159 +221,160 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
             .SelectMany(scope => scope.SnapshotServerUiPanels().Select(panel =>
                 new ServerPanel(
                     ServerPanelPrefix + scope.Info.Id + ":" + panel.Name,
+                    scope.Info.Id,
                     panel.Name,
                     panel.Content)))
             .OrderBy(panel => panel.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
-    private void ShowSelectedClientPage(IReadOnlyList<ClientPage> pages)
+    private void ShowSelectedPage(
+        IReadOnlyList<ClientPage> pages,
+        IReadOnlyList<ServerPanel> serverPanels)
     {
-        if (_selectedId == ClientHomeId)
+        _content.Content = _selectedId switch
         {
-            _content.Content = BuildClientHomePage(pages);
-            return;
-        }
-        if (_selectedId == FrameworkTabId)
-        {
-            _content.Content = BuildFrameworkPage();
-            return;
-        }
-
-        var page = pages.FirstOrDefault(candidate => string.Equals(
-            candidate.Id, _selectedId, StringComparison.OrdinalIgnoreCase));
-        _content.Content = page?.Scope is { } scope
-            ? BuildModPage(scope)
-            : page?.Status is { } status
-                ? BuildInstalledModPage(status)
-                : MessageCard("Unavailable", "This mod is no longer installed.");
+            ServersId => BuildServersPage(serverPanels),
+            ModsId => BuildFrameworkPage(pages),
+            _ => BuildHomePage(pages, serverPanels)
+        };
     }
 
-    private void ShowSelectedServerPage(IReadOnlyList<ServerPanel> panels)
-    {
-        if (_selectedId == ServerHomeId)
-        {
-            _content.Content = BuildServerHomePage(panels);
-            return;
-        }
-        var panel = panels.FirstOrDefault(candidate => string.Equals(
-            candidate.Id, _selectedId, StringComparison.OrdinalIgnoreCase));
-        if (panel is null)
-        {
-            _content.Content = MessageCard(
-                "Server tools unavailable",
-                "No Briefcase server administration panel is currently registered.");
-            return;
-        }
-
-        var stack = Page(panel.Name, "Remote Briefcase server management");
-        stack.Children.Add(RenderComponents(panel.Content));
-        _content.Content = ScrollPage(stack);
-    }
-
-    private Control BuildClientHomePage(IReadOnlyCollection<ClientPage> pages)
+    private Control BuildHomePage(
+        IReadOnlyCollection<ClientPage> pages,
+        IReadOnlyCollection<ServerPanel> serverPanels)
     {
         var statuses = _registry._modControl?.SnapshotInstalledMods() ?? [];
         var loaded = statuses.Count(status => status.Loaded);
         var errors = statuses.Count(status => status.LastError is not null);
+        var serverDirectoryAvailable = serverPanels.Any(panel => panel.IsDirectory);
+        var administrationAvailable = serverPanels.Any(panel => !panel.IsDirectory);
         var cards = new ResponsiveCardPanel();
 
         cards.Children.Add(BriefcaseControls.Card(
             "Briefcase is ready",
-            "The client framework is running and ready to manage your mods.",
+            "The framework is running and ready to manage your servers and client mods.",
             new Control[]
             {
                 StatusBadge(errors == 0 ? "No mod errors" : $"{errors} mod error(s)",
                     errors == 0 ? UiStatusTone.Success : UiStatusTone.Error),
                 DetailLine("Installed version", FrameworkVersion()),
-                DetailLine("Active mods", $"{loaded} of {statuses.Length}"),
-                MakeButton("Manage mods", () => SelectClientPage(FrameworkTabId), UiIcon.Mods)
+                DetailLine("Active mods", $"{loaded} of {statuses.Length}")
+            }));
+
+        cards.Children.Add(BriefcaseControls.Card(
+            "Servers",
+            "Save community servers, join them quickly, and open authenticated administration.",
+            new Control[]
+            {
+                StatusBadge(
+                    serverDirectoryAvailable ? "Server directory ready" : "Server directory unavailable",
+                    serverDirectoryAvailable ? UiStatusTone.Success : UiStatusTone.Warning),
+                DetailLine("Remote administration",
+                    administrationAvailable ? "Available" : "Unavailable"),
+                MakeButton("Manage servers", () => SelectTopLevelPage(ServersId), UiIcon.Server)
             }));
 
         cards.Children.Add(BriefcaseControls.Card(
             "Client mods",
-            "Every installed mod has a dedicated page, including mods using automatic configuration.",
+            "Install, configure, enable, reload, and disable client mods from one controlled page.",
             new Control[]
             {
-                DetailLine("Available pages", pages.Count.ToString(CultureInfo.InvariantCulture)),
-                DetailLine("Configuration", "Drafts are applied one page at a time"),
-                new TextBlock
-                {
-                    Text = "A violet dot in the navigation marks a page with unapplied changes.",
-                    Foreground = BriefcaseTheme.Muted,
-                    TextWrapping = TextWrapping.Wrap,
-                    FontSize = 12.5
-                }
+                DetailLine("Installed mods", statuses.Length.ToString(CultureInfo.InvariantCulture)),
+                DetailLine("Available configuration", pages.Count.ToString(CultureInfo.InvariantCulture)),
+                MakeButton("Manage mods", () => SelectTopLevelPage(ModsId), UiIcon.Mods)
             }));
 
-        cards.Children.Add(BriefcaseControls.Card(
-            "Server management",
-            "Open the server workspace to connect, configure players and manage server-side mods.",
-            new Control[]
-            {
-                DetailLine("Workspace", "Remote administration"),
-                MakeButton("Open server workspace", () =>
-                {
-                    _serverView = true;
-                    _selectedId = ServerHomeId;
-                    _registry.RememberSelectedView("Server");
-                    RefreshAll();
-                }, UiIcon.Server)
-            }));
-
-        var stack = Page("Client", "Your Briefcase client workspace");
+        var stack = Page("Briefcase", "Mod and community-server management for Deceive Inc.");
         stack.Children.Add(cards);
         return ScrollPage(stack);
     }
 
-    private Control BuildServerHomePage(IReadOnlyList<ServerPanel> panels)
+    private Control BuildServersPage(IReadOnlyList<ServerPanel> panels)
     {
-        var cards = new ResponsiveCardPanel();
-        var available = panels.Count > 0;
-        cards.Children.Add(BriefcaseControls.Card(
-            "Remote administration",
-            "Manage a Briefcase-enabled dedicated server from the game client.",
-            new Control[]
-            {
-                StatusBadge(
-                    available ? "Administration tools available" : "Waiting for server tools",
-                    available ? UiStatusTone.Success : UiStatusTone.Warning),
-                DetailLine("Available sections", panels.Count.ToString(CultureInfo.InvariantCulture)),
-                available
-                    ? MakeButton("Open administration", () => SelectServerPage(panels[0].Id),
-                        UiIcon.Server)
-                    : new TextBlock
-                    {
-                        Text = "Load the server administration client mod to expose this workspace.",
-                        Foreground = BriefcaseTheme.Muted,
-                        TextWrapping = TextWrapping.Wrap
-                    }
-            }));
+        if (_selectedServerPanelId is not null)
+        {
+            var selected = panels.FirstOrDefault(panel => string.Equals(
+                panel.Id, _selectedServerPanelId, StringComparison.OrdinalIgnoreCase));
+            if (selected is not null) return BuildServerPanelPage(selected);
+            _selectedServerPanelId = null;
+        }
 
-        cards.Children.Add(BriefcaseControls.Card(
-            "Server workspace",
-            "Server configuration, players and server mods stay separate from local client settings.",
-            new Control[]
-            {
-                DetailLine("Client settings", "Unchanged"),
-                DetailLine("Remote changes", "Applied by the selected server tool"),
-                new TextBlock
-                {
-                    Text = "Connection and authentication details are owned by the server administration mod.",
-                    Foreground = BriefcaseTheme.Muted,
-                    TextWrapping = TextWrapping.Wrap,
-                    FontSize = 12.5
-                }
-            }));
+        var stack = Page(
+            "Servers",
+            "Save, join, and administer community servers from one workspace.");
+        var directoryPanels = panels.Where(panel => panel.IsDirectory).ToArray();
+        if (directoryPanels.Length == 0)
+        {
+            stack.Children.Add(MessageCard(
+                "Server directory unavailable",
+                "The Briefcase server-directory component is not loaded."));
+        }
+        else
+        {
+            foreach (var directory in directoryPanels)
+                stack.Children.Add(RenderComponents(directory.Content));
+        }
 
-        var stack = Page("Server", "Remote dedicated-server workspace");
-        stack.Children.Add(cards);
+        var administration = panels.Where(panel => !panel.IsDirectory).ToArray();
+        if (administration.Length > 0)
+        {
+            var actions = administration.Select(panel => (Control)MakeButton(
+                administration.Length == 1 ? "Open administration" : panel.Name,
+                () => OpenServerPanel(panel.Id),
+                UiIcon.Settings)).ToArray();
+            stack.Children.Add(BriefcaseControls.Card(
+                "Remote administration",
+                "Select a saved server's Configure action to use its endpoint and credentials, " +
+                "or open the current administration target directly.",
+                actions));
+        }
+
         return ScrollPage(stack);
     }
 
-    private Control BuildFrameworkPage()
+    private Control BuildServerPanelPage(ServerPanel panel)
     {
-        var stack = Page("Mods", "Install, update and control client mods");
+        var stack = Page(panel.Name, "Remote Briefcase server management");
+        stack.Children.Add(MakeButton("Back to server list", () =>
+        {
+            _selectedServerPanelId = null;
+            RefreshAll();
+        }));
+        stack.Children.Add(RenderComponents(panel.Content));
+        return ScrollPage(stack);
+    }
+
+    private void OpenFirstServerAdministration()
+    {
+        if (_disposed) return;
+        var panel = SnapshotServerPanels().FirstOrDefault(candidate => !candidate.IsDirectory);
+        _selectedId = ServersId;
+        _selectedServerPanelId = panel?.Id;
+        _registry.RememberSelectedView("Servers");
+        RefreshAll();
+    }
+
+    private void OpenServerPanel(string id)
+    {
+        _selectedId = ServersId;
+        _selectedServerPanelId = id;
+        _registry.RememberSelectedView("Servers");
+        RefreshAll();
+    }
+
+    private Control BuildFrameworkPage(IReadOnlyList<ClientPage> pages)
+    {
+        if (_selectedModId is not null)
+        {
+            var selected = pages.FirstOrDefault(page => string.Equals(
+                page.Id, _selectedModId, StringComparison.OrdinalIgnoreCase));
+            if (selected?.Scope is { } scope) return BuildModPage(scope);
+            if (selected?.Status is { } status) return BuildInstalledModPage(status);
+            _selectedModId = null;
+        }
+
+        var stack = Page("Mods", "Install, configure, update, and control client mods");
         var control = _registry._modControl;
         var actions = new StackPanel
         {
@@ -566,6 +483,8 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
                 FontSize = 12.5
             }
         };
+        if (hasDraft)
+            children.Add(StatusBadge("Unsaved settings", UiStatusTone.Warning));
         if (mod.LastError is not null)
         {
             children.Add(new TextBlock
@@ -578,6 +497,12 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         }
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var configurable = scope is not null &&
+                           (scope.SnapshotEntries().Length > 0 ||
+                            scope.SnapshotUiPanels().Length > 0);
+        if (configurable)
+            buttons.Children.Add(MakeButton(
+                "Configure", () => OpenMod(scope!), UiIcon.Settings));
         if (mod.Loaded)
         {
             buttons.Children.Add(ModActionButton(
@@ -629,6 +554,7 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
     private Control BuildInstalledModPage(ManagedModStatus status)
     {
         var stack = Page(status.DisplayName, "Installed client mod");
+        stack.Children.Add(MakeButton("Back to mods", ReturnToMods));
         if (_registry._modControl is { } control)
             stack.Children.Add(BuildModCard(control, status, null));
         stack.Children.Add(MessageCard(
@@ -646,12 +572,12 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         void DraftChanged()
         {
             if (actionBar is not null) actionBar.IsVisible = draft.IsDirty;
-            UpdateDraftIndicators();
         }
 
         var stack = Page(
             scope.Info.Name,
             $"{scope.Info.Author}  ·  {scope.Info.Version}  ·  {scope.Info.Id}");
+        stack.Children.Add(MakeButton("Back to mods", ReturnToMods));
         if (!string.IsNullOrWhiteSpace(scope.Info.Description))
         {
             stack.Children.Add(new TextBlock
@@ -697,6 +623,20 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         return page;
     }
 
+    private void OpenMod(ModScope scope)
+    {
+        _selectedId = ModsId;
+        _selectedModId = scope.Info.Id;
+        _registry.RememberSelectedView("Mods");
+        _registry.RememberSelectedMod(scope.Info.Id);
+        RefreshAll();
+    }
+
+    private void ReturnToMods()
+    {
+        _selectedModId = null;
+        RefreshAll();
+    }
     private Border BuildActionBar(ConfigurationPageDraft draft)
     {
         var text = new TextBlock
@@ -729,7 +669,6 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
                 _registry.ReportClientUiError(exception);
                 error.Text = exception.GetBaseException().Message;
                 error.IsVisible = true;
-                UpdateDraftIndicators();
             }
         }, UiIcon.Save, primary: true);
         var actions = new StackPanel
@@ -874,12 +813,6 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         foreach (var rendered in _renderedComponents.ToArray()) rendered.Refresh();
     }
 
-    private void UpdateDraftIndicators()
-    {
-        foreach (var pair in _draftIndicators)
-            pair.Value.IsVisible = _registry.HasConfigurationDraft(pair.Key);
-    }
-
     private void RunModAction(Action action)
     {
         _registry.TryModAction(action);
@@ -1018,6 +951,7 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         if (_disposed) return;
         _disposed = true;
         _refreshTimer.Stop();
+        _serverWorkspaceSubscription.Dispose();
         DisposeRenderedComponents();
         _content.Content = null;
         Content = null;
@@ -1029,5 +963,15 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         ModScope? Scope,
         ManagedModStatus? Status);
 
-    private sealed record ServerPanel(string Id, string Name, UiComponent Content);
+    private sealed record ServerPanel(
+        string Id,
+        string ScopeId,
+        string Name,
+        UiComponent Content)
+    {
+        public bool IsDirectory => string.Equals(
+            ScopeId,
+            ServerDirectoryModId,
+            StringComparison.OrdinalIgnoreCase);
+    }
 }

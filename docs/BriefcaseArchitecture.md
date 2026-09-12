@@ -100,20 +100,21 @@ the native ABI headers.
 
 ## Framework configuration
 
-F1 opens the framework-owned Avalonia configuration window. A top switch
-selects the local Client view or remote Server view. Client mods are selected
-from vertical tabs on the left. The window position, size, selected view,
+F1 opens the framework-owned Avalonia configuration window. Its fixed navigation
+contains Home, Servers, and Mods. Servers stores gameplay and administration
+endpoints, joins a selected server, and opens authenticated remote administration
+inside the same workspace. Mods lists and configures every client mod without
+giving individual mods control of the top-level navigation. The selected view,
 selected mod, and every typed setting are persisted in `Briefcase/settings.json`.
 The managed mod manager creates a configuration scope before calling a mod's
 `Load`, which lets `ConfigurationApi.Bind` restore values before runtime work
-starts. One tab is registered for every loaded mod. Disposing that scope during
-hot reload removes entries and custom panels before the collectible assembly is
-released.
+starts. Disposing that scope during hot reload removes entries and custom panels
+before the collectible assembly is released.
 
-The first vertical tab belongs to Briefcase itself. It displays the installed
-DLL catalogue and controls persistent enablement plus immediate load, reload,
-and unload operations. Disabled filenames are retained in `settings.json`, so
-the loader can skip them before executing any mod code on the next startup.
+The Mods page displays the installed DLL catalogue and controls persistent
+enablement plus immediate load, reload, and unload operations. Disabled filenames
+are retained in `settings.json`, so the loader can skip them before executing any
+mod code on the next startup.
 
 Indispensable game services load from `Briefcase/Core/BuiltIns`. They use the
 same typed API and generated SDK as mods, but are outside the user-controlled
