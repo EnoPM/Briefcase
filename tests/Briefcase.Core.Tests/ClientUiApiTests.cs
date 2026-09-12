@@ -95,12 +95,15 @@ public sealed class ClientUiApiTests
             status,
             Ui.Expander("Details", true, Ui.Text("127.0.0.1")));
         card.WithClass(UiClasses.Compact);
+        status.WithDescription("Current connection state");
 
         Assert.Equal("Connection", card.Title);
         Assert.Contains(UiClasses.Card, card.StyleClasses);
         Assert.Contains(UiClasses.Compact, card.StyleClasses);
         Assert.Contains(UiClasses.StatusSuccess, status.StyleClasses);
         Assert.Equal("Connected", status.Value());
+        Assert.Equal("Current connection state", status.Description);
+        Assert.Throws<ArgumentException>(() => status.WithDescription(" "));
         var expander = Assert.IsType<UiExpander>(card.Children[1]);
         Assert.True(expander.InitiallyExpanded);
         Assert.Throws<ArgumentException>(() => card.WithClass("invalid class"));

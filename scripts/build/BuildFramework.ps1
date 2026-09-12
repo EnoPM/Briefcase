@@ -305,6 +305,11 @@ try {
 
     Organize-BriefcaseFrameworkPackage $frameworkDistribution
 
+    # Inter is embedded in Briefcase.AvaloniaUi.dll. Keep its SIL Open Font
+    # License beside the other third-party runtime assets in every client build.
+    Copy-Item -LiteralPath (Join-Path $root 'third_party\inter\OFL.txt') `
+        -Destination (Join-Path $coreDistribution 'ThirdPartyLibraries\Inter.OFL.txt') -Force
+
     Write-Host "[OK] Briefcase package: $distribution"
     Write-Host "[OK] Bundled .NET ${runtimeVersion}: $dotNetDistribution"
     Write-Host "[OK] Managed mods: $modsDistribution"

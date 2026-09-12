@@ -135,6 +135,52 @@ public sealed class ConfigurationRegistryTests
         Assert.Equal(910, placement.Width);
         Assert.Equal(640, placement.Height);
     }
+
+    [Fact]
+    public void Configuration_draft_applies_or_cancels_one_page_without_immediate_changes()
+    {
+        using var directory = new TemporaryDirectory();
+        using var registry = CreateRegistry(
+            Path.Combine(directory.Path, "settings.json"), []);
+        using var scope = registry.RegisterMod(CreateModInfo());
+        var count = scope.Bind("General", "Count", 2, "", null, false);
+        var enabled = scope.Bind("General", "Enabled", true, "", null, false);
+        var draft = registry.GetConfigurationDraft(scope);
+
+        draft.SetValue(count, 7);
+        draft.SetValue(enabled, false);
+
+        Assert.True(draft.IsDirty);
+        Assert.True(registry.HasConfigurationDraft(scope.Info.Id));
+        Assert.Equal(2, count.Value);
+        Assert.True(enabled.Value);
+        Assert.Same(draft, registry.GetConfigurationDraft(scope));
+
+        draft.Cancel();
+        Assert.False(draft.IsDirty);
+        Assert.Equal(2, draft.GetValue(count));
+        Assert.True((bool)draft.GetValue(enabled));
+
+        draft.SetValue(count, 9);
+        draft.Apply();
+        Assert.False(draft.IsDirty);
+        Assert.Equal(9, count.Value);
+    }
+
+    [Fact]
+    public void Unloading_a_mod_discards_its_pending_configuration_draft()
+    {
+        using var directory = new TemporaryDirectory();
+        using var registry = CreateRegistry(
+            Path.Combine(directory.Path, "settings.json"), []);
+        var scope = registry.RegisterMod(CreateModInfo());
+        var count = scope.Bind("General", "Count", 2, "", null, false);
+        registry.GetConfigurationDraft(scope).SetValue(count, 7);
+
+        scope.Dispose();
+
+        Assert.False(registry.HasConfigurationDraft(scope.Info.Id));
+    }
     private static ConfigurationRegistry CreateRegistry(
         string path, List<string> messages) =>
         new(path, _ => { }, messages.Add, messages.Add);

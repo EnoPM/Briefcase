@@ -95,6 +95,7 @@ public abstract class UiComponent
     public bool IsVisible => _visible?.Invoke() ?? true;
     public bool IsEnabled => _enabled?.Invoke() ?? true;
     public string? Tooltip => _tooltip?.Invoke();
+    public string? Description { get; private set; }
     public IReadOnlyList<string> StyleClasses => _styleClasses;
 
     public UiComponent WithClass(string styleClass)
@@ -113,6 +114,14 @@ public abstract class UiComponent
     {
         ArgumentNullException.ThrowIfNull(styleClasses);
         foreach (var styleClass in styleClasses) WithClass(styleClass);
+        return this;
+    }
+
+    /// <summary>Adds plain-language help rendered below the component label.</summary>
+    public UiComponent WithDescription(string description)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+        Description = description.Trim();
         return this;
     }
 

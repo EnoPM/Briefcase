@@ -27,9 +27,9 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
 {
     private const double MenuWidth = 900;
     private const double MenuHeight = 650;
-    private const double HiddenMenuScale = 0.965;
-    private static readonly TimeSpan OpenTransitionDuration = TimeSpan.FromMilliseconds(180);
-    private static readonly TimeSpan CloseTransitionDuration = TimeSpan.FromMilliseconds(140);
+    private const double HiddenMenuScale = 0.96;
+    private static readonly TimeSpan OpenTransitionDuration = TimeSpan.FromMilliseconds(240);
+    private static readonly TimeSpan CloseTransitionDuration = TimeSpan.FromMilliseconds(170);
     private static AvaloniaOverlayHost? s_initializing;
 
     private readonly nint _gameWindow;
@@ -59,6 +59,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
     private ContentControl? _surface;
     private AvaloniaOverlayDrawingView? _overlayDrawing;
     private ScaleTransform? _animatedScale;
+    private TranslateTransform? _animatedTranslation;
     private Control? _menuContent;
     private Control? _menuChrome;
     private AvaloniaStartupView? _startupView;
@@ -310,7 +311,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         };
         _backdrop = new Grid
         {
-            Background = new SolidColorBrush(Color.Parse("#A6000000")),
+            Background = new SolidColorBrush(Color.Parse("#B80A0710")),
             Opacity = 0,
             Children = { _surface }
         };
@@ -327,6 +328,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             Width = MenuWidth,
             Height = MenuHeight,
             Background = Brushes.Transparent,
+            FontFamily = BriefcaseTheme.FontFamily,
             Content = root,
             CanResize = false,
             ShowInTaskbar = false,
@@ -416,10 +418,11 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
     {
         _transitionProgress = Math.Clamp(progress, 0, 1);
         if (_backdrop is not null) _backdrop.Opacity = _transitionProgress;
-        if (_animatedScale is null) return;
+        if (_animatedScale is null || _animatedTranslation is null) return;
         var scale = HiddenMenuScale + ((1 - HiddenMenuScale) * _transitionProgress);
         _animatedScale.ScaleX = scale;
         _animatedScale.ScaleY = scale;
+        _animatedTranslation.Y = 14 * (1 - _transitionProgress);
     }
 
     private void CompleteTransition(double target)
@@ -533,32 +536,54 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
                 },
                 Padding = new Thickness(14, 5)
             };
+            close.Classes.Add("briefcase-secondary");
+            close.Classes.Add("briefcase-compact");
             close.Click += (_, _) => CloseFromUser();
             var title = new TextBlock
             {
-                Text = "BRIEFCASE",
-                FontSize = 16,
+                Text = "Briefcase",
+                FontSize = 18,
                 FontWeight = FontWeight.SemiBold,
-                Foreground = new SolidColorBrush(Color.Parse("#48DBB8")),
+                Foreground = BriefcaseTheme.Text,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            var subtitle = new TextBlock
+            var versionText = new TextBlock
             {
-                Text = "Configuration",
-                Margin = new Thickness(12, 0, 0, 0),
-                Foreground = new SolidColorBrush(Color.Parse("#AEB6C2")),
+                Text = typeof(AvaloniaOverlayHost).Assembly.GetName().Version?.ToString(3)
+                       ?? "development",
+                Margin = new Thickness(0, 2, 0, 0),
+                FontSize = 12,
+                Foreground = BriefcaseTheme.Muted,
                 VerticalAlignment = VerticalAlignment.Center
+            };
+            var nameAndVersion = new StackPanel
+            {
+                Spacing = 0,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children = { title, versionText }
+            };
+            var brand = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    AvaloniaIcons.Create(
+                        Briefcase.ClientModApi.UiIcon.Briefcase,
+                        26,
+                        BriefcaseTheme.Accent),
+                    nameAndVersion
+                }
             };
             var header = new Grid
             {
-                Height = 48,
-                Margin = new Thickness(16, 8, 12, 4),
-                ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto")
+                Height = 60,
+                Margin = new Thickness(20, 8, 16, 4),
+                ColumnDefinitions = new ColumnDefinitions("*,Auto")
             };
-            header.Children.Add(title);
-            Grid.SetColumn(subtitle, 1);
-            header.Children.Add(subtitle);
-            Grid.SetColumn(close, 2);
+            header.Children.Add(brand);
+            Grid.SetColumn(close, 1);
             header.Children.Add(close);
             var body = new ContentControl { Content = content };
             var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
@@ -567,17 +592,21 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             layout.Children.Add(body);
 
             _animatedScale = new ScaleTransform(HiddenMenuScale, HiddenMenuScale);
+            _animatedTranslation = new TranslateTransform(0, 14);
+            var transition = new TransformGroup();
+            transition.Children.Add(_animatedScale);
+            transition.Children.Add(_animatedTranslation);
             _menuChrome = new Border
             {
                 Width = MenuWidth,
                 Height = MenuHeight,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Background = new SolidColorBrush(Color.Parse("#F2181D25")),
-                BorderBrush = new SolidColorBrush(Color.Parse("#46505E")),
+                Background = BriefcaseTheme.Background,
+                BorderBrush = BriefcaseTheme.Border,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(10),
-                RenderTransform = _animatedScale,
+                CornerRadius = new CornerRadius(6),
+                RenderTransform = transition,
                 RenderTransformOrigin = RelativePoint.Center,
                 Child = layout
             };
@@ -602,6 +631,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         _menuContent = null;
         _menuChrome = null;
         _animatedScale = null;
+        _animatedTranslation = null;
         Volatile.Write(ref _menuCreated, 0);
         _info("Avalonia menu: released after close");
     }
