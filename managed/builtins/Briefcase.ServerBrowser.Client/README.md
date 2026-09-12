@@ -1,8 +1,13 @@
 # Briefcase server browser
 
-This client built-in adds the **Servers** entry to Briefcase's F1 navigation.
-It stores named community servers in `Briefcase/servers.json` and supports IPv4,
-host names, and bracketed IPv6 endpoints in `ADDRESS:PORT` form.
+This client built-in supplies the directory shown in Briefcase's framework-owned
+**Servers** page. It stores named community servers in `Briefcase/servers.json`
+with separate gameplay and administration endpoints and credentials. IPv4, host
+names, and bracketed IPv6 endpoints use `ADDRESS:PORT` form.
+
+Each saved server offers **Edit**, **Join**, and **Configure**. Configure selects
+the server's administration endpoint and opens remote administration inside the
+same Servers workspace, where the user can return to the directory.
 
 The Avalonia component callback only edits managed state. Connecting creates a pending
 request that is consumed by `DeceiveIncPlayerController.ReceiveTick`; the shared

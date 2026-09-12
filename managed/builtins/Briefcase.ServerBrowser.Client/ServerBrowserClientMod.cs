@@ -7,9 +7,10 @@ using Briefcase.ModApi.Interop;
 namespace Briefcase.ServerBrowser.Client;
 
 /// <summary>
-/// Core server directory. The client UI only edits managed state; a pending connection
-/// is consumed from ReceiveTick so Unreal's DirectConnect always runs on the
-/// game thread.
+/// Core server directory. UI actions only edit managed state; pending gameplay
+/// connections are consumed from ReceiveTick so Unreal's DirectConnect always
+/// runs on the game thread. Selecting a server also supplies its administration
+/// profile to Briefcase's built-in remote administration client.
 /// </summary>
 public sealed class ServerBrowserClientMod : BriefcaseMod
 {
@@ -26,21 +27,29 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
     private string _name = "";
     private string _endpoint = "";
     private string _password = "";
+    private string _administrationEndpoint = "";
+    private string _administrationPassword = "";
     private string _status = "Select a saved server or add a new one.";
+    private long _directoryUiRevision;
+    private bool _showEditor;
     private bool _showPassword;
+    private bool _showAdministrationPassword;
     private bool _confirmDelete;
 
     public override ModInfo Info { get; } = new(
         Id: "briefcase.server-browser.client",
         Name: "Servers",
         Author: "EnoPM",
-        Version: "0.1.0-dev",
-        Description: "Save community servers and connect to them from the Briefcase menu.",
+        Version: "0.2.0-dev",
+        Description: "Save, join and administer community servers from Briefcase.",
         RequiredCapabilities: BriefcaseAbi.CoreCapability |
                               BriefcaseAbi.UnrealReflectionCapability |
                               BriefcaseAbi.UnrealInvocationCapability |
                               BriefcaseAbi.RenderingCapability |
-                              BriefcaseAbi.PatchingCapability);
+                              BriefcaseAbi.PatchingCapability)
+    {
+        ShowConfigurationTab = false
+    };
 
     public override void Load(ModContext context)
     {
@@ -53,7 +62,8 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
             Path.Combine(frameworkDirectory, "settings.json"));
         _directory = _store.Load();
         Select(_directory.SelectedServerId);
-        _panel = context.Ui().RegisterPanel(BuildPanel());
+        _showEditor = false;
+        _panel = context.Ui().RegisterServerPanel("Server directory", BuildPanel());
         SaveDirectory();
         context.Info($"Server manager loaded with {_directory.Servers.Count} saved server(s).");
     }
@@ -65,6 +75,7 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         _panel?.Dispose();
         _panel = null;
         SaveDirectory();
+        ServerWorkspace.ClearSelection();
     }
 
     [UnrealPostfixPatch(
@@ -98,33 +109,71 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
     }
 
     private UiComponent BuildPanel() => Ui.Column(
-        Ui.Section("Saved community servers",
-            Ui.Text(
-                "Select a saved server, edit its details, then connect. " +
-                "The directory is shared by every Briefcase UI backend.",
-                UiTextTone.Muted),
-            Ui.Dynamic(BuildSavedServerComponents)),
-        Ui.Section("Server details",
-            Ui.Text(() => string.IsNullOrEmpty(_editingId) ? "Add server" : "Edit server",
-                UiTextTone.Accent),
-            Ui.TextField("Name", () => _name, value => _name = value, maximumLength: 128),
-            Ui.TextField("IP:PORT", () => _endpoint, value => _endpoint = value,
-                maximumLength: 256, hint: "127.0.0.1:50000"),
-            Ui.TextField("Password", () => _password, value => _password = value,
-                    secret: true, maximumLength: 256)
-                .VisibleWhen(() => !_showPassword),
-            Ui.TextField("Password", () => _password, value => _password = value,
-                    maximumLength: 256)
-                .VisibleWhen(() => _showPassword),
-            Ui.Toggle("Show password", () => _showPassword, value => _showPassword = value),
-            Ui.Row(
-                Ui.Button("Save", SaveEditedServer),
-                Ui.Button("Connect", () => QueueConnection(_name, _endpoint, _password)),
-                Ui.Button("Add new", BeginAdd),
-                Ui.Button("Delete", () => _confirmDelete = true)
-                    .VisibleWhen(() => !string.IsNullOrEmpty(_editingId) && !_confirmDelete)),
-            Ui.Dynamic(BuildDeleteConfirmation)),
-        Ui.Section("Connection status",
+        Ui.Column(
+                Ui.Section("Saved community servers",
+                    Ui.Text(
+                        "Keep every server you use in one place. Join opens the gameplay " +
+                        "connection; Configure opens authenticated Briefcase administration.",
+                        UiTextTone.Muted),
+                    Ui.Dynamic(BuildSavedServerComponents, DirectoryUiRevision)),
+                Ui.Button("Add server", UiIcon.Server, BeginAdd))
+            .VisibleWhen(() => !_showEditor),
+        Ui.Column(
+                Ui.Button("Back to server list", UiIcon.ChevronRight, ReturnToList),
+                Ui.Section("Server details",
+                    Ui.Text(() => string.IsNullOrEmpty(_editingId)
+                        ? "Add a server"
+                        : $"Edit {_name}", UiTextTone.Accent),
+                    Ui.TextField("Name", () => _name, value => _name = value,
+                        maximumLength: 128),
+                    Ui.TextField("Game IP:PORT", () => _endpoint,
+                        value => _endpoint = value,
+                        maximumLength: 256, hint: "127.0.0.1:50000"),
+                    Ui.TextField("Game password", () => _password,
+                            value => _password = value,
+                            secret: true, maximumLength: 256)
+                        .VisibleWhen(() => !_showPassword),
+                    Ui.TextField("Game password", () => _password,
+                            value => _password = value,
+                            maximumLength: 256)
+                        .VisibleWhen(() => _showPassword),
+                    Ui.Toggle("Show game password", () => _showPassword,
+                        value => _showPassword = value)),
+                Ui.Section("Briefcase administration",
+                    Ui.Text(
+                        "Administration uses the dedicated Briefcase TCP endpoint. " +
+                        "The password must match the server configuration.",
+                        UiTextTone.Muted),
+                    Ui.TextField("Administration IP:PORT",
+                        () => _administrationEndpoint,
+                        value => _administrationEndpoint = value,
+                        maximumLength: 256, hint: "127.0.0.1:47000"),
+                    Ui.TextField("Administration password",
+                            () => _administrationPassword,
+                            value => _administrationPassword = value,
+                            secret: true, maximumLength: 256)
+                        .VisibleWhen(() => !_showAdministrationPassword),
+                    Ui.TextField("Administration password",
+                            () => _administrationPassword,
+                            value => _administrationPassword = value,
+                            maximumLength: 256)
+                        .VisibleWhen(() => _showAdministrationPassword),
+                    Ui.Toggle("Show administration password",
+                        () => _showAdministrationPassword,
+                        value => _showAdministrationPassword = value)),
+                Ui.Row(
+                    Ui.Button("Save", UiIcon.Save, () => { SaveEditedServer(); }),
+                    Ui.Button("Join", UiIcon.Play, ConnectEditedServer),
+                    Ui.Button("Configure", UiIcon.Settings, ConfigureEditedServer),
+                    Ui.Button("Delete", UiIcon.Delete, () =>
+                        {
+                            _confirmDelete = true;
+                            MarkDirectoryChanged();
+                        })
+                        .VisibleWhen(() => !string.IsNullOrEmpty(_editingId) && !_confirmDelete)),
+                Ui.Dynamic(BuildDeleteConfirmation, DirectoryUiRevision))
+            .VisibleWhen(() => _showEditor),
+        Ui.Section("Status",
             Ui.Text(() => Volatile.Read(ref _status)),
             Ui.Text("Saved in Briefcase/servers.json.", UiTextTone.Muted)));
 
@@ -135,11 +184,14 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         if (servers.Length == 0)
             return [Ui.Text("No server is saved yet.", UiTextTone.Muted)];
 
-        return servers.Select(server => (UiComponent)Ui.Row(
-                Ui.Button(server.Name, () => Select(server.Id)),
+        return servers.Select(server => (UiComponent)Ui.Card(
+                server.Name,
                 Ui.Text(server.Endpoint, UiTextTone.Muted, wrap: false),
-                Ui.Button("Connect", () =>
-                    QueueConnection(server.Name, server.Endpoint, server.Password))))
+                Ui.Row(
+                    Ui.Button("Edit", UiIcon.Settings, () => BeginEdit(server.Id)),
+                    Ui.Button("Join", UiIcon.Play, () => ConnectSavedServer(server.Id)),
+                    Ui.Button("Configure", UiIcon.Server,
+                        () => ConfigureSavedServer(server.Id)))))
             .ToArray();
     }
 
@@ -150,9 +202,25 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         [
             Ui.Text("Delete this saved server?", UiTextTone.Warning),
             Ui.Row(
-                Ui.Button("Confirm delete", DeleteSelected),
-                Ui.Button("Cancel", () => _confirmDelete = false))
+                Ui.Button("Confirm delete", UiIcon.Delete, DeleteSelected),
+                Ui.Button("Cancel", () =>
+                {
+                    _confirmDelete = false;
+                    MarkDirectoryChanged();
+                }))
         ];
+    }
+
+    private long DirectoryUiRevision() => Volatile.Read(ref _directoryUiRevision);
+
+    private void MarkDirectoryChanged() =>
+        Interlocked.Increment(ref _directoryUiRevision);
+
+    private void BeginEdit(string id)
+    {
+        Select(id);
+        _showEditor = true;
+        MarkDirectoryChanged();
     }
 
     private void Select(string id)
@@ -173,7 +241,10 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         _name = selected.Name;
         _endpoint = selected.Endpoint;
         _password = selected.Password;
+        _administrationEndpoint = selected.AdministrationEndpoint;
+        _administrationPassword = selected.AdministrationPassword;
         _confirmDelete = false;
+        ServerWorkspace.Select(ToWorkspaceProfile(selected));
     }
 
     private void BeginAdd()
@@ -182,11 +253,23 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         _name = "New server";
         _endpoint = "127.0.0.1:50000";
         _password = "";
+        _administrationEndpoint = "127.0.0.1:47000";
+        _administrationPassword = "";
         _confirmDelete = false;
+        _showEditor = true;
         Volatile.Write(ref _status, "Enter the new server details, then press Save.");
+        MarkDirectoryChanged();
     }
 
-    private void SaveEditedServer()
+    private void ReturnToList()
+    {
+        _showEditor = false;
+        _confirmDelete = false;
+        Volatile.Write(ref _status, "Select a saved server, join it, or open its administration.");
+        MarkDirectoryChanged();
+    }
+
+    private bool SaveEditedServer()
     {
         try
         {
@@ -194,31 +277,63 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
             if (name.Length == 0)
                 throw new InvalidOperationException("The server name is empty.");
             var endpoint = CommunityServerConnection.NormalizeEndpoint(_endpoint);
+            var administrationEndpoint = CommunityServerConnection.NormalizeEndpoint(
+                _administrationEndpoint);
+            SavedServer server;
             lock (_directoryGate)
             {
-                var server = _directory.Servers.FirstOrDefault(candidate =>
+                server = _directory.Servers.FirstOrDefault(candidate =>
                     string.Equals(candidate.Id, _editingId,
-                        StringComparison.OrdinalIgnoreCase));
-                if (server is null)
-                {
-                    server = new SavedServer();
-                    _directory.Servers.Add(server);
-                }
+                        StringComparison.OrdinalIgnoreCase)) ?? new SavedServer();
+                if (!_directory.Servers.Contains(server)) _directory.Servers.Add(server);
                 server.Name = name;
                 server.Endpoint = endpoint;
                 server.Password = _password;
+                server.AdministrationEndpoint = administrationEndpoint;
+                server.AdministrationPassword = _administrationPassword;
                 _directory.SelectedServerId = server.Id;
                 _editingId = server.Id;
             }
             _name = name;
             _endpoint = endpoint;
+            _administrationEndpoint = administrationEndpoint;
             SaveDirectory();
+            ServerWorkspace.Select(ToWorkspaceProfile(server));
             Volatile.Write(ref _status, $"Saved {name}.");
+            MarkDirectoryChanged();
+            return true;
         }
         catch (Exception exception)
         {
             Volatile.Write(ref _status, $"Could not save server: {exception.Message}");
+            return false;
         }
+    }
+
+    private void ConnectEditedServer()
+    {
+        if (!SaveEditedServer()) return;
+        QueueConnection(_name, _endpoint, _password);
+    }
+
+    private void ConfigureEditedServer()
+    {
+        if (!SaveEditedServer()) return;
+        if (SelectedWorkspaceProfile() is { } profile)
+            ServerWorkspace.OpenAdministration(profile);
+    }
+
+    private void ConnectSavedServer(string id)
+    {
+        Select(id);
+        QueueConnection(_name, _endpoint, _password);
+    }
+
+    private void ConfigureSavedServer(string id)
+    {
+        Select(id);
+        if (SelectedWorkspaceProfile() is { } profile)
+            ServerWorkspace.OpenAdministration(profile);
     }
 
     private void DeleteSelected()
@@ -230,10 +345,34 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
             _directory.SelectedServerId = _directory.Servers.FirstOrDefault()?.Id ?? "";
         }
         SaveDirectory();
-        Select(_directory.SelectedServerId);
+        _showEditor = false;
         _confirmDelete = false;
+        if (string.IsNullOrEmpty(_directory.SelectedServerId))
+            ServerWorkspace.ClearSelection();
+        else
+            Select(_directory.SelectedServerId);
         Volatile.Write(ref _status, "Saved server deleted.");
+        MarkDirectoryChanged();
     }
+
+    private ServerWorkspaceProfile? SelectedWorkspaceProfile()
+    {
+        lock (_directoryGate)
+        {
+            var server = _directory.Servers.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, _directory.SelectedServerId,
+                    StringComparison.OrdinalIgnoreCase));
+            return server is null ? null : ToWorkspaceProfile(server);
+        }
+    }
+
+    private static ServerWorkspaceProfile ToWorkspaceProfile(SavedServer server) => new(
+        server.Id,
+        server.Name,
+        server.Endpoint,
+        server.Password,
+        server.AdministrationEndpoint,
+        server.AdministrationPassword);
 
     private void QueueConnection(string name, string endpoint, string password)
     {

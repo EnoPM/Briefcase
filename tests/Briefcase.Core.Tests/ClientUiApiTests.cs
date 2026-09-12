@@ -160,7 +160,7 @@ public sealed class ClientUiApiTests
     }
 
     [Fact]
-    public void Client_tab_is_created_only_for_an_explicit_complex_panel()
+    public void Explicit_complex_panel_updates_the_legacy_visibility_signal()
     {
         using var directory = new TemporaryDirectory();
         using var registry = new ConfigurationRegistry(
@@ -177,6 +177,46 @@ public sealed class ClientUiApiTests
             Assert.True(scope.ShouldShowClientTab);
 
         Assert.False(scope.ShouldShowClientTab);
+    }
+
+    [Fact]
+    public void Server_workspace_shares_selection_and_administration_navigation()
+    {
+        ServerWorkspace.ClearSelection();
+        var observed = new List<ServerWorkspaceEvent>();
+        using var subscription = ServerWorkspace.Subscribe(observed.Add);
+        var profile = new ServerWorkspaceProfile(
+            "test-server",
+            "Test server",
+            "127.0.0.1:50000",
+            "game-secret",
+            "127.0.0.1:47000",
+            "admin-secret");
+
+        try
+        {
+            ServerWorkspace.Select(profile);
+            Assert.Single(observed);
+            Assert.Same(profile, observed[0].Profile);
+            Assert.False(observed[0].OpenAdministration);
+
+            ServerWorkspaceEvent? replayed = null;
+            using (ServerWorkspace.Subscribe(value => replayed = value, replaySelection: true))
+            {
+                Assert.NotNull(replayed);
+                Assert.Same(profile, replayed.Profile);
+                Assert.False(replayed.OpenAdministration);
+            }
+
+            ServerWorkspace.OpenAdministration(profile);
+            Assert.Equal(2, observed.Count);
+            Assert.True(observed[1].OpenAdministration);
+            Assert.Equal("admin-secret", observed[1].Profile!.AdministrationPassword);
+        }
+        finally
+        {
+            ServerWorkspace.ClearSelection();
+        }
     }
 
     [Fact]

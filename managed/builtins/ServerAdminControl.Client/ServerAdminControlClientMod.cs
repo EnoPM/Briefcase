@@ -41,6 +41,7 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
 
     private ModContext _context;
     private IDisposable? _panel;
+    private IDisposable? _serverWorkspaceSubscription;
     private ConfigEntry<string>? _endpoint;
     private ConfigEntry<string>? _administrationSecret;
     private CancellationTokenSource? _networkLifetime;
@@ -111,6 +112,9 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
             context, Info,
             () => _endpoint?.Value ?? "127.0.0.1:47000",
             context.Info, context.Warning);
+        _serverWorkspaceSubscription = ServerWorkspace.Subscribe(
+            ApplyServerWorkspace,
+            replaySelection: true);
         CommunityBalanceState.Reset();
         _panel = context.Ui().RegisterServerPanel("Administration", BuildComponentPanel());
         // Network work starts from the first patched tick, after Load has
@@ -125,6 +129,8 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
     {
         _active = null;
         Interlocked.Exchange(ref _pendingReturnReason, null);
+        _serverWorkspaceSubscription?.Dispose();
+        _serverWorkspaceSubscription = null;
         _handshake?.Dispose();
         _handshake = null;
         _networkLifetime?.Cancel();
@@ -138,6 +144,27 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
         CommunityBalanceState.Reset();
     }
 
+    private void ApplyServerWorkspace(ServerWorkspaceEvent notification)
+    {
+        var profile = notification.Profile;
+        if (profile is null) return;
+
+        if (_endpoint is not null && !string.Equals(
+                _endpoint.Value,
+                profile.AdministrationEndpoint,
+                StringComparison.OrdinalIgnoreCase))
+            _endpoint.Value = profile.AdministrationEndpoint;
+        if (_administrationSecret is not null &&
+            _administrationSecret.Value != profile.AdministrationPassword)
+            _administrationSecret.Value = profile.AdministrationPassword;
+
+        _handshake?.Refresh();
+        if (!notification.OpenAdministration) return;
+        Volatile.Write(
+            ref _protocolStatus,
+            $"Selected {profile.Name} ({profile.AdministrationEndpoint}) for administration.");
+        Interlocked.Exchange(ref _refreshWorkspaceAfterLoad, 1);
+    }
     private ServerConfigurationEnvelope UpdateServerConfiguration(
         ServerConfigurationEnvelope configuration)
     {

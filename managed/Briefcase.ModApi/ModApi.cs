@@ -20,9 +20,10 @@ public sealed record ModInfo(
     public IReadOnlyList<string> Dependencies { get; init; } = [];
 
     /// <summary>
-    /// Controls whether a complex panel registered through the client UI API
-    /// receives its own navigation entry. Settings declared only with Bind are
-    /// always generated inside the central Mods page.
+    /// Legacy compatibility hint retained for mods built against earlier
+    /// Briefcase versions. The framework-owned menu now renders all simple and
+    /// complex client configuration inside the central Mods page and does not
+    /// create a top-level navigation entry per mod.
     /// </summary>
     public bool ShowConfigurationTab { get; init; } = true;
 }

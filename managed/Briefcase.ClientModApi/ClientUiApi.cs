@@ -14,7 +14,10 @@ public readonly struct ClientUiApi
 
     public bool IsAvailable => _scope is not null;
 
-    /// <summary>Adds toolkit-neutral content to this mod's client tab.</summary>
+    /// <summary>
+    /// Adds toolkit-neutral content to this mod's detail view inside the
+    /// framework-owned Mods page.
+    /// </summary>
     public IDisposable RegisterPanel(UiComponent content)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -22,8 +25,8 @@ public readonly struct ClientUiApi
     }
 
     /// <summary>
-    /// Adds toolkit-neutral content to Briefcase's remote-server view. The
-    /// panel still runs in the game client; it is never loaded by the server.
+    /// Adds toolkit-neutral content to Briefcase's Servers workspace. The panel
+    /// still runs in the game client; it is never loaded by the server.
     /// </summary>
     public IDisposable RegisterServerPanel(string name, UiComponent content)
     {

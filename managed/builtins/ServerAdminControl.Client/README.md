@@ -1,7 +1,7 @@
 # ServerAdminControl.Client
 
 This Briefcase Core built-in is the in-game administration client for a Deceive
-Inc. community server. The **Server** view in the F1 window uses vertical
+Inc. community server. Its detail view inside **Servers** uses vertical
 **Server**, **Players**, **Balancing**, **Mods**, and **Compatibility** pages. It
 edits the typed dedicated-server configuration, restarts the process, edits
 vanilla community balancing, controls managed server mods, and inspects the
@@ -15,7 +15,7 @@ player/server mod manifests.
    parameter buffer is valid. No native game pointer reaches the mod.
 4. The mod decompresses the zlib payload and wraps every override as a typed
    setting with a category, section, readable name, description and range.
-5. Numbers, booleans and text use appropriate validated controls in the F1 tab.
+5. Numbers, booleans and text use appropriate validated controls in the F1 menu.
 6. Applying changes sends the reconstructed profile to
    `ServerAdminControl.Server`, then requests the profile through the game's RPC.
 
@@ -30,10 +30,10 @@ Administration and compatibility share the configured Briefcase endpoint,
 The frame's channel field determines which bounded protocol handles it.
 
 Administration protocol version 7 authenticates every command with a one-use,
-ten-second challenge. The client derives a key from the password entered on the
-**Server** page with PBKDF2-SHA256, then signs the nonce, request ID and requested
-operation with HMAC-SHA256. The password itself is never transmitted. It must
-match `AdminPassword` in the dedicated server's `TripwireServer.ini`.
+ten-second challenge. The client derives a key from the selected server's
+administration password with PBKDF2-SHA256, then signs the nonce, request ID and
+requested operation with HMAC-SHA256. The password itself is never transmitted.
+It must match `AdminPassword` in the dedicated server's `TripwireServer.ini`.
 
 The wrapper keeps source identifiers and unknown properties internally. New
 settings therefore remain visible after a game update, using a text editor when
@@ -55,7 +55,8 @@ been deployed:
 scripts\build\build_server_admin_control_client.bat Release
 ```
 
-Connect to a community server, press F1, select **Server** at the top, and enter
-the administration password before refreshing the configuration.
+Press F1, select **Servers**, add or edit the server, then choose **Configure**.
+Its administration endpoint and password are selected before the administration
+detail opens.
 The **Balancing** page shows searchable categories and documented settings; the
 **Server mods** page exposes the server-side Briefcase lifecycle controls.

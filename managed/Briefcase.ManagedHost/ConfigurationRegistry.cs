@@ -266,8 +266,9 @@ internal sealed partial class ConfigurationRegistry : IDisposable
         public bool IsDisposed { get; private set; }
 
         /// <summary>
-        /// A client navigation tab is reserved for mods that explicitly register
-        /// complex content. Bind-only configuration stays in the central Mods page.
+        /// Legacy signal retained for compatibility tests and earlier menu hosts.
+        /// The current framework-owned menu renders registered content inside the
+        /// selected mod's detail view in the central Mods page.
         /// </summary>
         public bool ShouldShowClientTab
         {

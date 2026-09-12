@@ -4,7 +4,7 @@ namespace Briefcase.ServerBrowser.Client;
 
 internal sealed class ServerDirectory
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public string SelectedServerId { get; set; } = "";
     public List<SavedServer> Servers { get; set; } = [];
 }
@@ -15,6 +15,8 @@ internal sealed class SavedServer
     public string Name { get; set; } = "New server";
     public string Endpoint { get; set; } = "127.0.0.1:50000";
     public string Password { get; set; } = "";
+    public string AdministrationEndpoint { get; set; } = "127.0.0.1:47000";
+    public string AdministrationPassword { get; set; } = "";
 }
 
 internal sealed class ServerDirectoryStore(string path, string frameworkSettingsPath)
@@ -33,10 +35,12 @@ internal sealed class ServerDirectoryStore(string path, string frameworkSettings
             var result = JsonSerializer.Deserialize<ServerDirectory>(
                              File.ReadAllText(path), JsonOptions)
                          ?? new ServerDirectory();
+            var sourceSchemaVersion = result.SchemaVersion;
+            result.SchemaVersion = 2;
             result.Servers ??= [];
             result.Servers = result.Servers
                 .Where(server => server is not null)
-                .Select(Normalize)
+                .Select(server => Normalize(server, sourceSchemaVersion))
                 .GroupBy(server => server.Id, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToList();
@@ -69,21 +73,31 @@ internal sealed class ServerDirectoryStore(string path, string frameworkSettings
     {
         var endpoint = "127.0.0.1:50000";
         var password = "";
+        var administrationEndpoint = "127.0.0.1:47000";
+        var administrationPassword = "";
         try
         {
             if (File.Exists(frameworkSettingsPath))
             {
                 using var settings = JsonDocument.Parse(File.ReadAllText(frameworkSettingsPath));
-                if (settings.RootElement.TryGetProperty("Mods", out var mods) &&
-                    mods.TryGetProperty("briefcase.startup-automation", out var startup) &&
-                    startup.TryGetProperty("Values", out var values))
+                if (settings.RootElement.TryGetProperty("Mods", out var mods))
                 {
-                    if (values.TryGetProperty(
-                            "Community server/Server endpoint", out var endpointValue))
-                        endpoint = endpointValue.GetString() ?? endpoint;
-                    if (values.TryGetProperty(
-                            "Community server/Server password", out var passwordValue))
-                        password = passwordValue.GetString() ?? password;
+                    if (TryGetValues(mods, "briefcase.startup-automation", out var startup))
+                    {
+                        endpoint = ReadString(
+                            startup, "Community server/Server endpoint", endpoint);
+                        password = ReadString(
+                            startup, "Community server/Server password", password);
+                    }
+                    if (TryGetValues(mods, "server-admin-control.client", out var administration))
+                    {
+                        administrationEndpoint = ReadString(
+                            administration, "Briefcase server/Endpoint",
+                            administrationEndpoint);
+                        administrationPassword = ReadString(
+                            administration, "Briefcase server/Administration password",
+                            administrationPassword);
+                    }
                 }
             }
         }
@@ -94,7 +108,9 @@ internal sealed class ServerDirectoryStore(string path, string frameworkSettings
         {
             Name = "Community server",
             Endpoint = endpoint,
-            Password = password
+            Password = password,
+            AdministrationEndpoint = administrationEndpoint,
+            AdministrationPassword = administrationPassword
         };
         return new ServerDirectory
         {
@@ -103,7 +119,25 @@ internal sealed class ServerDirectoryStore(string path, string frameworkSettings
         };
     }
 
-    private static SavedServer Normalize(SavedServer server)
+    private static bool TryGetValues(
+        JsonElement mods,
+        string modId,
+        out JsonElement values)
+    {
+        values = default;
+        return mods.TryGetProperty(modId, out var mod) &&
+               mod.TryGetProperty("Values", out values);
+    }
+
+    private static string ReadString(
+        JsonElement values,
+        string name,
+        string fallback) =>
+        values.TryGetProperty(name, out var value)
+            ? value.GetString() ?? fallback
+            : fallback;
+
+    private static SavedServer Normalize(SavedServer server, int sourceSchemaVersion)
     {
         server.Id = string.IsNullOrWhiteSpace(server.Id)
             ? Guid.NewGuid().ToString("N")
@@ -113,6 +147,20 @@ internal sealed class ServerDirectoryStore(string path, string frameworkSettings
             : server.Name.Trim();
         server.Endpoint = server.Endpoint?.Trim() ?? "";
         server.Password ??= "";
+        server.AdministrationEndpoint = sourceSchemaVersion < 2 ||
+                                        string.IsNullOrWhiteSpace(server.AdministrationEndpoint)
+            ? DefaultAdministrationEndpoint(server.Endpoint)
+            : server.AdministrationEndpoint.Trim();
+        server.AdministrationPassword ??= "";
         return server;
+    }
+
+    private static string DefaultAdministrationEndpoint(string gameEndpoint)
+    {
+        var endpoint = gameEndpoint?.Trim() ?? "";
+        if (endpoint.Length == 0) return "127.0.0.1:47000";
+        var separator = endpoint.LastIndexOf(':');
+        var host = separator > 0 ? endpoint[..separator] : endpoint;
+        return $"{host}:47000";
     }
 }

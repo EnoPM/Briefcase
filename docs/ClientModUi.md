@@ -1,11 +1,11 @@
 # Client mod UI
 
 `Briefcase.ClientModApi` is the client-only contract for complex configuration
-panels. Registering a panel gives the mod its own navigation entry and lets it
-describe controls once while Briefcase chooses the Avalonia renderer
-from `Briefcase/loader.json`. Mods that only need standard persistent settings
-can use `context.Configuration.Bind(...)`; Briefcase renders those settings in
-the central `Mods` page without any UI code.
+panels. Registering a panel adds it to the mod's detail view inside Briefcase's
+framework-owned **Mods** page. The mod describes controls once and Briefcase
+renders them with Avalonia. Mods that only need standard persistent settings can
+use `context.Configuration.Bind(...)`; Briefcase renders those settings without
+any UI code.
 
 Add this project reference during development:
 
@@ -212,12 +212,12 @@ implementation details.
 - `Ui.Dynamic` rebuilds a subtree when its revision changes.
 - `Ui.Separator` and `Ui.Spacer` control visual grouping.
 
-Briefcase groups automatic configuration by section in responsive cards. A
-page uses two columns when space permits and one column in a narrower game
-window. Changes stay in a session draft while the player moves between pages
-or closes the menu. **Apply changes** writes only the current page; **Cancel**
-restores that page's last applied values. A violet dot beside the mod name
-marks a pending draft.
+Briefcase groups automatic configuration by section in responsive cards. The
+detail view uses two columns when space permits and one column in a narrower
+game window. Changes stay in a session draft while the player returns to the mod
+list or closes the menu. **Apply changes** writes only the current mod;
+**Cancel** restores that mod's last applied values. Its catalogue card reports
+when settings remain unsaved.
 
 Custom panels keep the commit behavior defined by their components. Use
 `UiCommitMode.OnCommit` when an expensive value should wait for Enter or focus
@@ -243,8 +243,8 @@ refresh.
 ## Configuration and overlays
 
 Use `context.Configuration.Bind(...)` by itself when Briefcase's generated
-editors are sufficient. Register a client panel only for layouts or interactions
-that need a dedicated page, and bind its components to the corresponding
-`ConfigEntry<T>.Value`. ESP markers, crosshairs, and other per-frame game
+editors are sufficient. Register a client panel only for richer layouts or
+interactions, and bind its components to the corresponding `ConfigEntry<T>.Value`.
+ESP markers, crosshairs, and other per-frame game
 drawings continue to use the rendering API because they belong on the
 low-latency overlay path.
