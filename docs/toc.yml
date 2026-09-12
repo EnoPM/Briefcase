@@ -1,0 +1,46 @@
+- name: Home
+  href: index.md
+- name: Getting started
+  items:
+  - name: Install Briefcase
+    href: getting-started/installation.md
+  - name: Create your first mod
+    href: getting-started/first-mod.md
+  - name: Explore the generated SDK
+    href: getting-started/explore-sdk.md
+- name: Mod development
+  items:
+  - name: C# runtime and mod lifecycle
+    href: CSharpRuntime.md
+  - name: Game thread
+    href: GameThread.md
+  - name: Configuration
+    href: ModConfiguration.md
+  - name: Client UI
+    href: ClientModUi.md
+  - name: Dependencies
+    href: ModDependencies.md
+  - name: Unreal events
+    href: UnrealEvents.md
+  - name: Unreal object lifecycle
+    href: UnrealObjectLifecycle.md
+  - name: Patching
+    href: Patching.md
+- name: Framework internals
+  items:
+  - name: Architecture
+    href: BriefcaseArchitecture.md
+  - name: Unreal reflection
+    href: BriefcaseUnrealReflection.md
+  - name: Automatic SDK generation
+    href: AutomaticSdkGeneration.md
+  - name: Avalonia UI architecture
+    href: AvaloniaUiPreview.md
+  - name: Native startup modules
+    href: NativeStartupModules.md
+  - name: Client/server handshake
+    href: ModHandshake.md
+  - name: Building Briefcase
+    href: Building.md
+  - name: Versioning
+    href: Versioning.md

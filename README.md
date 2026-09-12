@@ -3,6 +3,10 @@
 [![Checks](https://github.com/EnoPM/Briefcase/actions/workflows/checks.yml/badge.svg)](https://github.com/EnoPM/Briefcase/actions/workflows/checks.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[Documentation](https://enopm.github.io/Briefcase/) ·
+[Releases](https://github.com/EnoPM/Briefcase/releases) ·
+[Report a problem](https://github.com/EnoPM/Briefcase/issues)
+
 Briefcase is a mod loader for **Deceive Inc.** It lets you add community-made
 mods to the game or to a dedicated server by copying files into the game
 folder. Everything Briefcase needs is included in the download: you do not

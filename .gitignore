@@ -2,10 +2,11 @@
 .vs/
 artifacts/
 dist/
+docs/_site/
+docs/obj/
 **/bin/
 **/obj/
 *.suo
 *.user
 *.DotSettings.user
 third_party/*.zip
-

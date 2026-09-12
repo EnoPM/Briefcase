@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/v2.78.5/schemas/docfx.schema.json",
+  "build": {
+    "content": [
+      {
+        "files": [
+          "**/*.{md,yml}"
+        ],
+        "exclude": [
+          "_site/**",
+          "obj/**"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": [
+          "images/**"
+        ]
+      }
+    ],
+    "postProcessors": [
+      "ExtractSearchIndex"
+    ],
+    "globalMetadata": {
+      "_appTitle": "Briefcase documentation",
+      "_appName": "Briefcase",
+      "_appLogoPath": "images/briefcase.svg",
+      "_appFaviconPath": "images/briefcase.svg",
+      "_enableSearch": true,
+      "_gitContribute": {
+        "repo": "https://github.com/EnoPM/Briefcase",
+        "branch": "main"
+      },
+      "_gitUrlPattern": "github",
+      "_appFooter": "Briefcase is a community-made mod loader for Deceive Inc."
+    },
+    "sitemap": {
+      "baseUrl": "https://enopm.github.io/Briefcase/",
+      "priority": 0.5,
+      "changefreq": "weekly"
+    },
+    "output": "_site",
+    "template": [
+      "default",
+      "modern"
+    ]
+  }
+}
