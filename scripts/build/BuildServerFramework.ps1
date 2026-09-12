@@ -73,7 +73,7 @@ try {
     # JSON as a ZIP saves repository space and makes Git treat it as binary.
     $snapshotFileName="DeceiveInc.Server.$build.json"
     $snapshotArchive=Join-Path $root "sdk\snapshots\$snapshotFileName.zip"
-    $installedSnapshot=if($null -eq $serverWin64) {
+    $installedSnapshot=if([string]::IsNullOrWhiteSpace($serverWin64)) {
         $null
     } else {
         Join-Path $serverWin64 "Briefcase\Core\Sdk\Metadata\$snapshotFileName"
