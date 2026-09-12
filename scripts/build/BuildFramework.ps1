@@ -70,6 +70,21 @@ try {
         '--runtime','win-x64','--output',$managedHostPublish)
     if($result -ne 0){ exit $result }
 
+    $updateInstallerProject=Join-Path $root 'managed\Briefcase.UpdateInstaller\Briefcase.UpdateInstaller.csproj'
+    $updateInstallerPublish=Join-Path $root 'artifacts\publish\UpdateInstaller'
+    if(Test-Path -LiteralPath $updateInstallerPublish) {
+        $resolvedUpdater=[IO.Path]::GetFullPath($updateInstallerPublish)
+        $artifactPrefix=[IO.Path]::GetFullPath((Join-Path $root 'artifacts')).TrimEnd('\') + '\'
+        if(-not $resolvedUpdater.StartsWith($artifactPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe update installer publish path: $resolvedUpdater"
+        }
+        Remove-Item -LiteralPath $resolvedUpdater -Recurse -Force
+    }
+    Write-Host "Publishing Briefcase update installer | $Configuration | Native AOT"
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        'publish',$updateInstallerProject,'-c',$Configuration,'--runtime','win-x64',
+        '--self-contained','true','--output',$updateInstallerPublish)
+    if($result -ne 0){ exit $result }
     $avaloniaProject=Join-Path $root 'managed\Briefcase.AvaloniaUi\Briefcase.AvaloniaUi.csproj'
     $avaloniaMenuProject=Join-Path $root 'managed\Briefcase.AvaloniaMenu\Briefcase.AvaloniaMenu.csproj'
     $avaloniaPublish=Join-Path $root 'artifacts\publish\AvaloniaUi'
@@ -182,8 +197,9 @@ try {
     $avaloniaDistribution=Join-Path $coreDistribution 'Ui\Avalonia'
     $builtInsDistribution=Join-Path $coreDistribution 'BuiltIns'
     $dotNetDistribution=Join-Path $coreDistribution 'DotNet'
+    $updaterDistribution=Join-Path $coreDistribution 'Updater'
     $modsDistribution=Join-Path $frameworkDistribution 'Mods'
-    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$avaloniaDistribution,$builtInsDistribution,$modsDistribution -Force | Out-Null
+    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$avaloniaDistribution,$builtInsDistribution,$updaterDistribution,$modsDistribution -Force | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $root 'VERSION') `
         -Destination (Join-Path $frameworkDistribution 'VERSION') -Force
@@ -192,6 +208,8 @@ try {
         -Destination (Join-Path $distribution 'version.dll') -Force
     Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `
         -Destination (Join-Path $nativeDistribution 'Briefcase.UnrealRuntime.dll') -Force
+    Copy-Item -LiteralPath (Join-Path $updateInstallerPublish 'Briefcase.UpdateInstaller.exe') `
+        -Destination (Join-Path $updaterDistribution 'Briefcase.UpdateInstaller.exe') -Force
 
     Copy-Item -Path (Join-Path $managedHostPublish '*') -Destination $coreDistribution -Recurse -Force
     Copy-Item -Path (Join-Path $avaloniaPublish '*') -Destination $avaloniaDistribution -Recurse -Force
@@ -200,6 +218,8 @@ try {
     @(
         'Briefcase.ManagedHost.dll',
         'Briefcase.ManagedHost.pdb',
+        'Briefcase.Updater.dll',
+        'Briefcase.Updater.pdb',
         'Briefcase.ModApi.dll',
         'Briefcase.ModApi.pdb',
         'Briefcase.ClientModApi.dll',
@@ -266,6 +286,8 @@ try {
     $loaderConfiguration = @'
 {
   "schemaVersion": 1,
+  "automaticUpdates": true,
+  "updateRestartMode": "auto",
   "sdkSnapshotFormat": "binary",
   "sdkSnapshotRefresh": "missing",
   "avaloniaMenuLifetime": "cached",

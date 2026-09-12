@@ -233,6 +233,8 @@ Briefcase\Mods.
         Assert-File $stage 'Briefcase\loader.json'
         Assert-File $stage 'Briefcase\VERSION'
         Assert-File $stage 'Briefcase\Core\Briefcase.ManagedHost.dll'
+        Assert-File $stage 'Briefcase\Core\Briefcase.Updater.dll'
+        Assert-File $stage 'Briefcase\Core\Updater\Briefcase.UpdateInstaller.exe'
         Assert-File $stage 'Briefcase\Core\Briefcase.ModApi.dll'
         Assert-File $stage 'Briefcase\Core\Briefcase.SdkSnapshots.dll'
         Assert-File $stage 'Briefcase\Core\Native\Briefcase.UnrealRuntime.dll'
@@ -265,6 +267,8 @@ Briefcase\Mods.
         'Briefcase/loader.json',
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Briefcase.Updater.dll',
+        'Briefcase/Core/Updater/Briefcase.UpdateInstaller.exe',
         'Briefcase/Core/Briefcase.ClientModApi.dll',
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaUi.dll',
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaMenu.dll',
@@ -279,6 +283,8 @@ Briefcase\Mods.
         'Briefcase/loader.json',
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Briefcase.Updater.dll',
+        'Briefcase/Core/Updater/Briefcase.UpdateInstaller.exe',
         'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'StartBriefcaseServer.bat',

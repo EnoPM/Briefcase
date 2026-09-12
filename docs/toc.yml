@@ -4,6 +4,8 @@
   items:
   - name: Install Briefcase
     href: getting-started/installation.md
+  - name: Automatic updates
+    href: AutomaticUpdates.md
   - name: Create your first mod
     href: getting-started/first-mod.md
   - name: Explore the generated SDK

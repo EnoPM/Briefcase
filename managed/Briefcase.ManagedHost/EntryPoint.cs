@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Briefcase.ModApi;
 using Briefcase.ModApi.Interop;
+using Briefcase.Updater;
 #if !BRIEFCASE_HEADLESS
 using Briefcase.Rendering;
 #endif
@@ -63,6 +64,8 @@ public static unsafe class EntryPoint
             var coreDirectory = Path.Combine(frameworkDirectory, "Core");
             FrameworkDependencyResolver.Attach(coreDirectory);
             var loaderConfigurationPath = Path.Combine(frameworkDirectory, "loader.json");
+            var updateSettings = FrameworkUpdateSettingsReader.Read(
+                loaderConfigurationPath, context.Warning);
 #if !BRIEFCASE_HEADLESS
             var enableGameWindowChrome = FrameworkUiSettings.ReadGameWindowChrome(
                 loaderConfigurationPath, context.Warning);
@@ -102,9 +105,11 @@ public static unsafe class EntryPoint
             _initializationThread = new Thread(() => InitializeComponents(
                 context,
                 modManagement,
+                gameDirectory,
                 frameworkDirectory,
                 coreDirectory,
-                isServer))
+                isServer,
+                updateSettings))
             {
                 IsBackground = true,
                 Name = "Briefcase startup",
@@ -125,12 +130,23 @@ public static unsafe class EntryPoint
     private static void InitializeComponents(
         ModContext context,
         DeferredModManagementBackend modManagement,
+        string gameDirectory,
         string frameworkDirectory,
         string coreDirectory,
-        bool isServer)
+        bool isServer,
+        FrameworkUpdateSettings updateSettings)
     {
         try
         {
+            if (PrepareAutomaticUpdate(
+                    context,
+                    gameDirectory,
+                    frameworkDirectory,
+                    coreDirectory,
+                    isServer,
+                    updateSettings))
+                return;
+
             Report(0.08, "Loading the generated SDK", "Identifying the SDK for this game build...");
             var generatedSdk = GeneratedSdkLoader.Load(
                 context,
@@ -181,6 +197,89 @@ public static unsafe class EntryPoint
 #if !BRIEFCASE_HEADLESS
             _startupProgress?.Fail(exception.Message);
 #endif
+        }
+    }
+
+    private static bool PrepareAutomaticUpdate(
+        ModContext context,
+        string gameDirectory,
+        string frameworkDirectory,
+        string coreDirectory,
+        bool isServer,
+        FrameworkUpdateSettings settings)
+    {
+        if (!settings.Enabled)
+        {
+            context.Info("Automatic updates are disabled in loader.json.");
+            return false;
+        }
+
+        var versionPath = Path.Combine(frameworkDirectory, "VERSION");
+        var installerPath = Path.Combine(
+            coreDirectory, "Updater", "Briefcase.UpdateInstaller.exe");
+        try
+        {
+            var installedVersion = File.ReadAllText(versionPath).Trim();
+            var packageKind = isServer
+                ? BriefcasePackageKind.Server
+                : BriefcasePackageKind.Client;
+            var staging = Path.Combine(
+                Path.GetTempPath(), "Briefcase", "Updates");
+            var lastServerStage = "";
+            var lastServerBucket = -1;
+            using var releases = new GitHubReleaseClient();
+            var update = releases.PrepareLatestAsync(
+                    new BriefcaseUpdateOptions(
+                        installedVersion,
+                        packageKind,
+                        staging),
+                    progress =>
+                    {
+                        Report(progress.Progress, progress.Stage, progress.Detail);
+                        if (!isServer) return;
+                        var bucket = (int)(progress.Progress * 10);
+                        if (string.Equals(lastServerStage, progress.Stage,
+                                StringComparison.Ordinal) &&
+                            bucket <= lastServerBucket)
+                            return;
+                        lastServerStage = progress.Stage;
+                        lastServerBucket = bucket;
+                        context.Info($"Updater: {progress.Stage} - {progress.Detail}");
+                    })
+                .GetAwaiter()
+                .GetResult();
+            if (update is null)
+            {
+                if (!isServer)
+                    context.Info($"Briefcase {installedVersion} is up to date.");
+                return false;
+            }
+
+            UpdateInstallerLauncher.Schedule(
+                update,
+                gameDirectory,
+                installerPath,
+                settings.RestartMode,
+                context.Info);
+            Report(
+                0.98,
+                "Restarting Deceive Inc.",
+                $"Briefcase {update.DisplayVersion} will be installed before restart.");
+            context.Info(
+                $"Updater: closing the process to install Briefcase {update.DisplayVersion}.");
+            Thread.Sleep(350);
+            Environment.Exit(0);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            context.Warning(
+                $"Automatic update was not applied; continuing with the installed version: {exception.Message}");
+            Report(
+                0.07,
+                "Update check unavailable",
+                "Briefcase will continue with the installed version.");
+            return false;
         }
     }
 

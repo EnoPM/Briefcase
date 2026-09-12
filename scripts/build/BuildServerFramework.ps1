@@ -43,6 +43,21 @@ try {
         '-p:BriefcaseHeadless=true','--output',$publishCore)
     if($result -ne 0){ exit $result }
 
+    $updateInstallerProject=Join-Path $root 'managed\Briefcase.UpdateInstaller\Briefcase.UpdateInstaller.csproj'
+    $updateInstallerPublish=Join-Path $root 'artifacts\publish\UpdateInstaller'
+    if(Test-Path -LiteralPath $updateInstallerPublish) {
+        $resolvedUpdater=[IO.Path]::GetFullPath($updateInstallerPublish)
+        $artifactPrefix=[IO.Path]::GetFullPath((Join-Path $root 'artifacts')).TrimEnd('\') + '\'
+        if(-not $resolvedUpdater.StartsWith($artifactPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe update installer publish path: $resolvedUpdater"
+        }
+        Remove-Item -LiteralPath $resolvedUpdater -Recurse -Force
+    }
+    Write-Host "Publishing Briefcase update installer | $Configuration | Native AOT"
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        'publish',$updateInstallerProject,'-c',$Configuration,'--runtime','win-x64',
+        '--self-contained','true','--output',$updateInstallerPublish)
+    if($result -ne 0){ exit $result }
     $build='6A966107-05B60000'
     $serverWin64='D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64'
     # CI and clean developer machines use the reviewed, address-free snapshot
@@ -119,13 +134,16 @@ try {
     $builtIns=Join-Path $core 'BuiltIns'
     $mods=Join-Path $framework 'Mods'
     $dotnetDistribution=Join-Path $core 'DotNet'
-    New-Item -ItemType Directory -Path $core,$native,$builtIns,$mods -Force | Out-Null
+    $updaterDistribution=Join-Path $core 'Updater'
+    New-Item -ItemType Directory -Path $core,$native,$builtIns,$updaterDistribution,$mods -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $root 'VERSION') `
         -Destination (Join-Path $framework 'VERSION') -Force
     Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
         -Destination (Join-Path $distribution 'version.dll')
     Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `
         -Destination (Join-Path $native 'Briefcase.UnrealRuntime.dll')
+    Copy-Item -LiteralPath (Join-Path $updateInstallerPublish 'Briefcase.UpdateInstaller.exe') `
+        -Destination (Join-Path $updaterDistribution 'Briefcase.UpdateInstaller.exe') -Force
     Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServer.bat') `
         -Destination (Join-Path $distribution 'StartBriefcaseServer.bat')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServerNoUI.bat') `
@@ -163,7 +181,7 @@ try {
     # Server mods are built and distributed independently from Briefcase Core.
     [IO.File]::WriteAllText(
         (Join-Path $framework 'loader.json'),
-        "{`n  `"schemaVersion`": 1,`n  `"sdkSnapshotFormat`": `"binary`",`n  `"sdkSnapshotRefresh`": `"missing`"`n}`n",
+        "{`n  `"schemaVersion`": 1,`n  `"automaticUpdates`": true,`n  `"updateRestartMode`": `"auto`",`n  `"sdkSnapshotFormat`": `"binary`",`n  `"sdkSnapshotRefresh`": `"missing`"`n}`n",
         [Text.UTF8Encoding]::new($false))
 
     Organize-BriefcaseFrameworkPackage $framework

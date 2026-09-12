@@ -68,8 +68,17 @@ removing any information you do not want to share publicly.
 
 ## Update or remove Briefcase
 
-To update, close the game or server and extract the newer matching archive over
-the existing installation. Installed mods and saved settings are not removed.
+Briefcase automatically checks the latest stable GitHub release at startup. A
+new client version is downloaded behind the centered progress overlay. A new
+server version reports its progress in the terminal and log. Briefcase then
+closes, installs the verified package, and restarts automatically.
+
+Installed mods, `loader.json`, saved settings, logs, and server configuration
+are preserved. See [Automatic updates](../AutomaticUpdates.md) for the exact
+replacement rules and optional settings.
+
+To update manually, close the game or server and extract the newer matching
+archive over the existing installation.
 
 To remove Briefcase, delete its `version.dll`, its `Briefcase` folder, and the
 server start script when applicable. Restore a previous `version.dll` if you

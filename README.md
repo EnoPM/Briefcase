@@ -102,17 +102,21 @@ DeceiveInc\Binaries\Win64\Briefcase\Mods
 Start the server again with `StartBriefcaseServer.bat`. Server-side mods do not
 create an F1 menu on the server.
 
-## Update Briefcase
+## Automatic updates
 
-1. Close the game or stop the dedicated server.
-2. Download the newer client or server archive.
-3. Extract it into the same `DeceiveInc\Binaries\Win64` folder and allow files
-   to be replaced.
-4. Start the game or server again.
+Briefcase checks for a newer stable release whenever the game or dedicated
+server starts. The client shows a simple progress bar over the game while the
+update downloads. The server reports the progress in its terminal and log.
 
-The archive does not remove installed mods or saved mod settings. Always use
-the client archive for a client installation and the server archive for a
-server installation.
+After verification, Briefcase closes the current process, installs the update,
+and starts the game or server again. Installed mods, saved settings,
+`loader.json`, server configuration, and logs are preserved.
+
+If an update cannot be checked or downloaded, the installed version continues
+to load. Manual installation remains available by extracting the matching
+archive over the Win64 folder while the game or server is stopped. See the
+[automatic update guide](https://enopm.github.io/Briefcase/AutomaticUpdates.html)
+for configuration and recovery details.
 
 ## Remove Briefcase
 

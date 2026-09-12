@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\managed\Briefcase.ManagedHost\Briefcase.ManagedHost.csproj" />
+    <ProjectReference Include="..\..\managed\Briefcase.Updater\Briefcase.Updater.csproj" />
     <ProjectReference Include="..\..\managed\Briefcase.ModApi\Briefcase.ModApi.csproj" />
     <ProjectReference Include="..\..\managed\Briefcase.ClientModApi\Briefcase.ClientModApi.csproj" />
     <ProjectReference Include="..\..\managed\Briefcase.SdkEmitter\Briefcase.SdkEmitter.csproj" />

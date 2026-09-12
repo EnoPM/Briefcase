@@ -3,6 +3,7 @@
 
   <Folder Name="/Core/">
     <Project Path="managed/Briefcase.ModApi/Briefcase.ModApi.csproj" />
+    <Project Path="managed/Briefcase.Updater/Briefcase.Updater.csproj" />
     <Project Path="managed/Briefcase.ManagedHost/Briefcase.ManagedHost.csproj" />
     <Project Path="managed/Briefcase.SdkEmitter/Briefcase.SdkEmitter.csproj" />
     <Project Path="managed/Briefcase.SdkSnapshots/Briefcase.SdkSnapshots.csproj" />
@@ -39,6 +40,10 @@
 
   <Folder Name="/Core/Server/">
     <Project Path="managed/builtins/ServerAdminControl.Server/ServerAdminControl.Server.csproj" />
+  </Folder>
+
+  <Folder Name="/Core/Updater/">
+    <Project Path="managed/Briefcase.UpdateInstaller/Briefcase.UpdateInstaller.csproj" />
   </Folder>
 
   <Folder Name="/Core/Tooling/">
