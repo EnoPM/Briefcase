@@ -115,7 +115,7 @@ jobs:
           }
 
           $releaseCommit = (& git rev-parse HEAD).Trim()
-          Invoke-Git tag -a $tag $releaseCommit -m "Briefcase $nextVersion"
+          Invoke-Git @('tag', '-a', $tag, $releaseCommit, '-m', "Briefcase $nextVersion")
 
           # Updating main, the integration branch, and the tag atomically keeps
           # the next release on the new VERSION. If either branch changed after
