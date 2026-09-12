@@ -123,7 +123,7 @@ public sealed class GameThreadServiceTests
     }
 
     [Fact]
-    public void Driver_registration_retries_without_blocking_framework_startup()
+    public async Task Driver_registration_retries_without_blocking_framework_startup()
     {
         var driver = new DeferredGameThreadDriver();
         var info = new ConcurrentQueue<string>();
@@ -139,10 +139,12 @@ public sealed class GameThreadServiceTests
         var executed = false;
         api.Post(() => executed = true);
 
-        Assert.True(SpinWait.SpinUntil(() => driver.Attempts >= 2, TimeSpan.FromSeconds(1)));
+        await driver.RetryObserved.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(driver.Attempts >= 2);
         Assert.False(driver.IsStarted);
         driver.AllowRegistration();
-        Assert.True(SpinWait.SpinUntil(() => driver.IsStarted, TimeSpan.FromSeconds(1)));
+        await driver.RegistrationCompleted.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(driver.IsStarted);
 
         driver.Pump(default);
 
@@ -226,6 +228,10 @@ internal sealed class ManualGameThreadDriver : IGameThreadDriver
 
 internal sealed class DeferredGameThreadDriver : IGameThreadDriver
 {
+    private readonly TaskCompletionSource<bool> _registrationCompleted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _retryObserved =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Action<GameThreadPump>? _callback;
     private int _attempts;
     private int _allowRegistration;
@@ -236,13 +242,17 @@ internal sealed class DeferredGameThreadDriver : IGameThreadDriver
     public bool IsGameThread => false;
     public int Attempts => Volatile.Read(ref _attempts);
     public bool IsStarted => Volatile.Read(ref _started) != 0;
+    public Task RegistrationCompleted => _registrationCompleted.Task;
+    public Task RetryObserved => _retryObserved.Task;
 
     public bool TryStart(Action<GameThreadPump> callback)
     {
-        Interlocked.Increment(ref _attempts);
+        if (Interlocked.Increment(ref _attempts) >= 2)
+            _retryObserved.TrySetResult(true);
         if (Volatile.Read(ref _allowRegistration) == 0) return false;
         _callback = callback;
         Volatile.Write(ref _started, 1);
+        _registrationCompleted.TrySetResult(true);
         return true;
     }
 
