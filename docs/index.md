@@ -8,6 +8,10 @@ with Unreal Engine.
 This documentation is written for mod developers. Players who only want to
 install Briefcase or a mod can follow the [installation guide](getting-started/installation.md).
 
+[Download Briefcase](https://github.com/EnoPM/Briefcase/releases) ·
+[View the source](https://github.com/EnoPM/Briefcase) ·
+[Report a problem](https://github.com/EnoPM/Briefcase/issues)
+
 > [!NOTE]
 > Briefcase is under active development. The generated SDK and the runtime
 > profile are tied to a particular Deceive Inc. executable build.
