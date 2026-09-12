@@ -2,16 +2,22 @@
 param([ValidateSet('Debug','Release')][string]$Configuration='Release')
 $ErrorActionPreference='Stop'
 
+. (Join-Path $PSScriptRoot '..\Common.ps1')
+
 function Write-SnapshotCopy(
     [string]$Root,
     [hashtable]$Spec,
     [string]$Destination) {
     $fileName = "DeceiveInc.$($Spec.Target).$($Spec.Build).json"
-    $installed = Join-Path $Spec.GameRoot "Briefcase\Core\Sdk\Metadata\$fileName"
+    $installed = if([string]::IsNullOrWhiteSpace($Spec.GameRoot)) {
+        $null
+    } else {
+        Join-Path $Spec.GameRoot "Briefcase\Core\Sdk\Metadata\$fileName"
+    }
     $repositoryJson = Join-Path $Root "sdk\snapshots\$fileName"
     $repositoryArchive = "$repositoryJson.zip"
 
-    if (Test-Path -LiteralPath $installed -PathType Leaf) {
+    if ($null -ne $installed -and (Test-Path -LiteralPath $installed -PathType Leaf)) {
         $contents = [IO.File]::ReadAllText($installed)
         [IO.File]::WriteAllText($Destination, $contents, [Text.UTF8Encoding]::new($false))
         return
@@ -73,16 +79,28 @@ try {
     $modSdk=Join-Path $root "managed\Briefcase.ModApi\bin\$Configuration\net10.0\Briefcase.ModApi.dll"
     $sourceGenerator=Join-Path $root "managed\Briefcase.SdkGenerator\bin\$Configuration\net10.0\Briefcase.SdkGenerator.dll"
     $emitter=Join-Path $root "managed\Briefcase.SdkEmitter\bin\$Configuration\net10.0\Briefcase.SdkEmitter.dll"
+    $clientGameRoot=Resolve-BriefcaseLocalPath `
+        -EnvironmentVariable 'BRIEFCASE_CLIENT_GAME_DIR' `
+        -LocalSetting 'BriefcaseClientGameWin64' `
+        -CommandLineHint '-GameWin64' `
+        -Description 'client Win64' `
+        -Optional
+    $serverGameRoot=Resolve-BriefcaseLocalPath `
+        -EnvironmentVariable 'BRIEFCASE_SERVER_GAME_DIR' `
+        -LocalSetting 'BriefcaseServerGameWin64' `
+        -CommandLineHint '-ServerWin64' `
+        -Description 'server Win64' `
+        -Optional
     $specs = @(
         @{
             Target='Client'
             Build='6A96564B-06283000'
-            GameRoot='D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64'
+            GameRoot=$clientGameRoot
         },
         @{
             Target='Server'
             Build='6A966107-05B60000'
-            GameRoot='D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64'
+            GameRoot=$serverGameRoot
         }
     )
 

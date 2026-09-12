@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    [string]$GameWin64='')
 . (Join-Path $PSScriptRoot '..\Common.ps1')
 try {
     $root=Get-ModRoot
@@ -9,7 +11,13 @@ try {
     if($result -ne 0) { exit $result }
 
     $source=Join-Path $root "samples\Briefcase.HotReloadSample\bin\$Configuration\net10.0\Briefcase.HotReloadSample.dll"
-    $gameMods='D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase\Mods'
+    $game=Resolve-BriefcaseLocalPath `
+        -Value $GameWin64 `
+        -EnvironmentVariable 'BRIEFCASE_CLIENT_GAME_DIR' `
+        -LocalSetting 'BriefcaseClientGameWin64' `
+        -CommandLineHint '-GameWin64' `
+        -Description 'client Win64'
+    $gameMods=Join-Path $game 'Briefcase\Mods'
     New-Item -ItemType Directory -Path $gameMods -Force | Out-Null
     Copy-Item -LiteralPath $source -Destination (Join-Path $gameMods 'Briefcase.HotReloadSample.dll') -Force
     Write-Host '[OK] C# development mod rebuilt and copied. A running game will reload it after the debounce delay.'

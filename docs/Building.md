@@ -13,6 +13,26 @@ these tools.
 Rider, Visual Studio, and other editors can all open the repository. The build
 does not depend on a particular IDE.
 
+## Local game paths
+
+Repository scripts never contain a contributor's installation paths. Copy the
+local template once and edit the ignored copy:
+
+```powershell
+Copy-Item scripts/LocalPaths.example.ps1 scripts/LocalPaths.ps1
+```
+
+`scripts/LocalPaths.ps1` configures the client and dedicated-server `Win64`
+directories for deployment and fast development builds. Command-line arguments
+take priority over environment variables, and environment variables take
+priority over this local file:
+
+- `-GameWin64` or `BRIEFCASE_CLIENT_GAME_DIR` for the client;
+- `-ServerWin64` or `BRIEFCASE_SERVER_GAME_DIR` for the dedicated server.
+
+The local file is ignored by Git. Do not add machine-specific paths to tracked
+PowerShell or batch files.
+
 ## Build the client framework
 
 From the repository root, run:

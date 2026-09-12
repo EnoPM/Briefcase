@@ -1,6 +1,41 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 function Get-ModRoot { return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')) }
+
+function Get-BriefcaseLocalValue([string]$Name) {
+    $settingsPath=Join-Path (Get-ModRoot) 'scripts\LocalPaths.ps1'
+    if(-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) { return $null }
+    return & {
+        param([string]$Path,[string]$VariableName)
+        . $Path
+        $variable=Get-Variable -Name $VariableName -ErrorAction SilentlyContinue
+        if($null -ne $variable) { return $variable.Value }
+        return $null
+    } $settingsPath $Name
+}
+
+function Resolve-BriefcaseLocalPath {
+    param(
+        [AllowEmptyString()][string]$Value='',
+        [Parameter(Mandatory=$true)][string]$EnvironmentVariable,
+        [Parameter(Mandatory=$true)][string]$LocalSetting,
+        [Parameter(Mandatory=$true)][string]$CommandLineHint,
+        [Parameter(Mandatory=$true)][string]$Description,
+        [switch]$Optional)
+
+    $candidate=$Value
+    if([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate=[Environment]::GetEnvironmentVariable($EnvironmentVariable)
+    }
+    if([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate=Get-BriefcaseLocalValue $LocalSetting
+    }
+    if([string]::IsNullOrWhiteSpace($candidate)) {
+        if($Optional) { return $null }
+        throw "No $Description path is configured. Pass $CommandLineHint, set $EnvironmentVariable, or copy scripts\LocalPaths.example.ps1 to scripts\LocalPaths.ps1."
+    }
+    return [IO.Path]::GetFullPath($candidate)
+}
 function ConvertTo-ModArgument([string]$Value) {
     # ProcessStartInfo launches an executable directly, without cmd.exe.
     # Our arguments cannot contain quotes; double trailing backslashes before

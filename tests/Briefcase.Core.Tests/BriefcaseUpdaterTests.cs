@@ -209,7 +209,7 @@ public sealed class BriefcaseUpdaterTests
         var restart = UpdateInstallerLauncher.ResolveRestart(
             BriefcasePackageKind.Client,
             "auto",
-            @"D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64");
+            @"C:\Games\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64");
 
         Assert.Equal("steam", restart.Mode);
     }

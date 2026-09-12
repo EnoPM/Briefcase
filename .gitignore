@@ -11,3 +11,4 @@ docs/obj/
 *.DotSettings.user
 third_party/*.zip
 **/TestResults/
+scripts/LocalPaths.ps1

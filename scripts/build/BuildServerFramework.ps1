@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    [string]$ServerWin64='')
 
 . (Join-Path $PSScriptRoot '..\Common.ps1')
 
@@ -15,6 +17,13 @@ function Remove-SafeDirectory([string]$Path, [string]$AllowedRoot) {
 
 try {
     $root=Get-ModRoot
+    $serverWin64=Resolve-BriefcaseLocalPath `
+        -Value $ServerWin64 `
+        -EnvironmentVariable 'BRIEFCASE_SERVER_GAME_DIR' `
+        -LocalSetting 'BriefcaseServerGameWin64' `
+        -CommandLineHint '-ServerWin64' `
+        -Description 'server Win64' `
+        -Optional
     $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $install=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
     if($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }
@@ -59,13 +68,16 @@ try {
         '--self-contained','true','--output',$updateInstallerPublish)
     if($result -ne 0){ exit $result }
     $build='6A966107-05B60000'
-    $serverWin64='D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64'
     # CI and clean developer machines use the reviewed, address-free snapshot
     # archive committed for this exact executable build. Keeping this large
     # JSON as a ZIP saves repository space and makes Git treat it as binary.
     $snapshotFileName="DeceiveInc.Server.$build.json"
     $snapshotArchive=Join-Path $root "sdk\snapshots\$snapshotFileName.zip"
-    $installedSnapshot=Join-Path $serverWin64 "Briefcase\Core\Sdk\Metadata\$snapshotFileName"
+    $installedSnapshot=if($null -eq $serverWin64) {
+        $null
+    } else {
+        Join-Path $serverWin64 "Briefcase\Core\Sdk\Metadata\$snapshotFileName"
+    }
     $snapshotContents=$null
     if(Test-Path -LiteralPath $snapshotArchive) {
         Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -88,7 +100,7 @@ try {
         finally { $archive.Dispose() }
         Write-Host "Using repository server snapshot: $snapshotArchive"
     }
-    elseif(Test-Path -LiteralPath $installedSnapshot) {
+    elseif($null -ne $installedSnapshot -and (Test-Path -LiteralPath $installedSnapshot)) {
         # A live installed-server snapshot remains a local development fallback.
         $snapshotContents=[IO.File]::ReadAllText($installedSnapshot)
         Write-Host "Using installed server snapshot: $installedSnapshot"

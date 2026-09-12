@@ -1,13 +1,14 @@
 [CmdletBinding()]
 param(
-    [string]$ServerConfigurationPath =
-        'D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Saved\Config\WindowsServer\TripwireServer.ini',
-    [string]$ClientSettingsPath =
-        'D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase\settings.json'
-)
+    [string]$ServerConfigurationPath='',
+    [string]$ClientSettingsPath='',
+    [string]$ServerWin64='',
+    [string]$ClientGameWin64='')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'Common.ps1')
 
 function Get-OrAddProperty(
     [object]$Object,
@@ -34,6 +35,27 @@ function Write-AtomicUtf8([string]$Path, [string]$Contents) {
 }
 
 try {
+    if([string]::IsNullOrWhiteSpace($ServerConfigurationPath)) {
+        $server=Resolve-BriefcaseLocalPath `
+            -Value $ServerWin64 `
+            -EnvironmentVariable 'BRIEFCASE_SERVER_GAME_DIR' `
+            -LocalSetting 'BriefcaseServerGameWin64' `
+            -CommandLineHint '-ServerWin64' `
+            -Description 'server Win64'
+        $ServerConfigurationPath=Join-Path $server '..\..\Saved\Config\WindowsServer\TripwireServer.ini'
+    }
+    if([string]::IsNullOrWhiteSpace($ClientSettingsPath)) {
+        $client=Resolve-BriefcaseLocalPath `
+            -Value $ClientGameWin64 `
+            -EnvironmentVariable 'BRIEFCASE_CLIENT_GAME_DIR' `
+            -LocalSetting 'BriefcaseClientGameWin64' `
+            -CommandLineHint '-ClientGameWin64' `
+            -Description 'client Win64'
+        $ClientSettingsPath=Join-Path $client 'Briefcase\settings.json'
+    }
+    $ServerConfigurationPath=[IO.Path]::GetFullPath($ServerConfigurationPath)
+    $ClientSettingsPath=[IO.Path]::GetFullPath($ClientSettingsPath)
+
     if (-not (Test-Path -LiteralPath $ServerConfigurationPath)) {
         throw "Server configuration was not found: $ServerConfigurationPath"
     }

@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    [string]$ServerWin64='')
 . (Join-Path $PSScriptRoot '..\Common.ps1')
 try {
     $root=Get-ModRoot
@@ -11,7 +13,13 @@ try {
         'build',$project,'-c',$Configuration)
     if($result -ne 0){ exit $result }
 
-    $serverFramework='D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64\Briefcase'
+    $server=Resolve-BriefcaseLocalPath `
+        -Value $ServerWin64 `
+        -EnvironmentVariable 'BRIEFCASE_SERVER_GAME_DIR' `
+        -LocalSetting 'BriefcaseServerGameWin64' `
+        -CommandLineHint '-ServerWin64' `
+        -Description 'server Win64'
+    $serverFramework=Join-Path $server 'Briefcase'
     $serverCore=Join-Path $serverFramework 'Core\BuiltIns'
     $serverMods=Join-Path $serverFramework 'Mods'
     New-Item -ItemType Directory -Path $serverCore,$serverMods -Force | Out-Null
