@@ -6,15 +6,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
+. (Join-Path $PSScriptRoot 'Common.ps1')
+
 try {
     $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-    if([string]::IsNullOrWhiteSpace($GameWin64)) {
-        $GameWin64=$env:BRIEFCASE_CLIENT_GAME_DIR
-    }
-    if([string]::IsNullOrWhiteSpace($GameWin64)) {
-        $GameWin64='D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64'
-    }
-    $game=[IO.Path]::GetFullPath($GameWin64)
+    $game=Resolve-BriefcaseLocalPath `
+        -Value $GameWin64 `
+        -EnvironmentVariable 'BRIEFCASE_CLIENT_GAME_DIR' `
+        -LocalSetting 'BriefcaseClientGameWin64' `
+        -CommandLineHint '-GameWin64' `
+        -Description 'client Win64'
     if(Get-Process -Name 'DeceiveInc-Win64-Shipping' -ErrorAction SilentlyContinue) {
         throw 'Close Deceive Inc. before installing Briefcase.'
     }

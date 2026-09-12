@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    [string]$GameWin64='')
 . (Join-Path $PSScriptRoot '..\Common.ps1')
 try {
     $root=Get-ModRoot
@@ -10,7 +12,13 @@ try {
     $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
         'build',$project,'-c',$Configuration)
     if($result -ne 0){ exit $result }
-    $gameFramework='D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase'
+    $game=Resolve-BriefcaseLocalPath `
+        -Value $GameWin64 `
+        -EnvironmentVariable 'BRIEFCASE_CLIENT_GAME_DIR' `
+        -LocalSetting 'BriefcaseClientGameWin64' `
+        -CommandLineHint '-GameWin64' `
+        -Description 'client Win64'
+    $gameFramework=Join-Path $game 'Briefcase'
     $gameCore=Join-Path $gameFramework 'Core\BuiltIns'
     $gameMods=Join-Path $gameFramework 'Mods'
     New-Item -ItemType Directory -Path $gameCore,$gameMods -Force | Out-Null

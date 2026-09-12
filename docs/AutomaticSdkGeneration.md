@@ -250,7 +250,7 @@ to that shared assembly. A mod imports the stable target file instead of copying
 the SDK into its output:
 
 ```xml
-<Import Project="D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase\Core\Sdk\Generated\Client\Current.props" />
+<Import Project="C:\Path\To\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase\Core\Sdk\Generated\Client\Current.props" />
 ```
 
 `Current.props` adds a direct build-specific assembly reference with

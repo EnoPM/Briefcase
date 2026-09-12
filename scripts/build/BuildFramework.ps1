@@ -28,14 +28,13 @@ function Copy-BuiltIn([string]$Root, [string]$ProjectName, [string]$Destination)
 
 try {
     $root=Get-ModRoot
-    if([string]::IsNullOrWhiteSpace($GameWin64)) {
-        $GameWin64=$env:BRIEFCASE_CLIENT_GAME_DIR
-    }
-    $gameDirectory=if([string]::IsNullOrWhiteSpace($GameWin64)) {
-        $null
-    } else {
-        [IO.Path]::GetFullPath($GameWin64)
-    }
+    $gameDirectory=Resolve-BriefcaseLocalPath `
+        -Value $GameWin64 `
+        -EnvironmentVariable 'BRIEFCASE_CLIENT_GAME_DIR' `
+        -LocalSetting 'BriefcaseClientGameWin64' `
+        -CommandLineHint '-GameWin64' `
+        -Description 'client Win64' `
+        -Optional
     $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $install=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
     if ($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }

@@ -1,15 +1,21 @@
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    [string]$ServerWin64='')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
+. (Join-Path $PSScriptRoot 'Common.ps1')
+
 try {
     $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-    $serverPath=if([string]::IsNullOrWhiteSpace($env:BRIEFCASE_SERVER_GAME_DIR)) {
-        'D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64'
-    } else { $env:BRIEFCASE_SERVER_GAME_DIR }
-    $server=[IO.Path]::GetFullPath($serverPath)
+    $server=Resolve-BriefcaseLocalPath `
+        -Value $ServerWin64 `
+        -EnvironmentVariable 'BRIEFCASE_SERVER_GAME_DIR' `
+        -LocalSetting 'BriefcaseServerGameWin64' `
+        -CommandLineHint '-ServerWin64' `
+        -Description 'server Win64'
     $shippingExecutable=Join-Path $server 'DeceiveIncServer-Win64-Shipping.exe'
     $activeServer=Get-CimInstance Win32_Process | Where-Object {
         $_.ExecutablePath -eq $shippingExecutable
