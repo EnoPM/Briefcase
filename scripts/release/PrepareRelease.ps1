@@ -174,6 +174,10 @@ try {
     $serverStage = Join-Path $stagingRoot 'Server'
     Copy-DirectoryContents (Join-Path $root 'dist\Briefcase') $clientStage
     Copy-DirectoryContents (Join-Path $root 'dist\Briefcase.Server') $serverStage
+    foreach ($stage in @($clientStage, $serverStage)) {
+        Copy-Item -LiteralPath (Join-Path $root 'LICENSE') `
+            -Destination (Join-Path $stage 'LICENSE') -Force
+    }
 
     # The build package contains launchers for both deployment locations. A
     # release is extracted directly in Win64, so it exposes only that launcher
@@ -224,6 +228,7 @@ Briefcase\Mods.
         [Text.UTF8Encoding]::new($false))
 
     foreach ($stage in @($clientStage, $serverStage)) {
+        Assert-File $stage 'LICENSE'
         Assert-File $stage 'version.dll'
         Assert-File $stage 'Briefcase\loader.json'
         Assert-File $stage 'Briefcase\VERSION'
@@ -267,6 +272,7 @@ Briefcase\Mods.
         'Briefcase/Core/ThirdPartyLibraries/libSkiaSharp.dll',
         'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
+        'LICENSE',
         'README-Briefcase.txt')
     New-ReleaseArchive $serverStage $serverArchive @(
         'version.dll',
@@ -276,6 +282,7 @@ Briefcase\Mods.
         'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'StartBriefcaseServer.bat',
+        'LICENSE',
         'README-Briefcase.txt')
 
     $archives = @(Get-ChildItem -LiteralPath $outputRoot -Filter '*.zip' -File)
