@@ -58,6 +58,18 @@ internal sealed class SdkEmissionPlan
             .ToArray();
         var names = BuildTypeNames(usable);
         var knownPaths = names.Keys.ToHashSet(StringComparer.Ordinal);
+        var knownTypes = usable.ToDictionary(type => type.Path, StringComparer.Ordinal);
+        var managedStructPaths = usable
+            .Where(type => type.Kind == "ScriptStruct" &&
+                           !IsCanonicalGeneratedStruct(
+                               type.Path, knownPaths, knownTypes,
+                               new HashSet<string>(StringComparer.Ordinal)))
+            .Select(type => type.Path)
+            .ToHashSet(StringComparer.Ordinal);
+        var writableManagedStructPaths = managedStructPaths
+            .Where(path => IsWireWritableGeneratedStruct(
+                path, knownPaths, knownTypes, new HashSet<string>(StringComparer.Ordinal)))
+            .ToHashSet(StringComparer.Ordinal);
         var planned = new List<PlannedType>(usable.Length);
         var skippedProperties = 0;
         var skippedFunctions = 0;
@@ -69,7 +81,9 @@ internal sealed class SdkEmissionPlan
             if (type.Kind == "Enum")
             {
                 planned.Add(new PlannedType(
-                    type, names[type.Path], [], [], metadataProperties, metadataFunctions));
+                    type, names[type.Path], [], [], metadataProperties, metadataFunctions,
+                    UsesManagedStructRepresentation: false,
+                    SupportsManagedStructWrite: false));
                 continue;
             }
 
@@ -78,6 +92,7 @@ internal sealed class SdkEmissionPlan
                 {
                     "Handle", "Name", "Path", "ClassHandle", "StaticClass", "Properties",
                     "Functions", "Metadata", "Reflection", "UnrealPath", "FromObject", "Read",
+                    "Reference", "Outer", "Flags", "IsClassDefaultObject",
                     "ReadString", "ReadText", "InvokeText", "IsA", names[type.Path].Name
                 }
                 : new HashSet<string>(StringComparer.Ordinal)
@@ -90,10 +105,12 @@ internal sealed class SdkEmissionPlan
                          type.Kind == "Class" ? property.Name : property.Offset.ToString("D10"),
                          StringComparer.Ordinal))
             {
+                var allowAggregateRead = type.Kind is "Class" or "ScriptStruct";
                 var managedType = ManagedTypeDescriptor.TryCreate(
                     property, knownPaths,
-                    allowReadContainers: type.Kind == "Class",
-                    allowStringProperty: type.Kind == "Class");
+                    allowReadContainers: allowAggregateRead,
+                    allowStringProperty: allowAggregateRead,
+                    allowTextProperty: allowAggregateRead);
                 var validLayout = type.Kind == "Class" ||
                     property.Offset >= 0 && property.ElementSize > 0 &&
                     property.Offset <= type.Size - property.ElementSize;
@@ -103,10 +120,25 @@ internal sealed class SdkEmissionPlan
                     continue;
                 }
 
+                PlannedFunction? delegateSignature = null;
+                if (managedType.Kind == ManagedTypeKind.MulticastDelegate &&
+                    property.EffectiveType.DelegateSignature is { } signature)
+                {
+                    delegateSignature = TryPlanFunction(
+                        signature, knownPaths, knownTypes, managedStructPaths,
+                        writableManagedStructPaths,
+                        new HashSet<string>(StringComparer.Ordinal));
+                }
+
                 properties.Add(new PlannedProperty(
                     property,
                     managedType,
-                    UniqueMember(property.Name, type.Kind == "Class" ? "Property" : "Field", used)));
+                    UniqueMember(property.Name, type.Kind == "Class" ? "Property" : "Field", used),
+                    type.Kind == "Class" &&
+                    IsEncodedWireType(managedType, managedStructPaths) &&
+                    IsWireWritableType(
+                        managedType, writableManagedStructPaths),
+                    delegateSignature));
             }
 
             var functions = new List<PlannedFunction>();
@@ -115,7 +147,9 @@ internal sealed class SdkEmissionPlan
                 foreach (var function in type.Functions.OrderBy(
                              function => function.Name, StringComparer.Ordinal))
                 {
-                    var plannedFunction = TryPlanFunction(function, knownPaths, used);
+                    var plannedFunction = TryPlanFunction(
+                        function, knownPaths, knownTypes, managedStructPaths,
+                        writableManagedStructPaths, used);
                     if (plannedFunction is null) skippedFunctions++;
                     else functions.Add(plannedFunction);
                 }
@@ -123,7 +157,9 @@ internal sealed class SdkEmissionPlan
 
             planned.Add(new PlannedType(
                 type, names[type.Path], properties, functions,
-                metadataProperties, metadataFunctions));
+                metadataProperties, metadataFunctions,
+                type.Kind == "ScriptStruct" && managedStructPaths.Contains(type.Path),
+                type.Kind == "ScriptStruct" && writableManagedStructPaths.Contains(type.Path)));
         }
 
         var byPath = planned.ToDictionary(type => type.Snapshot.Path, StringComparer.Ordinal);
@@ -156,6 +192,9 @@ internal sealed class SdkEmissionPlan
     private static PlannedFunction? TryPlanFunction(
         FunctionSnapshot function,
         IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes,
+        IReadOnlySet<string> managedStructPaths,
+        IReadOnlySet<string> writableManagedStructPaths,
         HashSet<string> usedMembers)
     {
         var parameters = function.Parameters.OrderBy(parameter => parameter.Offset).ToArray();
@@ -167,6 +206,7 @@ internal sealed class SdkEmissionPlan
             var isReturn = IsReturnParameter(parameter);
             var managedType = ManagedTypeDescriptor.TryCreate(
                 parameter, knownPaths, allowInputContainers: !isReturn,
+                allowReadContainers: true,
                 allowTextProperty: true);
             if (managedType is null || parameter.ArrayDimension != 1 ||
                 !CanUseExactParameterName(parameter.Name))
@@ -183,19 +223,235 @@ internal sealed class SdkEmissionPlan
                            (parameter.Flags & OutParameterFlag) != 0;
             var isReference = isOutput &&
                               (parameter.Flags & ReferenceParameterFlag) != 0;
-            // FString/TArray outputs require allocator-aware copy-back, which is
-            // intentionally separate from scalar/struct/FText output storage.
-            if (isOutput && managedType.Kind is (ManagedTypeKind.String or
-                ManagedTypeKind.ByteArray or ManagedTypeKind.Array or
-                ManagedTypeKind.Set or ManagedTypeKind.Map) ||
-                isReference && managedType.Kind == ManagedTypeKind.Text)
+            if (managedType.Kind is ManagedTypeKind.InterfaceReference or
+                    ManagedTypeKind.LazyObjectReference or
+                    ManagedTypeKind.SoftObjectReference or
+                    ManagedTypeKind.SoftClassReference or ManagedTypeKind.Delegate or
+                    ManagedTypeKind.MulticastDelegate or ManagedTypeKind.FieldPath)
                 return null;
             planned.Add(new PlannedParameter(
                 parameter, managedType, isReturn, isOutput, isReference));
         }
 
+        // Generated structs containing UObject or weak-object fields use an
+        // address-free canonical image. The native prepared plan converts each
+        // nested handle immediately around ProcessEvent. Structs with owning
+        // FString/FText/container fields use managed snapshots. Pure out and
+        // return values and safely reconstructible inputs have a lifetime-aware
+        // prepared invocation path backed by Unreal's allocator and FProperty
+        // construction rules.
+        bool IsManagedStructParameter(PlannedParameter parameter) =>
+            parameter.Type.Kind == ManagedTypeKind.GeneratedStruct &&
+            parameter.Type.ReferencedTypePath is { } path &&
+            managedStructPaths.Contains(path);
+        bool IsEncodedWireParameter(PlannedParameter parameter) =>
+            IsManagedStructParameter(parameter) ||
+            parameter.Type.Kind is ManagedTypeKind.String or ManagedTypeKind.Text or
+                ManagedTypeKind.ByteArray or ManagedTypeKind.Array or
+                ManagedTypeKind.Set or ManagedTypeKind.Map;
+        var encodedWireParameters = planned.Where(IsEncodedWireParameter).ToArray();
+        var supportsPreparedValueOutputInvocation = encodedWireParameters.Length > 0 &&
+            encodedWireParameters.All(parameter =>
+                parameter.IsReturn || parameter.IsOutput && !parameter.IsReference ||
+                IsWireWritableType(parameter.Type, writableManagedStructPaths)) &&
+            planned.Where(parameter => !IsEncodedWireParameter(parameter))
+                .All(parameter => IsPreparedParameter(parameter, knownPaths, knownTypes));
+        var supportsDirectInvocation = encodedWireParameters.Length == 0 ||
+                                       supportsPreparedValueOutputInvocation;
+
+        var supportsPreparedInvocation = encodedWireParameters.Length == 0 &&
+            supportsDirectInvocation &&
+            planned.All(parameter => IsPreparedParameter(
+                parameter, knownPaths, knownTypes));
+        var preparedFastPath = supportsPreparedInvocation && planned.All(parameter =>
+            parameter.Type.Kind switch
+            {
+                ManagedTypeKind.Boolean or ManagedTypeKind.Int8 or ManagedTypeKind.UInt8 or
+                ManagedTypeKind.Int16 or ManagedTypeKind.UInt16 or ManagedTypeKind.Int32 or
+                ManagedTypeKind.UInt32 or ManagedTypeKind.Int64 or ManagedTypeKind.UInt64 or
+                ManagedTypeKind.Float or ManagedTypeKind.Double or ManagedTypeKind.Name => true,
+                ManagedTypeKind.ObjectReference =>
+                    parameter.Snapshot.EffectiveType.UnrealType is
+                        "ObjectProperty" or "ClassProperty",
+                ManagedTypeKind.GeneratedStruct => IsPlainGeneratedStruct(
+                    parameter.Type.ReferencedTypePath, knownPaths, knownTypes,
+                    new HashSet<string>(StringComparer.Ordinal)),
+                _ => false
+            });
         return new PlannedFunction(
-            function, UniqueMember(function.Name, "Method", usedMembers), planned);
+            function, UniqueMember(function.Name, "Method", usedMembers), planned,
+            supportsDirectInvocation, supportsPreparedInvocation,
+            supportsPreparedValueOutputInvocation, preparedFastPath);
+    }
+
+    private static bool IsPreparedParameter(
+        PlannedParameter parameter,
+        IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes) =>
+        parameter.Type.Kind switch
+        {
+            ManagedTypeKind.Boolean or ManagedTypeKind.Int8 or ManagedTypeKind.UInt8 or
+            ManagedTypeKind.Int16 or ManagedTypeKind.UInt16 or ManagedTypeKind.Int32 or
+            ManagedTypeKind.UInt32 or ManagedTypeKind.Int64 or ManagedTypeKind.UInt64 or
+            ManagedTypeKind.Float or ManagedTypeKind.Double or ManagedTypeKind.Name or
+            ManagedTypeKind.ObjectReference => true,
+            ManagedTypeKind.GeneratedStruct => IsCanonicalGeneratedStruct(
+                parameter.Type.ReferencedTypePath, knownPaths, knownTypes,
+                new HashSet<string>(StringComparer.Ordinal)),
+            _ => false
+        };
+
+    private static bool IsPlainGeneratedStruct(
+        string? path,
+        IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes,
+        HashSet<string> visiting) =>
+        IsFixedGeneratedStruct(
+            path, knownPaths, knownTypes, visiting, allowObjectHandles: false);
+
+    private static bool IsCanonicalGeneratedStruct(
+        string? path,
+        IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes,
+        HashSet<string> visiting) =>
+        IsFixedGeneratedStruct(
+            path, knownPaths, knownTypes, visiting, allowObjectHandles: true);
+
+    private static bool IsWireWritableGeneratedStruct(
+        string? path,
+        IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes,
+        HashSet<string> visiting)
+    {
+        if (path is null || !knownTypes.TryGetValue(path, out var type) ||
+            type.Kind != "ScriptStruct" || type.Size <= 0 || !visiting.Add(path))
+            return false;
+        try
+        {
+            if (type.SuperPath is { } parent &&
+                !IsWireWritableGeneratedStruct(parent, knownPaths, knownTypes, visiting))
+                return false;
+            foreach (var property in type.Properties)
+            {
+                if (property.ArrayDimension != 1 || property.Offset < 0 ||
+                    property.ElementSize <= 0 ||
+                    property.Offset > type.Size - property.ElementSize)
+                    return false;
+                var managed = ManagedTypeDescriptor.TryCreate(
+                    property, knownPaths, allowReadContainers: true,
+                    allowStringProperty: true, allowTextProperty: true);
+                if (managed is null) return false;
+                if (!IsWireWritableType(
+                        managed, knownPaths, knownTypes, visiting))
+                    return false;
+            }
+            return true;
+        }
+        finally
+        {
+            visiting.Remove(path);
+        }
+    }
+
+    private static bool IsWireWritableType(
+        ManagedTypeDescriptor type,
+        IReadOnlySet<string> writableManagedStructPaths) =>
+        type.Kind switch
+        {
+            ManagedTypeKind.Boolean or ManagedTypeKind.Int8 or ManagedTypeKind.UInt8 or
+            ManagedTypeKind.Int16 or ManagedTypeKind.UInt16 or ManagedTypeKind.Int32 or
+            ManagedTypeKind.UInt32 or ManagedTypeKind.Int64 or ManagedTypeKind.UInt64 or
+            ManagedTypeKind.Float or ManagedTypeKind.Double or ManagedTypeKind.Name or
+            ManagedTypeKind.ObjectReference or ManagedTypeKind.String or ManagedTypeKind.Text => true,
+            ManagedTypeKind.GeneratedStruct => type.ReferencedTypePath is { } path &&
+                                               writableManagedStructPaths.Contains(path),
+            ManagedTypeKind.ByteArray => true,
+            ManagedTypeKind.Array or ManagedTypeKind.Set => type.InnerType is { } inner &&
+                IsWireWritableType(inner, writableManagedStructPaths),
+            ManagedTypeKind.Map => type.KeyType is { } key && type.ValueType is { } value &&
+                IsWireWritableType(key, writableManagedStructPaths) &&
+                IsWireWritableType(value, writableManagedStructPaths),
+            _ => false
+        };
+
+    private static bool IsWireWritableType(
+        ManagedTypeDescriptor type,
+        IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes,
+        HashSet<string> visiting) =>
+        type.Kind switch
+        {
+            ManagedTypeKind.Boolean or ManagedTypeKind.Int8 or ManagedTypeKind.UInt8 or
+            ManagedTypeKind.Int16 or ManagedTypeKind.UInt16 or ManagedTypeKind.Int32 or
+            ManagedTypeKind.UInt32 or ManagedTypeKind.Int64 or ManagedTypeKind.UInt64 or
+            ManagedTypeKind.Float or ManagedTypeKind.Double or ManagedTypeKind.Name or
+            ManagedTypeKind.ObjectReference or ManagedTypeKind.String or ManagedTypeKind.Text => true,
+            ManagedTypeKind.GeneratedStruct => IsWireWritableGeneratedStruct(
+                type.ReferencedTypePath, knownPaths, knownTypes, visiting),
+            ManagedTypeKind.ByteArray => true,
+            ManagedTypeKind.Array or ManagedTypeKind.Set => type.InnerType is { } inner &&
+                IsWireWritableType(inner, knownPaths, knownTypes, visiting),
+            ManagedTypeKind.Map => type.KeyType is { } key && type.ValueType is { } value &&
+                IsWireWritableType(key, knownPaths, knownTypes, visiting) &&
+                IsWireWritableType(value, knownPaths, knownTypes, visiting),
+            _ => false
+        };
+
+    private static bool IsEncodedWireType(
+        ManagedTypeDescriptor type,
+        IReadOnlySet<string> managedStructPaths) =>
+        type.Kind is ManagedTypeKind.ByteArray or ManagedTypeKind.Array or
+            ManagedTypeKind.Set or ManagedTypeKind.Map ||
+        type.Kind == ManagedTypeKind.GeneratedStruct &&
+        type.ReferencedTypePath is { } path && managedStructPaths.Contains(path);
+
+    private static bool IsFixedGeneratedStruct(
+        string? path,
+        IReadOnlySet<string> knownPaths,
+        IReadOnlyDictionary<string, TypeSnapshot> knownTypes,
+        HashSet<string> visiting,
+        bool allowObjectHandles)
+    {
+        if (path is null || !knownTypes.TryGetValue(path, out var type) ||
+            type.Kind != "ScriptStruct" || type.Size <= 0 || !visiting.Add(path))
+            return false;
+        try
+        {
+            if (type.SuperPath is { } parent &&
+                !IsFixedGeneratedStruct(
+                    parent, knownPaths, knownTypes, visiting, allowObjectHandles))
+                return false;
+            foreach (var property in type.Properties)
+            {
+                if (property.ArrayDimension != 1 || property.Offset < 0 ||
+                    property.ElementSize <= 0 ||
+                    property.Offset > type.Size - property.ElementSize)
+                    return false;
+                var managed = ManagedTypeDescriptor.TryCreate(property, knownPaths);
+                if (managed is null) return false;
+                if (managed.Kind == ManagedTypeKind.GeneratedStruct)
+                {
+                    if (!IsFixedGeneratedStruct(
+                            managed.ReferencedTypePath, knownPaths, knownTypes,
+                            visiting, allowObjectHandles))
+                        return false;
+                    continue;
+                }
+                if (managed.Kind is ManagedTypeKind.ObjectReference && allowObjectHandles)
+                    continue;
+                if (managed.Kind is not (
+                    ManagedTypeKind.Boolean or ManagedTypeKind.Int8 or ManagedTypeKind.UInt8 or
+                    ManagedTypeKind.Int16 or ManagedTypeKind.UInt16 or ManagedTypeKind.Int32 or
+                    ManagedTypeKind.UInt32 or ManagedTypeKind.Int64 or ManagedTypeKind.UInt64 or
+                    ManagedTypeKind.Float or ManagedTypeKind.Double or ManagedTypeKind.Name))
+                    return false;
+            }
+            return true;
+        }
+        finally
+        {
+            visiting.Remove(path);
+        }
     }
 
     private static bool IsReturnParameter(PropertySnapshot parameter) =>
@@ -305,19 +561,24 @@ internal sealed record PlannedType(
     IReadOnlyList<PlannedProperty> Properties,
     IReadOnlyList<PlannedFunction> Functions,
     IReadOnlyList<PlannedMetadataProperty> MetadataProperties,
-    IReadOnlyList<PlannedMetadataFunction> MetadataFunctions)
+    IReadOnlyList<PlannedMetadataFunction> MetadataFunctions,
+    bool UsesManagedStructRepresentation,
+    bool SupportsManagedStructWrite)
 {
     public string FullName => Name.Namespace + "." + Name.Name;
 }
 
 internal readonly record struct GeneratedTypeName(string Namespace, string Name);
 internal sealed record PlannedProperty(
-    PropertySnapshot Snapshot, ManagedTypeDescriptor Type, string MemberName);
+    PropertySnapshot Snapshot, ManagedTypeDescriptor Type, string MemberName,
+    bool SupportsWireWrite, PlannedFunction? DelegateSignature);
 internal sealed record PlannedMetadataProperty(PropertySnapshot Snapshot, string MemberName);
 internal sealed record PlannedMetadataFunction(FunctionSnapshot Snapshot, string MemberName);
 
 internal sealed record PlannedFunction(
-    FunctionSnapshot Snapshot, string MemberName, IReadOnlyList<PlannedParameter> Parameters)
+    FunctionSnapshot Snapshot, string MemberName, IReadOnlyList<PlannedParameter> Parameters,
+    bool SupportsDirectInvocation, bool SupportsPreparedInvocation,
+    bool SupportsPreparedValueOutputInvocation, bool SupportsPreparedFastPath)
 {
     public PlannedParameter? ReturnParameter => Parameters.SingleOrDefault(parameter => parameter.IsReturn);
     public IEnumerable<PlannedParameter> MethodParameters =>
@@ -375,26 +636,27 @@ internal sealed record ManagedTypeDescriptor(
             type.InnerType?.UnrealType == "ByteProperty")
             return new ManagedTypeDescriptor(ManagedTypeKind.ByteArray);
 
-        if (allowReadContainers && type.UnrealType is "ArrayProperty" or "SetProperty")
+        if ((allowInputContainers || allowReadContainers) &&
+            type.UnrealType is "ArrayProperty" or "SetProperty")
         {
             var inner = type.InnerType is null ? null : TryCreateType(
                 type.InnerType, type.InnerType.ElementSize, knownPaths,
-                allowInputContainers: false, allowReadContainers: true,
+                allowInputContainers, allowReadContainers: true,
                 allowString: true, allowText: true);
             if (inner is null) return null;
             return new ManagedTypeDescriptor(
                 type.UnrealType == "ArrayProperty" ? ManagedTypeKind.Array : ManagedTypeKind.Set,
                 InnerType: inner);
         }
-        if (allowReadContainers && type.UnrealType == "MapProperty")
+        if ((allowInputContainers || allowReadContainers) && type.UnrealType == "MapProperty")
         {
             var key = type.KeyType is null ? null : TryCreateType(
                 type.KeyType, type.KeyType.ElementSize, knownPaths,
-                allowInputContainers: false, allowReadContainers: true,
+                allowInputContainers, allowReadContainers: true,
                 allowString: true, allowText: true);
             var value = type.ValueType is null ? null : TryCreateType(
                 type.ValueType, type.ValueType.ElementSize, knownPaths,
-                allowInputContainers: false, allowReadContainers: true,
+                allowInputContainers, allowReadContainers: true,
                 allowString: true, allowText: true);
             return key is null || value is null ? null : new ManagedTypeDescriptor(
                 ManagedTypeKind.Map, KeyType: key, ValueType: value);

@@ -13,6 +13,10 @@ public static class ServerAdminProtocol
 {
     public const uint Version = 7;
     public const int MaximumFrameBytes = 64 * 1024 * 1024;
+    // Briefcase.PlayerCap raises the Solo and Duo game ceilings to the Trio
+    // ceiling. Both administration endpoints use this shared limit so the UI
+    // and server-side validation cannot drift apart.
+    public const int MaximumPlayerCount = 12;
 
     public static readonly JsonSerializerOptions JsonOptions = new()
     {

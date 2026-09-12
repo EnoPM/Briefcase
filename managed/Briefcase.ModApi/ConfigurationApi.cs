@@ -106,42 +106,6 @@ public readonly struct ConfigurationApi
         return _scope.Bind(section, key, defaultValue, description, range, secret);
     }
 
-    /// <summary>
-    /// Adds rich ImGui content after the automatically generated controls in
-    /// this mod's tab. The callback runs on Briefcase's rendering thread while
-    /// an ImGui frame is active and must be disposed during Unload.
-    /// </summary>
-    public IDisposable RegisterPanel(Action<ConfigurationPanelContext> draw)
-    {
-        ArgumentNullException.ThrowIfNull(draw);
-        if (_scope is null)
-            throw new InvalidOperationException(
-                "Configuration is available only to mods loaded by the managed Briefcase host.");
-        return _scope.RegisterPanel(draw);
-    }
-
-    /// <summary>
-    /// Adds a page to the framework's Server view. This is intended for
-    /// server-oriented features such as balancing editors; the framework owns
-    /// connection settings and the remote mod lifecycle page.
-    /// </summary>
-    public IDisposable RegisterServerPanel(
-        string name,
-        Action<ConfigurationPanelContext> draw)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(draw);
-        if (_scope is null)
-            throw new InvalidOperationException(
-                "Configuration is available only to mods loaded by the managed Briefcase host.");
-        return _scope.RegisterServerPanel(name.Trim(), draw);
-    }
-}
-
-/// <summary>Frame information supplied to a mod's custom configuration panel.</summary>
-public readonly record struct ConfigurationPanelContext(RenderFrame Frame)
-{
-    public ImGuiApi ImGui => Frame.ImGui;
 }
 
 internal interface IConfigurationEntry
@@ -167,6 +131,4 @@ internal interface IModConfigurationScope
         bool secret)
         where T : notnull;
 
-    IDisposable RegisterPanel(Action<ConfigurationPanelContext> draw);
-    IDisposable RegisterServerPanel(string name, Action<ConfigurationPanelContext> draw);
 }

@@ -117,7 +117,7 @@ namespace briefcase {
 const BriefcaseHostApi* getHostApi() {
     HostApi.Capabilities = BRIEFCASE_CAPABILITY_CORE;
     HostApi.Unreal = nullptr;
-    HostApi.Rendering = nullptr;
+    HostApi.ReservedRendering = nullptr;
     HostApi.Input = nullptr;
     HostApi.Patching = nullptr;
     HostApi.GameThread = nullptr;

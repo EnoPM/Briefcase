@@ -26,10 +26,10 @@ The administration endpoint is a Core built-in and does not appear in the
 manageable server-mod list.
 
 Administration and compatibility share the configured Briefcase endpoint,
-`127.0.0.1:50000/TCP` by default. Unreal uses the same numeric port over UDP.
+`127.0.0.1:47000/TCP` by default. Unreal keeps its game traffic on `50000/UDP`.
 The frame's channel field determines which bounded protocol handles it.
 
-Administration protocol version 6 authenticates every command with a one-use,
+Administration protocol version 7 authenticates every command with a one-use,
 ten-second challenge. The client derives a key from the password entered on the
 **Server** page with PBKDF2-SHA256, then signs the nonce, request ID and requested
 operation with HMAC-SHA256. The password itself is never transmitted. It must

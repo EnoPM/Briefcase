@@ -193,6 +193,7 @@ internal static class PatchDiscovery
                 if (function.ReturnType is null || valueType != function.ReturnType)
                     throw new InvalidOperationException(
                         $"{method.Name}.__result does not match the generated return type.");
+                ValidateWritableManagedValue(method, parameter, valueType);
                 continue;
             }
 
@@ -206,6 +207,60 @@ internal static class PatchDiscovery
             if (valueType != targetParameter.ManagedType)
                 throw new InvalidOperationException(
                     $"{method.Name}.{parameter.Name} must have type {targetParameter.ManagedType.FullName}.");
+            ValidateWritableManagedValue(method, parameter, valueType);
+        }
+    }
+
+    private static void ValidateWritableManagedValue(
+        MethodInfo method, ParameterInfo parameter, Type valueType)
+    {
+        if (!parameter.ParameterType.IsByRef ||
+            !UnrealValueWire.RequiresEncodedConstruction(valueType) ||
+            IsWireWritableManagedValue(valueType, []))
+            return;
+        throw new InvalidOperationException(
+            $"{method.Name}.{parameter.Name} cannot be written back because {valueType.FullName} " +
+            "contains an unsupported owning Unreal value.");
+    }
+
+    private static bool IsWireWritableManagedValue(Type type, HashSet<Type> visiting)
+    {
+        if (type == typeof(byte[])) return true;
+        if (type.IsGenericType)
+        {
+            var definition = type.GetGenericTypeDefinition();
+            var arguments = type.GetGenericArguments();
+            if (definition == typeof(UnrealArray<>) || definition == typeof(UnrealSet<>))
+                return IsWireWritableManagedValue(arguments[0], visiting);
+            if (definition == typeof(UnrealMap<,>))
+                return IsWireWritableManagedValue(arguments[0], visiting) &&
+                       IsWireWritableManagedValue(arguments[1], visiting);
+        }
+        if (!typeof(IUnrealManagedStructValue).IsAssignableFrom(type))
+            return type.IsEnum || type == typeof(bool) ||
+                   type == typeof(sbyte) || type == typeof(byte) ||
+                   type == typeof(short) || type == typeof(ushort) ||
+                   type == typeof(int) || type == typeof(uint) ||
+                   type == typeof(long) || type == typeof(ulong) ||
+                   type == typeof(float) || type == typeof(double) ||
+                   type == typeof(string) || type == typeof(UnrealText) ||
+                   type == typeof(UnrealName) || type == typeof(UnrealObjectReference) ||
+                   typeof(IUnrealStructValue).IsAssignableFrom(type);
+        if (!visiting.Add(type)) return false;
+        try
+        {
+            foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (field.GetCustomAttribute<UnrealStructFieldAttribute>() is null)
+                    continue;
+                var fieldType = field.FieldType;
+                if (!IsWireWritableManagedValue(fieldType, visiting)) return false;
+            }
+            return true;
+        }
+        finally
+        {
+            visiting.Remove(type);
         }
     }
 }

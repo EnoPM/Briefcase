@@ -27,9 +27,11 @@ internal sealed class EmissionTypeSystem : IDisposable
     public Type UInt32 => typeof(uint);
     public Type Int64 => typeof(long);
     public Type UInt64 => typeof(ulong);
+    public Type NativeInt => typeof(nint);
     public Type Double => typeof(double);
     public Type SpanByte => typeof(Span<byte>);
     public Type ArgumentException => typeof(ArgumentException);
+    public Type NotSupportedException => typeof(NotSupportedException);
     public Type MemoryMarshal => typeof(System.Runtime.InteropServices.MemoryMarshal);
     public Type UnrealApi => typeof(UnrealApi);
     public Type UnrealObject => typeof(UnrealObject);
@@ -40,6 +42,8 @@ internal sealed class EmissionTypeSystem : IDisposable
     public Type UnrealFunction => typeof(UnrealFunction);
     public Type UnrealParameter => typeof(UnrealParameter);
     public Type IUnrealStructValue => typeof(IUnrealStructValue);
+    public Type IUnrealManagedStructValue => typeof(IUnrealManagedStructValue);
+    public Type UnrealStructFieldAttribute => typeof(UnrealStructFieldAttribute);
     public Type IUnrealObject => typeof(IUnrealObject<>);
     public Type UnrealClass => typeof(UnrealClass<>);
     public Type UnrealProperty => typeof(UnrealProperty<>);

@@ -81,7 +81,11 @@ internal sealed class ManualDriver : IGameThreadDriver
     private ulong _sequence;
     public bool IsAvailable => true;
     public bool IsGameThread => _pumping;
-    public void Start(Action<GameThreadPump> callback) => _callback = callback;
+    public bool TryStart(Action<GameThreadPump> callback)
+    {
+        _callback = callback;
+        return true;
+    }
     public void RequestPump() { }
     public void Pump(UnrealObjectHandle world)
     {

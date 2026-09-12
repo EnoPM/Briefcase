@@ -70,6 +70,36 @@ function Assert-BinaryServerSnapshot([string]$PackageRoot) {
     }
 }
 
+function Assert-CoreLibraryLayout(
+    [string]$PackageRoot,
+    [bool]$RequireThirdPartyLibraries) {
+    $framework = Join-Path $PackageRoot 'Briefcase'
+    $core = [IO.Path]::GetFullPath((Join-Path $framework 'Core'))
+    $thirdParty = [IO.Path]::GetFullPath((Join-Path $core 'ThirdPartyLibraries'))
+    if ($RequireThirdPartyLibraries -and
+        -not (Test-Path -LiteralPath $thirdParty -PathType Container)) {
+        throw 'Client package is missing Core\ThirdPartyLibraries.'
+    }
+
+    $symbols = @(Get-ChildItem -LiteralPath $framework -Filter '*.pdb' -File -Recurse)
+    if ($symbols.Count -ne 0) {
+        throw "The package contains debug symbols: $($symbols.FullName -join ', ')"
+    }
+
+    $dotNetPrefix = [IO.Path]::GetFullPath((Join-Path $core 'DotNet')).TrimEnd('\') + '\'
+    $thirdPartyPrefix = $thirdParty.TrimEnd('\') + '\'
+    $misplaced = @(Get-ChildItem -LiteralPath $core -Filter '*.dll' -File -Recurse |
+        Where-Object {
+            $full = [IO.Path]::GetFullPath($_.FullName)
+            -not $full.StartsWith($dotNetPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+            -not $full.StartsWith($thirdPartyPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+            $_.Name -notmatch '^(Briefcase\.|ServerAdminControl\.)'
+        })
+    if ($misplaced.Count -ne 0) {
+        throw "Third-party libraries are outside Core\ThirdPartyLibraries: $($misplaced.FullName -join ', ')"
+    }
+}
+
 function New-ReleaseArchive(
     [string]$Source,
     [string]$Destination,
@@ -157,8 +187,6 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'scripts\server\StartBriefcaseServerNoUI.bat') `
         -Destination (Join-Path $serverStage 'StartBriefcaseServer.bat') -Force
 
-    Get-ChildItem -LiteralPath $clientStage, $serverStage -Filter '*.pdb' -File -Recurse |
-        Remove-Item -Force
 
     $clientReadme = @"
 Briefcase Client $version
@@ -209,11 +237,18 @@ Briefcase\Mods.
             throw "Packaged VERSION '$packagedVersion' does not match '$version'."
         }
     }
+    Assert-CoreLibraryLayout $clientStage $true
+    Assert-CoreLibraryLayout $serverStage $false
+    Assert-File $clientStage 'Briefcase\Core\Briefcase.ClientModApi.dll'
+    Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaUi.dll'
+    Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaMenu.dll'
+    Assert-File $clientStage 'Briefcase\Core\ThirdPartyLibraries\Avalonia.Base.dll'
+    Assert-File $clientStage 'Briefcase\Core\ThirdPartyLibraries\libSkiaSharp.dll'
     Assert-File $serverStage 'StartBriefcaseServer.bat'
     Assert-BinaryServerSnapshot $serverStage
 
     $forbiddenServerFiles = @(Get-ChildItem -LiteralPath $serverStage -File -Recurse |
-        Where-Object { $_.Name -match '^(ImGui|cimgui|Briefcase\.Rendering|Vortice\.|SharpGen\.)' })
+        Where-Object { $_.Name -match '^(ImGui|cimgui|Briefcase\.(Rendering|ClientModApi|AvaloniaUi|AvaloniaMenu)|Avalonia\.|SkiaSharp|Vortice\.|SharpGen\.)' })
     if ($forbiddenServerFiles.Count -ne 0) {
         throw "The server archive contains rendering files: $($forbiddenServerFiles.Name -join ', ')"
     }
@@ -225,6 +260,11 @@ Briefcase\Mods.
         'Briefcase/loader.json',
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
+        'Briefcase/Core/Briefcase.ClientModApi.dll',
+        'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaUi.dll',
+        'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaMenu.dll',
+        'Briefcase/Core/ThirdPartyLibraries/Avalonia.Base.dll',
+        'Briefcase/Core/ThirdPartyLibraries/libSkiaSharp.dll',
         'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',
         'README-Briefcase.txt')

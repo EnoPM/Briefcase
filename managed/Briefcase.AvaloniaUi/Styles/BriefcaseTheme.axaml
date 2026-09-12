@@ -1,0 +1,64 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Button.briefcase-primary">
+    <Setter Property="Background" Value="#258A74" />
+    <Setter Property="Foreground" Value="#F6FFFC" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.briefcase-primary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#30A98F" />
+  </Style>
+
+  <Style Selector="Button.briefcase-danger">
+    <Setter Property="Background" Value="#A93643" />
+    <Setter Property="Foreground" Value="#FFF7F8" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.briefcase-danger:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#C74452" />
+  </Style>
+
+  <Style Selector="Button.briefcase-compact">
+    <Setter Property="Padding" Value="9,4" />
+    <Setter Property="MinHeight" Value="28" />
+  </Style>
+
+  <Style Selector="Border.briefcase-card">
+    <Setter Property="Background" Value="#B5222933" />
+    <Setter Property="BorderBrush" Value="#394351" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="Margin" Value="0,4,0,8" />
+  </Style>
+
+  <Style Selector="Border.briefcase-status">
+    <Setter Property="Background" Value="#303944" />
+    <Setter Property="BorderBrush" Value="#586473" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="9,3" />
+  </Style>
+
+  <Style Selector="Border.briefcase-status-information">
+    <Setter Property="Background" Value="#243F49" />
+    <Setter Property="BorderBrush" Value="#48DBB8" />
+  </Style>
+
+  <Style Selector="Border.briefcase-status-success">
+    <Setter Property="Background" Value="#203F31" />
+    <Setter Property="BorderBrush" Value="#59D98A" />
+  </Style>
+
+  <Style Selector="Border.briefcase-status-warning">
+    <Setter Property="Background" Value="#493A22" />
+    <Setter Property="BorderBrush" Value="#F5C56B" />
+  </Style>
+
+  <Style Selector="Border.briefcase-status-error">
+    <Setter Property="Background" Value="#4A252B" />
+    <Setter Property="BorderBrush" Value="#FF5964" />
+  </Style>
+</Styles>

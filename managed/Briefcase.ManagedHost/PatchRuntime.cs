@@ -260,134 +260,7 @@ internal sealed unsafe class PatchRegistration : IDisposable
     }
 
     private object ReadParameter(NativePatchCall* call, UnrealParameter parameter)
-    {
-        var bytes = ParameterSpan(call, parameter);
-        if (parameter.ManagedType == typeof(byte[]) && bytes.Length == 0x10)
-            return CopyByteArray(call, parameter.Offset);
-        if (parameter.ManagedType == typeof(string) && bytes.Length == 0x10)
-            return CopyString(call, parameter.Offset);
-        if (parameter.ManagedType == typeof(UnrealText) && bytes.Length == 0x18)
-            return new UnrealText(CopyText(call, parameter.Offset));
-        if (_backend == PatchBackend.Unreal && RequiresPointerFreeCopy(parameter.ManagedType))
-            return CopyValue(call, parameter);
-        if (parameter.ManagedType == typeof(sbyte) && bytes.Length == 1) return (sbyte)bytes[0];
-        if (parameter.ManagedType == typeof(byte) && bytes.Length == 1) return bytes[0];
-        if (parameter.ManagedType == typeof(short)) return BinaryPrimitives.ReadInt16LittleEndian(bytes);
-        if (parameter.ManagedType == typeof(ushort)) return BinaryPrimitives.ReadUInt16LittleEndian(bytes);
-        if (parameter.ManagedType == typeof(int)) return BinaryPrimitives.ReadInt32LittleEndian(bytes);
-        if (parameter.ManagedType == typeof(uint)) return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
-        if (parameter.ManagedType == typeof(long)) return BinaryPrimitives.ReadInt64LittleEndian(bytes);
-        if (parameter.ManagedType == typeof(ulong)) return BinaryPrimitives.ReadUInt64LittleEndian(bytes);
-        if (parameter.ManagedType == typeof(float))
-            return BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        if (parameter.ManagedType == typeof(double))
-            return BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(bytes));
-        if (parameter.ManagedType == typeof(bool) && bytes.Length == 1) return bytes[0] != 0;
-        if (parameter.ManagedType.IsValueType &&
-            Marshal.SizeOf(parameter.ManagedType) == bytes.Length)
-        {
-            fixed (byte* pointer = bytes)
-                return Marshal.PtrToStructure((nint)pointer, parameter.ManagedType)
-                       ?? throw new InvalidOperationException(
-                           $"Could not marshal {parameter.ManagedType.FullName}.");
-        }
-        throw new NotSupportedException(
-            $"Patch parameter {parameter.Name} of type {parameter.ManagedType.FullName} is unsupported.");
-    }
-
-    private object CopyValue(NativePatchCall* call, UnrealParameter parameter)
-    {
-        var api = _api;
-        if (api == null || api->ApiVersion < BriefcaseAbi.PatchingApiVersion ||
-            api->CopyValue == null)
-            throw new NotSupportedException("The host cannot copy pointer-free Unreal values.");
-        var kind = PropertyKind(parameter.ManagedType);
-        uint required = 0;
-        var status = api->CopyValue(
-            api->Context, call, checked((uint)parameter.Offset), kind,
-            null, 0, &required);
-        if (status != NativeUnrealResult.BufferTooSmall || required is < 12 or > 32u * 1024u * 1024u)
-            throw new InvalidOperationException($"Could not size Unreal patch value: {status}.");
-        var bytes = new byte[required];
-        fixed (byte* destination = bytes)
-            status = api->CopyValue(
-                api->Context, call, checked((uint)parameter.Offset), kind,
-                destination, checked((uint)bytes.Length), &required);
-        if (status != NativeUnrealResult.Ok || required != bytes.Length)
-            throw new InvalidOperationException($"Could not copy Unreal patch value: {status}.");
-        return UnrealValueWire.Decode(parameter.ManagedType, bytes)
-               ?? throw new InvalidOperationException("The copied Unreal value was null.");
-    }
-
-    private byte[] CopyByteArray(NativePatchCall* call, int parameterOffset)
-    {
-        var api = _api;
-        if (api == null || api->ApiVersion < BriefcaseAbi.PatchingApiVersion ||
-            api->CopyByteArray == null)
-            throw new NotSupportedException("The host cannot copy Unreal byte arrays.");
-        uint required = 0;
-        var status = api->CopyByteArray(
-            api->Context, call, checked((uint)parameterOffset), null, 0, &required);
-        if (status == NativeUnrealResult.Ok && required == 0) return [];
-        if (status != NativeUnrealResult.BufferTooSmall || required > 32u * 1024u * 1024u)
-            throw new InvalidOperationException($"Could not size Unreal byte array: {status}.");
-        var result = new byte[required];
-        fixed (byte* destination = result)
-            status = api->CopyByteArray(
-                api->Context, call, checked((uint)parameterOffset), destination,
-                checked((uint)result.Length), &required);
-        if (status != NativeUnrealResult.Ok || required != result.Length)
-            throw new InvalidOperationException($"Could not copy Unreal byte array: {status}.");
-        return result;
-    }
-
-    private string CopyString(NativePatchCall* call, int parameterOffset)
-    {
-        var api = _api;
-        if (api == null || api->ApiVersion < BriefcaseAbi.PatchingApiVersion ||
-            api->CopyString == null)
-            throw new NotSupportedException("The host cannot copy Unreal strings.");
-        uint required = 0;
-        var status = api->CopyString(
-            api->Context, call, checked((uint)parameterOffset), null, 0, &required);
-        if (status == NativeUnrealResult.Ok && required == 0) return string.Empty;
-        if (status != NativeUnrealResult.BufferTooSmall || required > 1024u * 1024u)
-            throw new InvalidOperationException($"Could not size Unreal string: {status}.");
-        var characters = new char[required];
-        fixed (char* destination = characters)
-            status = api->CopyString(
-                api->Context, call, checked((uint)parameterOffset), destination,
-                checked((uint)characters.Length), &required);
-        if (status != NativeUnrealResult.Ok || required != characters.Length)
-            throw new InvalidOperationException($"Could not copy Unreal string: {status}.");
-        var length = characters.Length > 0 && characters[^1] == '\0'
-            ? characters.Length - 1 : characters.Length;
-        return new string(characters, 0, length);
-    }
-
-    private string CopyText(NativePatchCall* call, int parameterOffset)
-    {
-        var api = _api;
-        if (api == null || api->ApiVersion < BriefcaseAbi.PatchingApiVersion ||
-            api->CopyText == null)
-            throw new NotSupportedException("The host cannot copy Unreal FText values.");
-        uint required = 0;
-        var status = api->CopyText(
-            api->Context, call, checked((uint)parameterOffset), null, 0, &required);
-        if (status == NativeUnrealResult.Ok && required == 0) return string.Empty;
-        if (status != NativeUnrealResult.BufferTooSmall || required > 64u * 1024u)
-            throw new InvalidOperationException($"Could not size Unreal FText: {status}.");
-        var characters = new char[required];
-        fixed (char* destination = characters)
-            status = api->CopyText(
-                api->Context, call, checked((uint)parameterOffset), destination,
-                checked((uint)characters.Length), &required);
-        if (status != NativeUnrealResult.Ok || required != characters.Length)
-            throw new InvalidOperationException($"Could not copy Unreal FText: {status}.");
-        var length = characters.Length > 0 && characters[^1] == '\0'
-            ? characters.Length - 1 : characters.Length;
-        return new string(characters, 0, length);
-    }
+        => PatchValueReader.Read(_api, _modState.Context.Unreal, call, parameter);
 
     private void WriteParameter(
         NativePatchCall* call, UnrealParameter parameter, object? value)
@@ -441,13 +314,26 @@ internal sealed unsafe class PatchRegistration : IDisposable
     private void WriteValue(NativePatchCall* call, UnrealParameter parameter, object? value)
     {
         var api = _api;
-        if (api == null || api->WriteValue == null || value is null ||
-            value.GetType() != parameter.ManagedType)
+        if (api == null || value is null || value.GetType() != parameter.ManagedType)
             throw new NotSupportedException($"Patch value {parameter.Name} cannot be written.");
         var kind = PropertyKind(parameter.ManagedType);
         NativeUnrealResult status;
-        if (value is UnrealObjectReference objectReference)
+        if (UnrealValueWire.RequiresEncodedConstruction(parameter.ManagedType))
         {
+            if (api->ApiVersion < BriefcaseAbi.PatchingApiVersion ||
+                api->WriteEncodedValue == null)
+                throw new NotSupportedException(
+                    "The host cannot write owning Unreal patch values.");
+            var bytes = UnrealValueWire.Encode(parameter.ManagedType, value);
+            fixed (byte* source = bytes)
+                status = api->WriteEncodedValue(
+                    api->Context, call, checked((uint)parameter.Offset), kind,
+                    source, checked((uint)bytes.Length));
+        }
+        else if (value is UnrealObjectReference objectReference)
+        {
+            if (api->WriteValue == null)
+                throw new NotSupportedException("The host cannot write Unreal patch values.");
             status = api->WriteValue(
                 api->Context, call, checked((uint)parameter.Offset), kind,
                 &objectReference, checked((uint)sizeof(UnrealObjectReference)));
@@ -455,6 +341,8 @@ internal sealed unsafe class PatchRegistration : IDisposable
         else if (value is IUnrealStructValue structure &&
                  structure.Size == parameter.Size)
         {
+            if (api->WriteValue == null)
+                throw new NotSupportedException("The host cannot write Unreal patch values.");
             var bytes = new byte[parameter.Size];
             structure.WriteTo(bytes);
             fixed (byte* source = bytes)
@@ -499,7 +387,8 @@ internal sealed unsafe class PatchRegistration : IDisposable
 
     private static bool RequiresPointerFreeCopy(Type type) =>
         type == typeof(UnrealObjectReference) ||
-        typeof(IUnrealStructValue).IsAssignableFrom(type) ||
+        (typeof(IUnrealStructValue).IsAssignableFrom(type) ||
+         typeof(IUnrealManagedStructValue).IsAssignableFrom(type)) ||
         type == typeof(byte[]) ||
         type.IsGenericType && type.GetGenericTypeDefinition() is var definition &&
         (definition == typeof(UnrealArray<>) || definition == typeof(UnrealSet<>) ||
@@ -508,7 +397,9 @@ internal sealed unsafe class PatchRegistration : IDisposable
     private static UnrealPropertyKind PropertyKind(Type type)
     {
         if (type == typeof(UnrealObjectReference)) return UnrealPropertyKind.Object;
-        if (typeof(IUnrealStructValue).IsAssignableFrom(type)) return UnrealPropertyKind.Struct;
+        if (typeof(IUnrealStructValue).IsAssignableFrom(type) ||
+            typeof(IUnrealManagedStructValue).IsAssignableFrom(type))
+            return UnrealPropertyKind.Struct;
         if (type == typeof(byte[])) return UnrealPropertyKind.Array;
         if (type.IsGenericType)
         {

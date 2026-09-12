@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Briefcase.ModApi\Briefcase.ModApi.csproj" Private="false" />
+    <ProjectReference Include="..\..\Briefcase.ClientModApi\Briefcase.ClientModApi.csproj" Private="false" />
     <Compile Include="..\ServerAdminControl.Shared\ServerAdminProtocol.cs"
              Link="Protocol\ServerAdminProtocol.cs" />
     <Compile Include="..\ServerAdminControl.Shared\ServerAdminAuthentication.cs"

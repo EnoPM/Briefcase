@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C7E53B64-52BA-4A57-9CF5-BCB524E71F24}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectName>Briefcase.Unreal.Patching</ProjectName>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)' != 'Debug'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildProjectDirectory)\obj\$(Configuration)\</IntDir>
+    <TargetName>Briefcase.Unreal.Patching</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\Briefcase.Native.Foundation\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Discovery\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Invocation\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Marshalling\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Reflection\src;$(MSBuildProjectDirectory)\..\..\sdk\BriefcaseModApi\include;$(MSBuildProjectDirectory)\..\..\third_party\minhook-1.3.4\include;$(MSBuildProjectDirectory)\..\..\third_party\minhook-1.3.4\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\UnrealPatching.cpp" />
+    <ClCompile Include="..\..\third_party\minhook-1.3.4\src\buffer.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile>
+    <ClCompile Include="..\..\third_party\minhook-1.3.4\src\hook.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile>
+    <ClCompile Include="..\..\third_party\minhook-1.3.4\src\trampoline.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile>
+    <ClCompile Include="..\..\third_party\minhook-1.3.4\src\hde\hde64.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile>
+  </ItemGroup>
+  <ItemGroup><ClInclude Include="src\UnrealPatching.h" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Briefcase.Native.Foundation\Briefcase.Native.Foundation.vcxproj"><Project>{5CDFF6BE-9A2C-4475-B46A-474C6E4C78AD}</Project></ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Discovery\Briefcase.Unreal.Discovery.vcxproj"><Project>{D8E30167-CE75-4B8D-8A32-D65C50F83A6C}</Project></ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Invocation\Briefcase.Unreal.Invocation.vcxproj"><Project>{B5D93441-91CF-4F7B-9E2D-18C41C51EADB}</Project></ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Marshalling\Briefcase.Unreal.Marshalling.vcxproj"><Project>{8822B7D6-C43F-4EFF-B7D4-34C9119A917A}</Project></ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Reflection\Briefcase.Unreal.Reflection.vcxproj"><Project>{7FA7625C-9AA8-481F-81A2-48029620D885}</Project></ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

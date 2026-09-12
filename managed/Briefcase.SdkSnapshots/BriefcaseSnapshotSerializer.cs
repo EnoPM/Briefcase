@@ -13,7 +13,8 @@ public static class BriefcaseSnapshotSerializer
 {
     private static ReadOnlySpan<byte> Magic => "BRSK"u8;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-    private const ushort BinaryFormatVersion = 1;
+    private const ushort CurrentBinaryFormatVersion = 2;
+    private const ushort MinimumBinaryFormatVersion = 1;
     private const long MaximumFileBytes = 64L * 1024 * 1024;
     private const int MaximumStringBytes = 1024 * 1024;
     private const int MaximumTypes = 100_000;
@@ -60,7 +61,7 @@ public static class BriefcaseSnapshotSerializer
 
         using var writer = new BinaryWriter(destination, StrictUtf8, leaveOpen: true);
         writer.Write(Magic);
-        writer.Write(BinaryFormatVersion);
+        writer.Write(CurrentBinaryFormatVersion);
         writer.Write((ushort)0);
         WriteSnapshot(writer, snapshot);
     }
@@ -76,11 +77,12 @@ public static class BriefcaseSnapshotSerializer
             throw new InvalidDataException("The SDK snapshot has an invalid binary signature.");
         var version = reader.ReadUInt16();
         var reserved = reader.ReadUInt16();
-        if (version != BinaryFormatVersion || reserved != 0)
+        if (version is < MinimumBinaryFormatVersion or > CurrentBinaryFormatVersion ||
+            reserved != 0)
             throw new InvalidDataException(
                 $"Unsupported Briefcase binary snapshot format {version}.");
 
-        var snapshot = ReadSnapshot(reader);
+        var snapshot = ReadSnapshot(reader, version);
         if (source.CanSeek && source.Position != source.Length)
             throw new InvalidDataException("The SDK snapshot contains trailing binary data.");
         return snapshot;
@@ -88,9 +90,9 @@ public static class BriefcaseSnapshotSerializer
 
     private static void Validate(SdkSnapshot snapshot)
     {
-        if (snapshot.SchemaVersion is not (2 or 3))
+        if (snapshot.SchemaVersion is not (2 or 3 or 4))
             throw new InvalidDataException(
-                $"Persisted SDK generation requires snapshot schema 2 or 3; found {snapshot.SchemaVersion}.");
+                $"Persisted SDK generation requires snapshot schema 2, 3 or 4; found {snapshot.SchemaVersion}.");
         if (snapshot.Target is not ("Client" or "Server"))
             throw new InvalidDataException($"Unsupported SDK target {snapshot.Target}.");
         var expectedName = $"Briefcase.DeceiveInc.{snapshot.Target}.Sdk";
@@ -110,7 +112,7 @@ public static class BriefcaseSnapshotSerializer
         WriteList(writer, snapshot.Types, WriteType);
     }
 
-    private static SdkSnapshot ReadSnapshot(BinaryReader reader) => new()
+    private static SdkSnapshot ReadSnapshot(BinaryReader reader, ushort version) => new()
     {
         SchemaVersion = reader.ReadInt32(),
         Target = ReadString(reader),
@@ -121,7 +123,7 @@ public static class BriefcaseSnapshotSerializer
             ImageSize = reader.ReadUInt32()
         },
         CapturedObjectCount = reader.ReadInt32(),
-        Types = ReadList(reader, MaximumTypes, "types", ReadType)
+        Types = ReadList(reader, MaximumTypes, "types", value => ReadType(value, version))
     };
 
     private static void WriteType(BinaryWriter writer, TypeSnapshot type)
@@ -136,19 +138,25 @@ public static class BriefcaseSnapshotSerializer
         WriteList(writer, type.Values, WriteEnumValue);
     }
 
-    private static TypeSnapshot ReadType(BinaryReader reader) => new()
+    private static TypeSnapshot ReadType(BinaryReader reader, ushort version) => new()
     {
         Path = ReadString(reader),
         Name = ReadString(reader),
         Kind = ReadString(reader),
         SuperPath = ReadNullableString(reader),
         Size = reader.ReadInt32(),
-        Properties = ReadList(reader, MaximumMembers, "properties", ReadProperty),
-        Functions = ReadList(reader, MaximumMembers, "functions", ReadFunction),
+        Properties = ReadList(
+            reader, MaximumMembers, "properties", value => ReadProperty(value, version)),
+        Functions = ReadList(
+            reader, MaximumMembers, "functions", value => ReadFunction(value, version)),
         Values = ReadList(reader, MaximumMembers, "enum values", ReadEnumValue)
     };
 
     private static void WriteProperty(BinaryWriter writer, PropertySnapshot property)
+        => WriteProperty(writer, property, 0);
+
+    private static void WriteProperty(
+        BinaryWriter writer, PropertySnapshot property, int typeDepth)
     {
         WriteString(writer, property.Name);
         WriteString(writer, property.UnrealType);
@@ -158,10 +166,14 @@ public static class BriefcaseSnapshotSerializer
         writer.Write(property.Flags);
         WriteNullableString(writer, property.ReferencedTypePath);
         WriteNullableString(writer, property.InnerUnrealType);
-        WriteNullableType(writer, property.Type, 0);
+        WriteNullableType(writer, property.Type, typeDepth);
     }
 
-    private static PropertySnapshot ReadProperty(BinaryReader reader) => new()
+    private static PropertySnapshot ReadProperty(BinaryReader reader, ushort version) =>
+        ReadProperty(reader, version, 0);
+
+    private static PropertySnapshot ReadProperty(
+        BinaryReader reader, ushort version, int typeDepth) => new()
     {
         Name = ReadString(reader),
         UnrealType = ReadString(reader),
@@ -171,7 +183,7 @@ public static class BriefcaseSnapshotSerializer
         Flags = reader.ReadUInt64(),
         ReferencedTypePath = ReadNullableString(reader),
         InnerUnrealType = ReadNullableString(reader),
-        Type = ReadNullableType(reader, 0)
+        Type = ReadNullableType(reader, typeDepth, version)
     };
 
     private static void WriteNullableType(
@@ -196,9 +208,13 @@ public static class BriefcaseSnapshotSerializer
             writer.Write(boolean.ByteMask);
             writer.Write(boolean.FieldMask);
         }
+        writer.Write(type.DelegateSignature is not null);
+        if (type.DelegateSignature is { } signature)
+            WriteFunction(writer, signature, depth + 1);
     }
 
-    private static UnrealTypeSnapshot? ReadNullableType(BinaryReader reader, int depth)
+    private static UnrealTypeSnapshot? ReadNullableType(
+        BinaryReader reader, int depth, ushort version)
     {
         if (!reader.ReadBoolean()) return null;
         if (depth > MaximumTypeDepth)
@@ -206,10 +222,10 @@ public static class BriefcaseSnapshotSerializer
         var unrealType = ReadString(reader);
         var elementSize = reader.ReadInt32();
         var referencedTypePath = ReadNullableString(reader);
-        var innerType = ReadNullableType(reader, depth + 1);
-        var keyType = ReadNullableType(reader, depth + 1);
-        var valueType = ReadNullableType(reader, depth + 1);
-        var underlyingType = ReadNullableType(reader, depth + 1);
+        var innerType = ReadNullableType(reader, depth + 1, version);
+        var keyType = ReadNullableType(reader, depth + 1, version);
+        var valueType = ReadNullableType(reader, depth + 1, version);
+        var underlyingType = ReadNullableType(reader, depth + 1, version);
         BooleanLayoutSnapshot? booleanLayout = null;
         if (reader.ReadBoolean())
         {
@@ -221,6 +237,8 @@ public static class BriefcaseSnapshotSerializer
                 FieldMask = reader.ReadByte()
             };
         }
+        var delegateSignature = version >= 2 && reader.ReadBoolean()
+            ? ReadFunction(reader, version, depth + 1) : null;
         return new UnrealTypeSnapshot
         {
             UnrealType = unrealType,
@@ -230,26 +248,39 @@ public static class BriefcaseSnapshotSerializer
             KeyType = keyType,
             ValueType = valueType,
             UnderlyingType = underlyingType,
-            BooleanLayout = booleanLayout
+            BooleanLayout = booleanLayout,
+            DelegateSignature = delegateSignature
         };
     }
 
     private static void WriteFunction(BinaryWriter writer, FunctionSnapshot function)
+        => WriteFunction(writer, function, 0);
+
+    private static void WriteFunction(
+        BinaryWriter writer, FunctionSnapshot function, int typeDepth)
     {
         WriteString(writer, function.Name);
         writer.Write(function.Flags);
         writer.Write(function.ParameterSize);
         writer.Write(function.ParameterCount);
-        WriteList(writer, function.Parameters, WriteProperty);
+        WriteList(
+            writer, function.Parameters,
+            (valueWriter, parameter) => WriteProperty(valueWriter, parameter, typeDepth));
     }
 
-    private static FunctionSnapshot ReadFunction(BinaryReader reader) => new()
+    private static FunctionSnapshot ReadFunction(BinaryReader reader, ushort version) =>
+        ReadFunction(reader, version, 0);
+
+    private static FunctionSnapshot ReadFunction(
+        BinaryReader reader, ushort version, int typeDepth) => new()
     {
         Name = ReadString(reader),
         Flags = reader.ReadUInt32(),
         ParameterSize = reader.ReadInt32(),
         ParameterCount = reader.ReadInt32(),
-        Parameters = ReadList(reader, MaximumMembers, "parameters", ReadProperty)
+        Parameters = ReadList(
+            reader, MaximumMembers, "parameters",
+            value => ReadProperty(value, version, typeDepth))
     };
 
     private static void WriteEnumValue(BinaryWriter writer, EnumValueSnapshot value)

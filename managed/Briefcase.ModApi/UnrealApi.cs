@@ -32,10 +32,14 @@ public readonly record struct UnrealPropertyMetadata(
 public sealed class UnrealInvocationResult
 {
     internal UnrealInvocationResult(
-        byte[] buffer, IReadOnlyDictionary<int, string> textOutputs) =>
-        (Buffer, TextOutputs) = (buffer, textOutputs);
+        byte[] buffer,
+        IReadOnlyDictionary<int, string> textOutputs,
+        IReadOnlyDictionary<int, object?>? valueOutputs = null) =>
+        (Buffer, TextOutputs, ValueOutputs) =
+            (buffer, textOutputs, valueOutputs ?? new Dictionary<int, object?>());
     internal byte[] Buffer { get; }
     internal IReadOnlyDictionary<int, string> TextOutputs { get; }
+    internal IReadOnlyDictionary<int, object?> ValueOutputs { get; }
 }
 
 public readonly unsafe partial struct UnrealApi
@@ -46,6 +50,9 @@ public readonly unsafe partial struct UnrealApi
     private const uint TextApiVersion = 5;
     private const uint NativeInvocationApiVersion = 6;
     private const uint ValueApiVersion = 8;
+    private const uint PreparedApiVersion = 10;
+    private const uint PreparedValueApiVersion = 11;
+    private const uint PreparedValueInputApiVersion = 12;
     private const uint MaximumValueBytes = 32u * 1024u * 1024u;
     private const int MaximumTextCharacters = 65_536;
     private const uint MaximumEnumeration = 100_000;
@@ -302,6 +309,36 @@ public readonly unsafe partial struct UnrealApi
         return result;
     }
 
+    internal TValue ReadGenerated<TValue>(
+        UnrealObjectHandle objectHandle,
+        UnrealProperty<TValue> property,
+        ref long preparedToken) where TValue : unmanaged
+    {
+        if (Unsafe.SizeOf<TValue>() != property.Size)
+            throw new InvalidOperationException(
+                $"Managed type {typeof(TValue).Name} does not match {property.OwnerPath}.{property.Name}.");
+        if (!IsPreparedApiAvailable()) return Read(objectHandle, property);
+        var token = GetOrPrepareProperty(property, ref preparedToken);
+        if (token == 0) return Read(objectHandle, property);
+
+        var kind = KindOf<TValue>();
+        if (kind == UnrealPropertyKind.Bool)
+        {
+            uint nativeBoolean = 0;
+            var status = _api->ReadPreparedProperty(
+                _api->Context, token, objectHandle, &nativeBoolean, sizeof(uint));
+            EnsureSuccess("ReadPreparedProperty", property.Name, status);
+            var managedBoolean = nativeBoolean != 0;
+            return Unsafe.As<bool, TValue>(ref managedBoolean);
+        }
+
+        TValue result = default;
+        var read = _api->ReadPreparedProperty(
+            _api->Context, token, objectHandle, &result, checked((uint)sizeof(TValue)));
+        EnsureSuccess("ReadPreparedProperty", property.Name, read);
+        return result;
+    }
+
     internal string ReadString(
         UnrealObjectHandle objectHandle,
         UnrealProperty<string> property)
@@ -494,6 +531,68 @@ public readonly unsafe partial struct UnrealApi
         EnsureSuccess($"WriteProperty({property.Name})", status);
     }
 
+    internal void WriteGenerated<TValue>(
+        UnrealObjectHandle objectHandle,
+        UnrealProperty<TValue> property,
+        TValue value,
+        ref long preparedToken) where TValue : unmanaged
+    {
+        if (Unsafe.SizeOf<TValue>() != property.Size)
+            throw new InvalidOperationException(
+                $"Managed type {typeof(TValue).Name} does not match {property.OwnerPath}.{property.Name}.");
+        if (!IsPreparedApiAvailable())
+        {
+            Write(objectHandle, property, value);
+            return;
+        }
+        var token = GetOrPrepareProperty(property, ref preparedToken);
+        if (token == 0)
+        {
+            Write(objectHandle, property, value);
+            return;
+        }
+
+        NativeUnrealResult status;
+        if (KindOf<TValue>() == UnrealPropertyKind.Bool)
+        {
+            var native = Unsafe.As<TValue, bool>(ref value) ? (byte)1 : (byte)0;
+            status = _api->WritePreparedProperty(
+                _api->Context, token, objectHandle, &native, 1);
+        }
+        else
+        {
+            status = _api->WritePreparedProperty(
+                _api->Context, token, objectHandle, &value, checked((uint)sizeof(TValue)));
+        }
+        EnsureSuccess("WritePreparedProperty", property.Name, status);
+    }
+
+    internal void WriteAggregate<TValue>(
+        UnrealObjectHandle objectHandle,
+        UnrealProperty<TValue> property,
+        TValue value,
+        ref long preparedToken)
+    {
+        if (value is null || value.GetType() != typeof(TValue))
+            throw new ArgumentException(
+                $"Value for {property.OwnerPath}.{property.Name} must be {typeof(TValue).FullName}.",
+                nameof(value));
+        if (!IsPreparedApiAvailable() ||
+            _api->ApiVersion < PreparedValueInputApiVersion ||
+            _api->WritePreparedValueProperty == null)
+            throw new NotSupportedException(
+                "The host does not expose owning property writes from Unreal API v13.");
+
+        var token = GetOrPrepareValueProperty(property, ref preparedToken);
+        var encoded = UnrealValueWire.Encode(typeof(TValue), value!);
+        fixed (byte* input = encoded)
+        {
+            var status = _api->WritePreparedValueProperty(
+                _api->Context, token, objectHandle, input, checked((uint)encoded.Length));
+            EnsureSuccess("WritePreparedValueProperty", property.Name, status);
+        }
+    }
+
     private static NativeUnrealResult WriteBooleanRetry<TValue>(
         NativeUnrealApi* api, UnrealObjectHandle objectHandle,
         UnrealObjectHandle ownerClass, byte* name, uint nameLength,
@@ -545,6 +644,313 @@ public readonly unsafe partial struct UnrealApi
         EnsureSuccess($"WriteTextProperty({name})", status);
     }
 
+    internal void InvokeGenerated(
+        UnrealObjectHandle objectHandle,
+        UnrealFunction function,
+        ref long preparedToken,
+        nint parameterBuffer,
+        int parameterSize)
+    {
+        if (!IsPreparedApiAvailable())
+            throw new NotSupportedException("The host does not expose prepared Unreal API v10.");
+        if (parameterSize != function.ParameterBufferSize || parameterSize is < 0 or > 65_535)
+            throw new InvalidOperationException(
+                $"{function.OwnerPath}.{function.Name} has an invalid generated parameter buffer.");
+
+        var token = Volatile.Read(ref preparedToken);
+        if (token == 0)
+        {
+            token = checked((long)PrepareFunction(function));
+            var existing = Interlocked.CompareExchange(ref preparedToken, token, 0);
+            if (existing != 0) token = existing;
+        }
+        var status = _api->InvokePreparedFunction(
+            _api->Context, checked((ulong)token), objectHandle,
+            (void*)parameterBuffer, checked((uint)parameterSize));
+        EnsureSuccess("InvokePreparedFunction", function.Name, status);
+    }
+
+
+    internal UnrealInvocationResult InvokeGeneratedWithValues(
+        UnrealObjectHandle objectHandle,
+        UnrealFunction function,
+        ref long preparedToken,
+        nint parameterBuffer,
+        int parameterSize)
+    {
+        if (!IsPreparedApiAvailable() || _api->ApiVersion < PreparedValueApiVersion ||
+            _api->InvokePreparedValueFunction == null || _api->ReleaseValueBuffer == null)
+            throw new NotSupportedException(
+                "The host does not expose owning output invocation API v11.");
+        if (parameterSize != function.ParameterBufferSize || parameterSize is < 0 or > 65_535)
+            throw new InvalidOperationException(
+                $"{function.OwnerPath}.{function.Name} has an invalid generated parameter buffer.");
+
+        var token = Volatile.Read(ref preparedToken);
+        if (token == 0)
+        {
+            token = checked((long)PrepareFunction(function));
+            var existing = Interlocked.CompareExchange(ref preparedToken, token, 0);
+            if (existing != 0) token = existing;
+        }
+
+        NativeOwnedValueBuffer output = default;
+        try
+        {
+            var status = _api->InvokePreparedValueFunction(
+                _api->Context, checked((ulong)token), objectHandle,
+                (void*)parameterBuffer, checked((uint)parameterSize), &output);
+            EnsureSuccess("InvokePreparedValueFunction", function.Name, status);
+            if (output.Data == null || output.Size < 8 || output.Size > MaximumValueBytes)
+                throw new InvalidOperationException(
+                    "The host returned an invalid owning output buffer.");
+            var bytes = new byte[output.Size];
+            Marshal.Copy((nint)output.Data, bytes, 0, bytes.Length);
+            return new UnrealInvocationResult(
+                Array.Empty<byte>(), new Dictionary<int, string>(),
+                UnrealValueWire.DecodeOutputs(function, bytes));
+        }
+        finally
+        {
+            if (output.Data != null)
+                _api->ReleaseValueBuffer(_api->Context, &output);
+        }
+    }
+
+    internal UnrealInvocationResult InvokeGeneratedWithValues(
+        UnrealObjectHandle objectHandle,
+        UnrealFunction function,
+        ref long preparedToken,
+        nint parameterBuffer,
+        int parameterSize,
+        object?[] owningInputs)
+    {
+        ArgumentNullException.ThrowIfNull(owningInputs);
+        if (!IsPreparedApiAvailable() || _api->ApiVersion < PreparedValueInputApiVersion ||
+            _api->InvokePreparedValueFunctionV2 == null || _api->ReleaseValueBuffer == null)
+            throw new NotSupportedException(
+                "The host does not expose owning input invocation API v13.");
+        if (parameterSize != function.ParameterBufferSize || parameterSize is < 0 or > 65_535)
+            throw new InvalidOperationException(
+                $"{function.OwnerPath}.{function.Name} has an invalid generated parameter buffer.");
+
+        var parameters = function.Parameters
+            .Where(parameter => (!parameter.IsOut || parameter.IsReference) &&
+                UnrealValueWire.RequiresEncodedConstruction(parameter.ManagedType))
+            .ToArray();
+        if (parameters.Length != owningInputs.Length)
+            throw new InvalidOperationException(
+                $"{function.OwnerPath}.{function.Name} expected {parameters.Length} owning inputs " +
+                $"but received {owningInputs.Length}.");
+
+        var encoded = new byte[parameters.Length][];
+        var descriptors = new NativeValueInput[parameters.Length];
+        var handles = new GCHandle[parameters.Length];
+        for (var index = 0; index < parameters.Length; index++)
+        {
+            var value = owningInputs[index] ?? throw new ArgumentNullException(parameters[index].Name);
+            if (value.GetType() != parameters[index].ManagedType)
+                throw new ArgumentException(
+                    $"Owning input {parameters[index].Name} must be " +
+                    $"{parameters[index].ManagedType.FullName}.", nameof(owningInputs));
+            encoded[index] = UnrealValueWire.Encode(parameters[index].ManagedType, value);
+        }
+
+        var token = Volatile.Read(ref preparedToken);
+        if (token == 0)
+        {
+            token = checked((long)PrepareFunction(function));
+            var existing = Interlocked.CompareExchange(ref preparedToken, token, 0);
+            if (existing != 0) token = existing;
+        }
+
+        NativeOwnedValueBuffer output = default;
+        try
+        {
+            for (var index = 0; index < encoded.Length; index++)
+            {
+                handles[index] = GCHandle.Alloc(encoded[index], GCHandleType.Pinned);
+                descriptors[index] = new NativeValueInput
+                {
+                    StructSize = checked((uint)sizeof(NativeValueInput)),
+                    ParameterOffset = parameters[index].Offset,
+                    Data = (byte*)handles[index].AddrOfPinnedObject(),
+                    Size = checked((uint)encoded[index].Length)
+                };
+            }
+            fixed (NativeValueInput* inputs = descriptors)
+            {
+                var status = _api->InvokePreparedValueFunctionV2(
+                    _api->Context, checked((ulong)token), objectHandle,
+                    (void*)parameterBuffer, checked((uint)parameterSize),
+                    inputs, checked((uint)descriptors.Length), &output);
+                EnsureSuccess("InvokePreparedValueFunctionV2", function.Name, status);
+            }
+            if (output.Data == null || output.Size < 8 || output.Size > MaximumValueBytes)
+                throw new InvalidOperationException(
+                    "The host returned an invalid owning output buffer.");
+            var bytes = new byte[output.Size];
+            Marshal.Copy((nint)output.Data, bytes, 0, bytes.Length);
+            return new UnrealInvocationResult(
+                Array.Empty<byte>(), new Dictionary<int, string>(),
+                UnrealValueWire.DecodeOutputs(function, bytes));
+        }
+        finally
+        {
+            if (output.Data != null)
+                _api->ReleaseValueBuffer(_api->Context, &output);
+            foreach (var handle in handles)
+                if (handle.IsAllocated) handle.Free();
+        }
+    }
+
+    private ulong PrepareFunction(UnrealFunction function)
+    {
+        var ownerClass = FindMetadata(function.OwnerPath);
+        var encodedName = Encode(function.Name);
+        var descriptors = new NativePreparedParameter[function.Parameters.Count];
+        for (var index = 0; index < descriptors.Length; index++)
+        {
+            var parameter = function.Parameters[index];
+            var flags = parameter.IsOut
+                ? NativePreparedParameterFlags.Output
+                : NativePreparedParameterFlags.Input;
+            if (parameter.IsReference)
+                flags |= NativePreparedParameterFlags.Input | NativePreparedParameterFlags.Reference;
+            if (function.ReturnParameter is { } returned &&
+                returned.Offset == parameter.Offset && returned.Name == parameter.Name)
+                flags |= NativePreparedParameterFlags.Return;
+            descriptors[index] = new NativePreparedParameter
+            {
+                StructSize = checked((uint)sizeof(NativePreparedParameter)),
+                Offset = parameter.Offset,
+                ElementSize = parameter.Size,
+                Kind = KindOf(parameter.ManagedType, parameter.Size),
+                Flags = flags
+            };
+        }
+
+        ulong token = 0;
+        fixed (byte* name = encodedName)
+        fixed (NativePreparedParameter* parameters = descriptors)
+        {
+            var status = _api->PrepareFunction(
+                _api->Context, ownerClass, name, checked((uint)encodedName.Length),
+                checked((uint)function.ParameterBufferSize),
+                parameters, checked((uint)descriptors.Length), &token);
+            if (status == NativeUnrealResult.StaleHandle)
+            {
+                ownerClass = RefreshMetadata(function.OwnerPath);
+                status = _api->PrepareFunction(
+                    _api->Context, ownerClass, name, checked((uint)encodedName.Length),
+                    checked((uint)function.ParameterBufferSize),
+                    parameters, checked((uint)descriptors.Length), &token);
+            }
+            EnsureSuccess("PrepareFunction", function.Name, status);
+        }
+        if (token == 0) throw new InvalidOperationException("The host returned an empty function token.");
+        return token;
+    }
+
+    private ulong GetOrPrepareProperty<TValue>(
+        UnrealProperty<TValue> property, ref long preparedToken) where TValue : unmanaged
+    {
+        var cached = Volatile.Read(ref preparedToken);
+        if (cached < 0) return 0; // Native layout needs the dynamic canonical path.
+        if (cached != 0) return checked((ulong)cached);
+        var ownerClass = FindMetadata(property.OwnerPath);
+        var encodedName = Encode(property.Name);
+        ulong token = 0;
+        fixed (byte* name = encodedName)
+        {
+            var status = _api->PrepareProperty(
+                _api->Context, ownerClass, name, checked((uint)encodedName.Length),
+                property.Offset, property.Size, 1, KindOf<TValue>(), &token);
+            if (status == NativeUnrealResult.StaleHandle)
+            {
+                ownerClass = RefreshMetadata(property.OwnerPath);
+                status = _api->PrepareProperty(
+                    _api->Context, ownerClass, name, checked((uint)encodedName.Length),
+                    property.Offset, property.Size, 1, KindOf<TValue>(), &token);
+            }
+            if (status == NativeUnrealResult.Unsupported)
+            {
+                Interlocked.CompareExchange(ref preparedToken, -1, 0);
+                return 0;
+            }
+            EnsureSuccess("PrepareProperty", property.Name, status);
+        }
+        if (token == 0) throw new InvalidOperationException("The host returned an empty property token.");
+        var prepared = checked((long)token);
+        var existing = Interlocked.CompareExchange(ref preparedToken, prepared, 0);
+        return checked((ulong)(existing == 0 ? prepared : existing));
+    }
+
+    private ulong GetOrPrepareValueProperty<TValue>(
+        UnrealProperty<TValue> property, ref long preparedToken)
+    {
+        var cached = Volatile.Read(ref preparedToken);
+        if (cached != 0) return checked((ulong)cached);
+        var ownerClass = FindMetadata(property.OwnerPath);
+        var encodedName = Encode(property.Name);
+        var kind = AggregateKind(typeof(TValue));
+        ulong token = 0;
+        fixed (byte* name = encodedName)
+        {
+            var status = _api->PrepareProperty(
+                _api->Context, ownerClass, name, checked((uint)encodedName.Length),
+                property.Offset, property.Size, 1, kind, &token);
+            if (status == NativeUnrealResult.StaleHandle)
+            {
+                ownerClass = RefreshMetadata(property.OwnerPath);
+                status = _api->PrepareProperty(
+                    _api->Context, ownerClass, name, checked((uint)encodedName.Length),
+                    property.Offset, property.Size, 1, kind, &token);
+            }
+            EnsureSuccess("PrepareProperty", property.Name, status);
+        }
+        if (token == 0) throw new InvalidOperationException("The host returned an empty property token.");
+        var prepared = checked((long)token);
+        var existing = Interlocked.CompareExchange(ref preparedToken, prepared, 0);
+        return checked((ulong)(existing == 0 ? prepared : existing));
+    }
+
+    private bool IsPreparedApiAvailable() =>
+        IsAvailable && _api->ApiVersion >= PreparedApiVersion &&
+        _api->PrepareFunction != null && _api->InvokePreparedFunction != null &&
+        _api->PrepareProperty != null && _api->ReadPreparedProperty != null &&
+        _api->WritePreparedProperty != null;
+
+    private static UnrealPropertyKind KindOf(Type type, int size)
+    {
+        if (type == typeof(sbyte)) return UnrealPropertyKind.Int8;
+        if (type == typeof(byte)) return UnrealPropertyKind.Byte;
+        if (type == typeof(short)) return UnrealPropertyKind.Int16;
+        if (type == typeof(ushort)) return UnrealPropertyKind.UInt16;
+        if (type == typeof(int)) return UnrealPropertyKind.Int32;
+        if (type == typeof(uint)) return UnrealPropertyKind.UInt32;
+        if (type == typeof(long)) return UnrealPropertyKind.Int64;
+        if (type == typeof(ulong)) return UnrealPropertyKind.UInt64;
+        if (type == typeof(float)) return UnrealPropertyKind.Float;
+        if (type == typeof(double)) return UnrealPropertyKind.Double;
+        if (type == typeof(bool)) return UnrealPropertyKind.Bool;
+        if (type == typeof(UnrealName)) return UnrealPropertyKind.Name;
+        if (type == typeof(UnrealObjectReference)) return UnrealPropertyKind.Object;
+        if (type == typeof(string)) return UnrealPropertyKind.String;
+        if (type == typeof(UnrealText)) return UnrealPropertyKind.Text;
+        if (UnrealValueWire.RequiresEncodedConstruction(type)) return AggregateKind(type);
+        if (type.IsEnum) return size switch
+        {
+            1 => UnrealPropertyKind.Byte,
+            2 => UnrealPropertyKind.UInt16,
+            4 => UnrealPropertyKind.UInt32,
+            8 => UnrealPropertyKind.UInt64,
+            _ => throw new NotSupportedException($"Enum storage of {size} bytes is unsupported.")
+        };
+        if (type.IsValueType && !type.IsPrimitive) return UnrealPropertyKind.Struct;
+        throw new NotSupportedException($"Prepared values for {type.FullName} are not implemented.");
+    }
+
     internal void InvokeVoid(
         UnrealObjectHandle objectHandle,
         UnrealFunction function,
@@ -592,6 +998,13 @@ public readonly unsafe partial struct UnrealApi
     internal static TValue ReadOutput<TValue>(
         UnrealInvocationResult invocation, UnrealParameter parameter) where TValue : unmanaged =>
         ReadValue<TValue>(invocation.Buffer, parameter);
+
+    internal static TValue ReadValueOutput<TValue>(
+        UnrealInvocationResult invocation, UnrealParameter parameter) =>
+        invocation.ValueOutputs.TryGetValue(parameter.Offset, out var value) && value is TValue typed
+            ? typed
+            : throw new InvalidOperationException(
+                $"No {typeof(TValue).Name} output was returned for {parameter.Name}.");
 
     internal static UnrealText ReadTextOutput(
         UnrealInvocationResult invocation, UnrealParameter parameter) =>
@@ -951,6 +1364,8 @@ public readonly unsafe partial struct UnrealApi
 
     private static UnrealPropertyKind AggregateKind(Type type)
     {
+        if (typeof(IUnrealManagedStructValue).IsAssignableFrom(type))
+            return UnrealPropertyKind.Struct;
         if (type == typeof(byte[])) return UnrealPropertyKind.Array;
         if (type == typeof(UnrealInterfaceReference)) return UnrealPropertyKind.Interface;
         if (type == typeof(UnrealLazyObjectReference)) return UnrealPropertyKind.LazyObject;
@@ -987,6 +1402,13 @@ public readonly unsafe partial struct UnrealApi
         if (result != NativeUnrealResult.Ok)
             throw new UnrealApiException(operation, result);
     }
+
+    private static void EnsureSuccess(
+        string operation, string memberName, NativeUnrealResult result)
+    {
+        if (result != NativeUnrealResult.Ok)
+            throw new UnrealApiException($"{operation}({memberName})", result);
+    }
 }
 
 public class UnrealObject
@@ -996,9 +1418,14 @@ public class UnrealObject
     protected internal UnrealObject(UnrealApi api, UnrealObjectHandle handle) =>
         (_api, Handle) = (api, handle);
     public bool IsNull => Handle.IsNull;
+    public UnrealObjectReference Reference => new(Handle);
     public string Name => IsNull ? "<null>" : _api.GetName(Handle);
     public string Path => IsNull ? "<null>" : _api.GetPath(Handle);
     public UnrealObjectHandle ClassHandle => IsNull ? default : _api.GetClass(Handle);
+    public UnrealObject? Outer => IsNull ? null : _api.GetOuter(this);
+    public UnrealObjectFlags Flags => IsNull ? UnrealObjectFlags.None : _api.GetFlags(this);
+    public bool IsClassDefaultObject =>
+        (Flags & UnrealObjectFlags.ClassDefaultObject) != 0;
     public bool IsA<T>(UnrealClass<T> unrealClass) where T : UnrealObject, IUnrealObject<T> =>
         !IsNull && _api.IsA(Handle, unrealClass.Path);
 
@@ -1007,6 +1434,10 @@ public class UnrealObject
 
     protected TValue ReadAggregate<TValue>(UnrealProperty<TValue> property) =>
         _api.ReadAggregate(Handle, property);
+
+    protected void WriteAggregate<TValue>(
+        UnrealProperty<TValue> property, TValue value, ref long preparedToken) =>
+        _api.WriteAggregate(Handle, property, value, ref preparedToken);
 
     protected string ReadString(UnrealProperty<string> property) =>
         _api.ReadString(Handle, property);
@@ -1027,6 +1458,30 @@ public class UnrealObject
     // methods. The native ProcessEvent bridge marshals the generated
     // parameter descriptor here; keeping the entry point on the base class
     // means generated wrappers never manipulate addresses or native buffers.
+    protected TValue ReadGenerated<TValue>(
+        UnrealProperty<TValue> property, ref long preparedToken) where TValue : unmanaged =>
+        _api.ReadGenerated(Handle, property, ref preparedToken);
+
+    protected void WriteGenerated<TValue>(
+        UnrealProperty<TValue> property, TValue value, ref long preparedToken)
+        where TValue : unmanaged =>
+        _api.WriteGenerated(Handle, property, value, ref preparedToken);
+
+    protected void InvokeGenerated(
+        UnrealFunction function, ref long preparedToken, nint parameterBuffer, int parameterSize) =>
+        _api.InvokeGenerated(Handle, function, ref preparedToken, parameterBuffer, parameterSize);
+
+    protected UnrealInvocationResult InvokeGeneratedWithValues(
+        UnrealFunction function, ref long preparedToken, nint parameterBuffer, int parameterSize) =>
+        _api.InvokeGeneratedWithValues(
+            Handle, function, ref preparedToken, parameterBuffer, parameterSize);
+
+    protected UnrealInvocationResult InvokeGeneratedWithValues(
+        UnrealFunction function, ref long preparedToken, nint parameterBuffer, int parameterSize,
+        object?[] owningInputs) =>
+        _api.InvokeGeneratedWithValues(
+            Handle, function, ref preparedToken, parameterBuffer, parameterSize, owningInputs);
+
     protected void InvokeVoid(UnrealFunction function, params object?[] arguments) =>
         _api.InvokeVoid(Handle, function, arguments);
 
@@ -1044,6 +1499,10 @@ public class UnrealObject
     protected static TValue ReadOutput<TValue>(
         UnrealInvocationResult result, UnrealParameter parameter)
         where TValue : unmanaged => UnrealApi.ReadOutput<TValue>(result, parameter);
+
+    protected static TValue ReadValueOutput<TValue>(
+        UnrealInvocationResult result, UnrealParameter parameter) =>
+        UnrealApi.ReadValueOutput<TValue>(result, parameter);
 
     protected static UnrealText ReadTextOutput(
         UnrealInvocationResult result, UnrealParameter parameter) =>

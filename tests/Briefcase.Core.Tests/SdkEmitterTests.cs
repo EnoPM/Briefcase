@@ -1,4 +1,5 @@
 using System.Reflection;
+using Briefcase.ManagedHost;
 using Briefcase.ModApi;
 using Briefcase.ModApi.Interop;
 using Briefcase.SdkEmitter;
@@ -60,7 +61,7 @@ public sealed class SdkEmitterTests
         using var stream = new MemoryStream();
         BriefcaseSnapshotSerializer.WriteBinary(snapshot, stream);
         var bytes = stream.ToArray();
-        bytes[4] = 2;
+        bytes[4] = 3;
         Assert.Throws<InvalidDataException>(() =>
             BriefcaseSnapshotSerializer.ReadBinary(new MemoryStream(bytes)));
 
@@ -662,6 +663,473 @@ public sealed class SdkEmitterTests
         Assert.Equal(2, result.TypeCount);
         Assert.Equal(1, result.Plan.DescribedPropertyCount);
         Assert.Equal(1, result.Plan.DescribedFunctionCount);
+    }
+
+    [Fact]
+    public void Persisted_emitter_caches_descriptors_and_emits_a_stack_buffer_fast_path()
+    {
+        const ulong returnParameter = 0x400;
+        var snapshot = CreateSnapshot();
+        snapshot.Types.Add(new TypeSnapshot
+        {
+            Path = "/Script/DeceiveInc.Controller",
+            Name = "Controller",
+            Kind = "Class",
+            Functions =
+            [
+                new FunctionSnapshot
+                {
+                    Name = "SetMode",
+                    ParameterSize = 8,
+                    Parameters =
+                    [
+                        Property("Mode", "IntProperty", 0, 4),
+                        Property("ReturnValue", "BoolProperty", 4, 1, returnParameter)
+                    ]
+                }
+            ]
+        });
+
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "FastPathSdk.dll");
+        SnapshotSdkEmitter.Emit(
+            snapshot, path, "Briefcase.DeceiveInc.FastPath." + Guid.NewGuid().ToString("N"));
+        var assembly = Assembly.Load(File.ReadAllBytes(path));
+        var controller = assembly.GetType("Briefcase.DeceiveInc.Controller", true)!;
+        var functions = controller.GetNestedType("Functions", BindingFlags.Public)!;
+        var descriptor = functions.GetProperty("SetMode")!;
+
+        Assert.Same(descriptor.GetValue(null), descriptor.GetValue(null));
+        var il = controller.GetMethod("SetMode")!.GetMethodBody()!.GetILAsByteArray()!;
+        Assert.Contains(il.Select((value, index) => (value, index)), item =>
+            item.value == 0xFE && item.index + 1 < il.Length && il[item.index + 1] == 0x0F);
+        Assert.DoesNotContain((byte)0x8D, il); // newarr
+    }
+
+    [Fact]
+    public void EmissionPlan_uses_canonical_prepared_path_for_nested_object_handles()
+    {
+        var snapshot = CreateSnapshot();
+        snapshot.Types.AddRange([
+            new TypeSnapshot
+            {
+                Path = "/Script/DeceiveInc.UnsafePayload",
+                Name = "UnsafePayload",
+                Kind = "ScriptStruct",
+                Size = 8,
+                Properties = [Property("Object", "ObjectProperty", 0, 8)]
+            },
+            new TypeSnapshot
+            {
+                Path = "/Script/DeceiveInc.Controller",
+                Name = "Controller",
+                Kind = "Class",
+                Functions =
+                [
+                    new FunctionSnapshot
+                    {
+                        Name = "Consume",
+                        ParameterSize = 8,
+                        Parameters =
+                        [
+                            new PropertySnapshot
+                            {
+                                Name = "Payload",
+                                UnrealType = "StructProperty",
+                                Offset = 0,
+                                ElementSize = 8,
+                                ArrayDimension = 1,
+                                Type = new UnrealTypeSnapshot
+                                {
+                                    UnrealType = "StructProperty",
+                                    ElementSize = 8,
+                                    ReferencedTypePath = "/Script/DeceiveInc.UnsafePayload"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]);
+
+        var plan = SdkEmissionPlan.Create(snapshot);
+
+        var function = Assert.Single(
+            plan.TypesByPath["/Script/DeceiveInc.Controller"].Functions);
+        Assert.Equal("Consume", function.MemberName);
+        Assert.True(function.SupportsDirectInvocation);
+        Assert.True(function.SupportsPreparedInvocation);
+        Assert.False(function.SupportsPreparedFastPath);
+        Assert.Equal(0, plan.SkippedFunctionCount);
+
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "PatchSurfaceSdk.dll");
+        SnapshotSdkEmitter.Emit(
+            snapshot, path,
+            "Briefcase.DeceiveInc.PatchSurface." + Guid.NewGuid().ToString("N"));
+        var assembly = Assembly.Load(File.ReadAllBytes(path));
+        var controller = assembly.GetType("Briefcase.DeceiveInc.Controller", true)!;
+        var consume = controller.GetMethod(
+            "Consume", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(consume);
+        var il = consume!.GetMethodBody()!.GetILAsByteArray()!;
+        Assert.Contains(il.Select((value, index) => (value, index)), item =>
+            item.value == 0xFE && item.index + 1 < il.Length && il[item.index + 1] == 0x0F);
+        var functions = controller.GetNestedType("Functions", BindingFlags.Public)!;
+        Assert.NotNull(functions.GetProperty(
+            "Consume", BindingFlags.Public | BindingFlags.Static));
+
+        var target = new UnrealPostfixPatchAttribute(controller, "Consume");
+        var resolve = typeof(PatchDiscovery).GetMethod(
+            "ResolveFunction", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var resolved = Assert.IsType<UnrealFunction>(resolve.Invoke(null, [target]));
+        Assert.Equal("Consume", resolved.Name);
+        Assert.Equal("Briefcase.DeceiveInc.FUnsafePayload",
+            Assert.Single(resolved.Parameters).ManagedType.FullName);
+    }
+
+    [Fact]
+    public void Emitter_exposes_owning_structs_as_managed_snapshots_and_complex_returns()
+    {
+        const ulong returnParameter = 0x400;
+        const string payloadPath = "/Script/DeceiveInc.ManagedPayload";
+        var snapshot = CreateSnapshot();
+        snapshot.Types.AddRange([
+            new TypeSnapshot
+            {
+                Path = payloadPath,
+                Name = "ManagedPayload",
+                Kind = "ScriptStruct",
+                Size = 32,
+                Properties =
+                [
+                    Property("Label", "StrProperty", 0, 16),
+                    new PropertySnapshot
+                    {
+                        Name = "Scores",
+                        UnrealType = "ArrayProperty",
+                        Offset = 16,
+                        ElementSize = 16,
+                        ArrayDimension = 1,
+                        Type = new UnrealTypeSnapshot
+                        {
+                            UnrealType = "ArrayProperty",
+                            ElementSize = 16,
+                            InnerType = new UnrealTypeSnapshot
+                            {
+                                UnrealType = "IntProperty",
+                                ElementSize = 4
+                            }
+                        }
+                    }
+                ]
+            },
+            new TypeSnapshot
+            {
+                Path = "/Script/DeceiveInc.Controller",
+                Name = "Controller",
+                Kind = "Class",
+                Properties =
+                [
+                    new PropertySnapshot
+                    {
+                        Name = "Payload",
+                        UnrealType = "StructProperty",
+                        Offset = 40,
+                        ElementSize = 32,
+                        ArrayDimension = 1,
+                        Type = new UnrealTypeSnapshot
+                        {
+                            UnrealType = "StructProperty",
+                            ElementSize = 32,
+                            ReferencedTypePath = payloadPath
+                        }
+                    }
+                ],
+                Functions =
+                [
+                    new FunctionSnapshot
+                    {
+                        Name = "GetPayload",
+                        ParameterSize = 32,
+                        Parameters =
+                        [
+                            new PropertySnapshot
+                            {
+                                Name = "ReturnValue",
+                                UnrealType = "StructProperty",
+                                Offset = 0,
+                                ElementSize = 32,
+                                ArrayDimension = 1,
+                                Flags = returnParameter,
+                                Type = new UnrealTypeSnapshot
+                                {
+                                    UnrealType = "StructProperty",
+                                    ElementSize = 32,
+                                    ReferencedTypePath = payloadPath
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]);
+
+        var plan = SdkEmissionPlan.Create(snapshot);
+        var payloadPlan = plan.TypesByPath[payloadPath];
+        Assert.True(payloadPlan.UsesManagedStructRepresentation);
+        Assert.Equal([ManagedTypeKind.String, ManagedTypeKind.Array],
+            payloadPlan.Properties.Select(property => property.Type.Kind));
+        var functionPlan = Assert.Single(
+            plan.TypesByPath["/Script/DeceiveInc.Controller"].Functions);
+        Assert.True(functionPlan.SupportsDirectInvocation);
+        Assert.True(functionPlan.SupportsPreparedValueOutputInvocation);
+        Assert.False(functionPlan.SupportsPreparedInvocation);
+
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "ManagedStructSdk.dll");
+        SnapshotSdkEmitter.Emit(
+            snapshot, path,
+            "Briefcase.DeceiveInc.ManagedStruct." + Guid.NewGuid().ToString("N"));
+        var assembly = Assembly.Load(File.ReadAllBytes(path));
+        var payload = assembly.GetType("Briefcase.DeceiveInc.FManagedPayload", true)!;
+        Assert.True(payload.IsValueType);
+        Assert.True(typeof(IUnrealManagedStructValue).IsAssignableFrom(payload));
+        Assert.False(typeof(IUnrealStructValue).IsAssignableFrom(payload));
+        var label = payload.GetField("Label")!;
+        var identity = label.GetCustomAttribute<UnrealStructFieldAttribute>()!;
+        Assert.Equal("Label", identity.Name);
+        Assert.Equal(0, identity.Offset);
+
+        var controller = assembly.GetType("Briefcase.DeceiveInc.Controller", true)!;
+        var property = controller.GetProperty("Payload")!;
+        Assert.Equal(payload, property.PropertyType);
+        Assert.NotNull(property.GetMethod);
+        Assert.NotNull(property.SetMethod);
+        Assert.Equal(payload, controller.GetMethod("GetPayload")!.ReturnType);
+    }
+
+    [Fact]
+    public void Writable_managed_structs_get_property_setters_and_input_ref_functions()
+    {
+        const string payloadPath = "/Script/DeceiveInc.EditablePayload";
+        const ulong writableReference = 0x100 | 0x08000000;
+        var snapshot = CreateSnapshot();
+        snapshot.Types.AddRange(
+        [
+            new TypeSnapshot
+            {
+                Path = payloadPath,
+                Name = "EditablePayload",
+                Kind = "ScriptStruct",
+                Size = 24,
+                Properties =
+                [
+                    Property("Label", "StrProperty", 0, 16),
+                    Property("Count", "IntProperty", 16, 4)
+                ]
+            },
+            new TypeSnapshot
+            {
+                Path = "/Script/DeceiveInc.EditableController",
+                Name = "EditableController",
+                Kind = "Class",
+                Properties =
+                [
+                    new PropertySnapshot
+                    {
+                        Name = "Payload", UnrealType = "StructProperty",
+                        Offset = 40, ElementSize = 24, ArrayDimension = 1,
+                        Type = new UnrealTypeSnapshot
+                        {
+                            UnrealType = "StructProperty", ElementSize = 24,
+                            ReferencedTypePath = payloadPath
+                        }
+                    }
+                ],
+                Functions =
+                [
+                    StructFunction("SetPayload", payloadPath, flags: 0),
+                    StructFunction("UpdatePayload", payloadPath, writableReference)
+                ]
+            }
+        ]);
+
+        var plan = SdkEmissionPlan.Create(snapshot);
+        var payloadPlan = plan.TypesByPath[payloadPath];
+        Assert.True(payloadPlan.UsesManagedStructRepresentation);
+        Assert.True(payloadPlan.SupportsManagedStructWrite);
+        Assert.All(plan.TypesByPath["/Script/DeceiveInc.EditableController"].Functions,
+            function => Assert.True(function.SupportsPreparedValueOutputInvocation));
+
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "WritableManagedStructSdk.dll");
+        SnapshotSdkEmitter.Emit(snapshot, path,
+            "Briefcase.DeceiveInc.WritableManagedStruct." + Guid.NewGuid().ToString("N"));
+        var assembly = Assembly.Load(File.ReadAllBytes(path));
+        var controller = assembly.GetType(
+            "Briefcase.DeceiveInc.EditableController", throwOnError: true)!;
+        Assert.NotNull(controller.GetProperty("Payload")!.SetMethod);
+        Assert.False(controller.GetMethod("SetPayload")!.GetParameters()[0].ParameterType.IsByRef);
+        Assert.True(controller.GetMethod("UpdatePayload")!.GetParameters()[0].ParameterType.IsByRef);
+
+        return;
+
+        static FunctionSnapshot StructFunction(string name, string path, ulong flags) => new()
+        {
+            Name = name,
+            ParameterSize = 24,
+            Parameters =
+            [
+                new PropertySnapshot
+                {
+                    Name = "payload", UnrealType = "StructProperty", Offset = 0,
+                    ElementSize = 24, ArrayDimension = 1, Flags = flags,
+                    Type = new UnrealTypeSnapshot
+                    {
+                        UnrealType = "StructProperty", ElementSize = 24,
+                        ReferencedTypePath = path
+                    }
+                }
+            ]
+        };
+    }
+
+    [Fact]
+    public void Emitter_exposes_FString_and_FText_inputs_returns_and_writable_outputs()
+    {
+        const ulong outParameter = 0x100;
+        const ulong returnParameter = 0x400;
+        const ulong referenceParameter = 0x08000000;
+        var snapshot = CreateSnapshot();
+        snapshot.Types.Add(new TypeSnapshot
+        {
+            Path = "/Script/DeceiveInc.TextController",
+            Name = "TextController",
+            Kind = "Class",
+            Functions =
+            [
+                Function("SetName", Property("Value", "StrProperty", 0, 16)),
+                Function("GetName", Property(
+                    "ReturnValue", "StrProperty", 0, 16, returnParameter)),
+                Function("GetNameOut", Property(
+                    "Value", "StrProperty", 0, 16, outParameter)),
+                Function("RewriteName", Property(
+                    "Value", "StrProperty", 0, 16,
+                    outParameter | referenceParameter)),
+                Function("RewriteLabel", Property(
+                    "Value", "TextProperty", 0, 24,
+                    outParameter | referenceParameter))
+            ]
+        });
+
+        var plan = SdkEmissionPlan.Create(snapshot);
+        var functions = plan.TypesByPath["/Script/DeceiveInc.TextController"]
+            .Functions.ToDictionary(function => function.MemberName);
+
+        Assert.Equal(5, functions.Count);
+        Assert.All(functions.Values,
+            function => Assert.True(function.SupportsPreparedValueOutputInvocation));
+        Assert.Equal(0, plan.SkippedFunctionCount);
+
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "OwningTextSdk.dll");
+        SnapshotSdkEmitter.Emit(
+            snapshot, path,
+            "Briefcase.DeceiveInc.OwningText." + Guid.NewGuid().ToString("N"));
+        var assembly = Assembly.Load(File.ReadAllBytes(path));
+        var controller = assembly.GetType(
+            "Briefcase.DeceiveInc.TextController", throwOnError: true)!;
+
+        Assert.Equal(typeof(void), controller.GetMethod("SetName")!.ReturnType);
+        Assert.Equal(typeof(string),
+            controller.GetMethod("SetName")!.GetParameters()[0].ParameterType);
+        Assert.Equal(typeof(string), controller.GetMethod("GetName")!.ReturnType);
+        Assert.Equal(typeof(string).MakeByRefType(),
+            controller.GetMethod("GetNameOut")!.GetParameters()[0].ParameterType);
+        Assert.True(controller.GetMethod("GetNameOut")!.GetParameters()[0].IsOut);
+        Assert.Equal(typeof(string).MakeByRefType(),
+            controller.GetMethod("RewriteName")!.GetParameters()[0].ParameterType);
+        Assert.True(controller.GetMethod("RewriteName")!.GetParameters()[0].IsIn);
+        Assert.True(controller.GetMethod("RewriteName")!.GetParameters()[0].IsOut);
+        Assert.Equal(typeof(UnrealText).MakeByRefType(),
+            controller.GetMethod("RewriteLabel")!.GetParameters()[0].ParameterType);
+
+        return;
+
+        static FunctionSnapshot Function(string name, PropertySnapshot parameter) => new()
+        {
+            Name = name,
+            ParameterSize = parameter.ElementSize,
+            Parameters = [parameter]
+        };
+    }
+
+    [Fact]
+    public void Binary_snapshot_v2_round_trips_delegate_signatures_and_reads_v1()
+    {
+        var snapshot = CreateSnapshot(schemaVersion: 4);
+        snapshot.Types.Add(new TypeSnapshot
+        {
+            Path = "/Script/DeceiveInc.EventSource",
+            Name = "EventSource",
+            Kind = "Class",
+            Properties =
+            [
+                new PropertySnapshot
+                {
+                    Name = "OnChanged",
+                    UnrealType = "MulticastInlineDelegateProperty",
+                    Offset = 32,
+                    ElementSize = 16,
+                    ArrayDimension = 1,
+                    Type = new UnrealTypeSnapshot
+                    {
+                        UnrealType = "MulticastInlineDelegateProperty",
+                        ElementSize = 16,
+                        DelegateSignature = new FunctionSnapshot
+                        {
+                            Name = "OnChanged__DelegateSignature",
+                            ParameterSize = 4,
+                            ParameterCount = 1,
+                            Parameters = [Property("Value", "IntProperty", 0, 4)]
+                        }
+                    }
+                }
+            ]
+        });
+
+        using var binary = new MemoryStream();
+        BriefcaseSnapshotSerializer.WriteBinary(snapshot, binary);
+        binary.Position = 0;
+        var restored = BriefcaseSnapshotSerializer.ReadBinary(binary);
+
+        var signature = Assert.Single(restored.Types).Properties.Single()
+            .EffectiveType.DelegateSignature;
+        Assert.NotNull(signature);
+        Assert.Equal("OnChanged__DelegateSignature", signature.Name);
+        Assert.Equal(ManagedTypeKind.Int32, SdkEmissionPlan.Create(restored).Types.Single()
+            .Properties.Single().DelegateSignature!.Parameters.Single().Type.Kind);
+
+        using var directory = new TemporaryDirectory();
+        var assemblyPath = Path.Combine(directory.Path, "DelegateSdk.dll");
+        SnapshotSdkEmitter.Emit(restored, assemblyPath, "Briefcase.DeceiveInc.DelegateSdk");
+        var assembly = Assembly.Load(File.ReadAllBytes(assemblyPath));
+        var source = assembly.GetType("Briefcase.DeceiveInc.EventSource", true)!;
+        var properties = source.GetNestedType("Properties", BindingFlags.Public)!;
+        var descriptor = properties.GetProperty("OnChanged")!.GetValue(null)!;
+        var generatedSignature = (UnrealFunction?)descriptor.GetType()
+            .GetProperty("DelegateSignature")!.GetValue(descriptor);
+        Assert.NotNull(generatedSignature);
+        Assert.Equal(typeof(int), Assert.Single(generatedSignature.Parameters).ManagedType);
+
+        var legacy = CreateSnapshot(schemaVersion: 3);
+        binary.SetLength(0);
+        BriefcaseSnapshotSerializer.WriteBinary(legacy, binary);
+        var legacyBytes = binary.ToArray();
+        legacyBytes[4] = 1;
+        var readLegacy = BriefcaseSnapshotSerializer.ReadBinary(new MemoryStream(legacyBytes));
+        Assert.Equal(3, readLegacy.SchemaVersion);
     }
 
     private static SdkSnapshot CreateSnapshot(int schemaVersion = 2) => new()

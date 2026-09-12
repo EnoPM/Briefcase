@@ -27,7 +27,7 @@ internal static class Program
         try
         {
             var snapshot = SnapshotReader.Read(snapshotPath);
-            if (snapshot.SchemaVersion is not (1 or 2 or 3))
+            if (snapshot.SchemaVersion is not (1 or 2 or 3 or 4))
                 throw new InvalidDataException(
                     $"Unsupported SDK snapshot schema {snapshot.SchemaVersion}.");
 

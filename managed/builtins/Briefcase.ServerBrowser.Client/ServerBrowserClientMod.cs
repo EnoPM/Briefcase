@@ -1,14 +1,13 @@
-using System.Numerics;
+using Briefcase.ClientModApi;
 using Briefcase.ClientSupport;
 using Briefcase.DeceiveInc;
 using Briefcase.ModApi;
 using Briefcase.ModApi.Interop;
-using ImGuiNET;
 
 namespace Briefcase.ServerBrowser.Client;
 
 /// <summary>
-/// Core server directory. ImGui only edits managed state; a pending connection
+/// Core server directory. The client UI only edits managed state; a pending connection
 /// is consumed from ReceiveTick so Unreal's DirectConnect always runs on the
 /// game thread.
 /// </summary>
@@ -54,7 +53,7 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
             Path.Combine(frameworkDirectory, "settings.json"));
         _directory = _store.Load();
         Select(_directory.SelectedServerId);
-        _panel = context.Configuration.RegisterPanel(DrawPanel);
+        _panel = context.Ui().RegisterPanel(BuildPanel());
         SaveDirectory();
         context.Info($"Server manager loaded with {_directory.Servers.Count} saved server(s).");
     }
@@ -98,79 +97,62 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         }
     }
 
-    private void DrawPanel(ConfigurationPanelContext panel)
+    private UiComponent BuildPanel() => Ui.Column(
+        Ui.Section("Saved community servers",
+            Ui.Text(
+                "Select a saved server, edit its details, then connect. " +
+                "The directory is shared by every Briefcase UI backend.",
+                UiTextTone.Muted),
+            Ui.Dynamic(BuildSavedServerComponents)),
+        Ui.Section("Server details",
+            Ui.Text(() => string.IsNullOrEmpty(_editingId) ? "Add server" : "Edit server",
+                UiTextTone.Accent),
+            Ui.TextField("Name", () => _name, value => _name = value, maximumLength: 128),
+            Ui.TextField("IP:PORT", () => _endpoint, value => _endpoint = value,
+                maximumLength: 256, hint: "127.0.0.1:50000"),
+            Ui.TextField("Password", () => _password, value => _password = value,
+                    secret: true, maximumLength: 256)
+                .VisibleWhen(() => !_showPassword),
+            Ui.TextField("Password", () => _password, value => _password = value,
+                    maximumLength: 256)
+                .VisibleWhen(() => _showPassword),
+            Ui.Toggle("Show password", () => _showPassword, value => _showPassword = value),
+            Ui.Row(
+                Ui.Button("Save", SaveEditedServer),
+                Ui.Button("Connect", () => QueueConnection(_name, _endpoint, _password)),
+                Ui.Button("Add new", BeginAdd),
+                Ui.Button("Delete", () => _confirmDelete = true)
+                    .VisibleWhen(() => !string.IsNullOrEmpty(_editingId) && !_confirmDelete)),
+            Ui.Dynamic(BuildDeleteConfirmation)),
+        Ui.Section("Connection status",
+            Ui.Text(() => Volatile.Read(ref _status)),
+            Ui.Text("Saved in Briefcase/servers.json.", UiTextTone.Muted)));
+
+    private IReadOnlyList<UiComponent> BuildSavedServerComponents()
     {
-        ImGui.SeparatorText("Saved community servers");
-        ImGui.TextWrapped(
-            "Select a server and press Connect. Double-clicking a saved entry also connects immediately.");
+        SavedServer[] servers;
+        lock (_directoryGate) servers = _directory.Servers.ToArray();
+        if (servers.Length == 0)
+            return [Ui.Text("No server is saved yet.", UiTextTone.Muted)];
 
-        var available = ImGui.GetContentRegionAvail();
-        var listWidth = Math.Clamp(available.X * 0.36f, 180, 280);
-        if (ImGui.BeginChild(
-                "server-list", new Vector2(listWidth, 300), ImGuiNET.ImGuiChildFlags.Borders))
-        {
-            SavedServer[] servers;
-            lock (_directoryGate) servers = _directory.Servers.ToArray();
-            foreach (var server in servers)
-            {
-                ImGui.PushID(server.Id);
-                var selected = string.Equals(
-                    server.Id, _editingId, StringComparison.OrdinalIgnoreCase);
-                if (ImGui.Selectable(server.Name, selected)) Select(server.Id);
-                if (ImGui.IsItemHovered() &&
-                    ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                    QueueConnection(server.Name, server.Endpoint, server.Password);
-                ImGui.TextDisabled(server.Endpoint);
-                ImGui.Spacing();
-                ImGui.PopID();
-            }
-        }
-        ImGui.EndChild();
+        return servers.Select(server => (UiComponent)Ui.Row(
+                Ui.Button(server.Name, () => Select(server.Id)),
+                Ui.Text(server.Endpoint, UiTextTone.Muted, wrap: false),
+                Ui.Button("Connect", () =>
+                    QueueConnection(server.Name, server.Endpoint, server.Password))))
+            .ToArray();
+    }
 
-        ImGui.SameLine();
-        if (ImGui.BeginChild(
-                "server-editor", new Vector2(0, 300), ImGuiNET.ImGuiChildFlags.Borders))
-        {
-            ImGui.Text(string.IsNullOrEmpty(_editingId) ? "Add server" : "Edit server");
-            ImGui.Separator();
-            ImGui.InputText("Name", ref _name, 128);
-            ImGui.InputText("IP:PORT", ref _endpoint, 256);
-            var passwordFlags = _showPassword
-                ? ImGuiNET.ImGuiInputTextFlags.None
-                : ImGuiNET.ImGuiInputTextFlags.Password;
-            ImGui.InputText("Password", ref _password, 256, passwordFlags);
-            ImGui.Checkbox("Show password", ref _showPassword);
-            ImGui.Spacing();
-
-            if (ImGui.Button("Save")) SaveEditedServer();
-            ImGui.SameLine();
-            if (ImGui.Button("Connect"))
-                QueueConnection(_name, _endpoint, _password);
-            ImGui.SameLine();
-            if (ImGui.Button("Add new")) BeginAdd();
-
-            if (!string.IsNullOrEmpty(_editingId))
-            {
-                if (!_confirmDelete)
-                {
-                    if (ImGui.Button("Delete")) _confirmDelete = true;
-                }
-                else
-                {
-                    ImGui.TextColored(new Vector4(1, 0.55f, 0.3f, 1),
-                        "Delete this saved server?");
-                    if (ImGui.Button("Confirm delete")) DeleteSelected();
-                    ImGui.SameLine();
-                    if (ImGui.Button("Cancel")) _confirmDelete = false;
-                }
-            }
-        }
-        ImGui.EndChild();
-
-        ImGui.Spacing();
-        ImGui.SeparatorText("Connection status");
-        ImGui.TextWrapped(Volatile.Read(ref _status));
-        ImGui.TextDisabled("Saved in Briefcase/servers.json.");
+    private IReadOnlyList<UiComponent> BuildDeleteConfirmation()
+    {
+        if (!_confirmDelete) return [];
+        return
+        [
+            Ui.Text("Delete this saved server?", UiTextTone.Warning),
+            Ui.Row(
+                Ui.Button("Confirm delete", DeleteSelected),
+                Ui.Button("Cancel", () => _confirmDelete = false))
+        ];
     }
 
     private void Select(string id)

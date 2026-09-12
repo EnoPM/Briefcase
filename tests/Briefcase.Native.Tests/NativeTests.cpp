@@ -3,6 +3,12 @@
 #include "RuntimeProfile.h"
 #include "RuntimeSymbolResolver.h"
 #include "SignatureScanner.h"
+#include "UnrealReflection.h"
+#include "UnrealInvocation.h"
+#include "UnrealMarshalling.h"
+#include "UnrealMetadataSnapshot.h"
+#include "UnrealPatching.h"
+#include "UnrealValueCodec.h"
 
 #include <Windows.h>
 #include <algorithm>
@@ -10,6 +16,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <span>
 #include <sstream>
@@ -84,7 +92,7 @@ void binarySnapshotWriterTests() {
         briefcase::snapshot::BinarySnapshotWriter writer(stream);
         writer.writeHeader();
         writer.writeUInt32(0x12345678);
-        const std::string expected{"BRSK\x01\x00\x00\x00\x78\x56\x34\x12", 12};
+        const std::string expected{"BRSK\x02\x00\x00\x00\x78\x56\x34\x12", 12};
         expect(stream.str() == expected, "binary header or integer encoding changed");
     });
 
@@ -99,6 +107,244 @@ void binarySnapshotWriterTests() {
                static_cast<unsigned char>(bytes[1]) == 0x01,
                "string length is not 7-bit encoded");
         expect(bytes.substr(2) == value, "string payload was altered");
+    });
+}
+
+void __fastcall unusedNameConverter(const briefcase::unreal::FName*,
+                                    briefcase::unreal::FStringBuffer*) {}
+
+void __fastcall marshallingNameConverter(
+    const briefcase::unreal::FName* name,
+    briefcase::unreal::FStringBuffer* result) {
+    if (!name || !result || !result->Data || result->Max <= 0) return;
+    std::wstring_view text;
+    switch (name->ComparisonIndex) {
+    case 1: text = L"IntProperty"; break;
+    case 2: text = L"ObjectProperty"; break;
+    case 3: text = L"EnumProperty"; break;
+    case 4: text = L"MapProperty"; break;
+    default: text = L"UnsupportedProperty"; break;
+    }
+    if (text.size() + 1 > static_cast<std::size_t>(result->Max)) return;
+    std::copy(text.begin(), text.end(), result->Data);
+    result->Data[text.size()] = L'\0';
+    result->Num = static_cast<std::int32_t>(text.size() + 1);
+}
+
+void unrealMarshallingTests() {
+    test("property marshalling classifies Unreal field metadata", [] {
+        using namespace briefcase::unreal;
+
+        const auto previousConverter = RuntimeNameConverter;
+        RuntimeNameConverter = marshallingNameConverter;
+
+        FFieldClass fieldClass{};
+        FProperty property{};
+        property.ClassPrivate = &fieldClass;
+        property.ArrayDim = 1;
+
+        fieldClass.Name.ComparisonIndex = 1;
+        property.ElementSize = 4;
+        expect(propertyKind(&property) == BRIEFCASE_PROPERTY_INT32,
+               "IntProperty did not map to the public Int32 kind");
+
+        fieldClass.Name.ComparisonIndex = 2;
+        expect(propertyKind(&property) == BRIEFCASE_PROPERTY_OBJECT,
+               "ObjectProperty did not map to the public object kind");
+        expect(isDirectPreparedObject(&property),
+               "ObjectProperty was not accepted by prepared-call marshalling");
+
+        fieldClass.Name.ComparisonIndex = 3;
+        property.ElementSize = 2;
+        expect(propertyKind(&property) == BRIEFCASE_PROPERTY_UINT16,
+               "a two-byte EnumProperty did not preserve its storage width");
+
+        fieldClass.Name.ComparisonIndex = 4;
+        expect(propertyKind(&property) == BRIEFCASE_PROPERTY_MAP,
+               "MapProperty did not map to the public map kind");
+
+        fieldClass.Name.ComparisonIndex = 99;
+        expect(propertyKind(&property) == BRIEFCASE_PROPERTY_UNKNOWN,
+               "an unsupported property class was accepted");
+
+        RuntimeNameConverter = previousConverter;
+    });
+}
+
+void unrealValueCodecTests() {
+    test("BVC1 round-trips a canonical reflected value", [] {
+        using namespace briefcase::unreal;
+
+        const auto previousConverter = RuntimeNameConverter;
+        RuntimeNameConverter = marshallingNameConverter;
+
+        FFieldClass fieldClass{};
+        fieldClass.Name.ComparisonIndex = 1;
+        FProperty property{};
+        property.ClassPrivate = &fieldClass;
+        property.ArrayDim = 1;
+        property.ElementSize = sizeof(std::int32_t);
+        property.OffsetInternal = 0;
+
+        const std::int32_t source = 1337;
+        ValueWireBuilder wire;
+        expect(wire.append(ValueWireMagic), "BVC1 magic could not be appended");
+        expect(appendValueNode(
+                   &property, reinterpret_cast<const std::byte*>(&source), wire, 0),
+               "canonical IntProperty could not be encoded");
+        expect(wire.Bytes.size() == 16, "canonical IntProperty envelope size changed");
+
+        std::uint32_t magic{};
+        std::uint32_t kind{};
+        std::uint32_t payloadSize{};
+        std::memcpy(&magic, wire.Bytes.data(), sizeof(magic));
+        std::memcpy(&kind, wire.Bytes.data() + 4, sizeof(kind));
+        std::memcpy(&payloadSize, wire.Bytes.data() + 8, sizeof(payloadSize));
+        expect(magic == ValueWireMagic, "BVC1 envelope has the wrong magic");
+        expect(kind == BRIEFCASE_PROPERTY_INT32 && payloadSize == sizeof(source),
+               "BVC1 node header does not describe an Int32 payload");
+
+        std::int32_t decoded{};
+        expect(decodeValueEnvelope(
+                   &property, reinterpret_cast<std::byte*>(&decoded),
+                   reinterpret_cast<const std::uint8_t*>(wire.Bytes.data()),
+                   static_cast<std::uint32_t>(wire.Bytes.size())),
+               "valid BVC1 envelope was rejected");
+        expect(decoded == source, "BVC1 round-trip changed the Int32 value");
+
+        auto corrupt = wire.Bytes;
+        corrupt[0] = std::byte{};
+        decoded = 0;
+        expect(!decodeValueEnvelope(
+                   &property, reinterpret_cast<std::byte*>(&decoded),
+                   reinterpret_cast<const std::uint8_t*>(corrupt.data()),
+                   static_cast<std::uint32_t>(corrupt.size())),
+               "an envelope with a corrupt BVC1 magic was accepted");
+        expect(!decodeValueEnvelope(
+                   &property, reinterpret_cast<std::byte*>(&decoded),
+                   reinterpret_cast<const std::uint8_t*>(wire.Bytes.data()),
+                   static_cast<std::uint32_t>(wire.Bytes.size() - 1)),
+               "a truncated BVC1 payload was accepted");
+
+        RuntimeNameConverter = previousConverter;
+    });
+
+    test("BVC1 builder enforces its explicit size budget", [] {
+        using namespace briefcase::unreal;
+        ValueWireBuilder wire;
+        const std::byte value{0x2a};
+        expect(!wire.append(&value, MaximumValueWireBytes + 1),
+               "a value larger than the BVC1 budget was accepted");
+        expect(wire.Bytes.empty(), "a rejected BVC1 append mutated the output");
+        expect(canonicalSize(BRIEFCASE_PROPERTY_DOUBLE) == 8,
+               "the canonical Double size changed");
+        expect(isPreparedAggregateKind(BRIEFCASE_PROPERTY_MAP),
+               "Map was not classified as a prepared aggregate");
+    });
+}
+
+void unrealInvocationTests() {
+    test("prepared invocation enforces the captured Unreal thread", [] {
+        using namespace briefcase::unreal;
+
+        const auto previousThread = capturedGameThreadId();
+        const auto currentThread = GetCurrentThreadId();
+        setCapturedGameThreadId(currentThread);
+        expect(onCapturedGameThread(),
+               "the captured Unreal thread was not recognized");
+
+        setCapturedGameThreadId(currentThread ^ 0x80000000u);
+        expect(!onCapturedGameThread(),
+               "a different thread identifier was accepted");
+        setCapturedGameThreadId(previousThread);
+    });
+
+    test("prepared invocation rejects unknown tokens and releases output buffers", [] {
+        using namespace briefcase::unreal;
+
+        FUObjectArray objects{};
+        const auto* previousObjects = RuntimeObjects;
+        const auto previousConverter = RuntimeNameConverter;
+        const auto previousThread = capturedGameThreadId();
+        RuntimeObjects = &objects;
+        RuntimeNameConverter = marshallingNameConverter;
+        setCapturedGameThreadId(GetCurrentThreadId());
+
+        expect(apiInvokePreparedFunction(
+                   nullptr, 0, {}, nullptr, 0) == BRIEFCASE_UNREAL_INVALID_ARGUMENT,
+               "an unknown prepared-function token was accepted");
+
+        BriefcaseOwnedValueBuffer buffer{};
+        buffer.Data = new std::uint8_t[4]{1, 2, 3, 4};
+        buffer.Size = 4;
+        apiReleaseValueBuffer(nullptr, &buffer);
+        expect(buffer.Data == nullptr && buffer.Size == 0,
+               "released BVC1 output buffer was not cleared");
+
+        RuntimeObjects = previousObjects;
+        RuntimeNameConverter = previousConverter;
+        setCapturedGameThreadId(previousThread);
+    });
+}
+
+
+void unrealPatchingTests() {
+    test("patching APIs fail closed before runtime configuration", [] {
+        using namespace briefcase::unreal;
+
+        const auto previousThread = capturedGameThreadId();
+        setCapturedGameThreadId(GetCurrentThreadId());
+        configurePatchingRuntime(nullptr, nullptr, 0);
+
+        BriefcaseBool result = 1;
+        expect(apiInvokeNativeBoolean(nullptr, {}, {}, 1, &result) ==
+                   BRIEFCASE_UNREAL_INVALID_ARGUMENT,
+               "an RVA call was accepted without a validated runtime image");
+        expect(apiUnregisterPatch(nullptr, UINT64_MAX) == 0,
+               "an unknown reflected patch registration was removed");
+        expect(apiUnregisterNativePatch(nullptr, UINT64_MAX) == 0,
+               "an unknown native patch registration was removed");
+        expect(apiIsGameThread(nullptr) == 1,
+               "the patching scheduler did not use the captured Unreal thread");
+
+        setCapturedGameThreadId(previousThread);
+    });
+}
+void unrealReflectionTests() {
+    test("object handles round-trip through the validated Unreal registry", [] {
+        using namespace briefcase::unreal;
+
+        std::vector<FUObjectItem> items(1000);
+        FUObjectItem* chunks[]{items.data()};
+        FUObjectArray registry{};
+        registry.ObjObjects.Objects = chunks;
+        registry.ObjObjects.MaxElements = static_cast<std::int32_t>(items.size());
+        registry.ObjObjects.NumElements = static_cast<std::int32_t>(items.size());
+        registry.ObjObjects.MaxChunks = 1;
+        registry.ObjObjects.NumChunks = 1;
+
+        UObject object{};
+        object.InternalIndex = 17;
+        items[17].Object = &object;
+        items[17].SerialNumber = 42;
+
+        const auto* previousObjects = RuntimeObjects;
+        const auto previousConverter = RuntimeNameConverter;
+        RuntimeObjects = &registry;
+        RuntimeNameConverter = unusedNameConverter;
+
+        BriefcaseObjectHandle handle{};
+        expect(saneObjectArray(&registry), "synthetic object registry was rejected");
+        expect(makeHandle(&object, handle), "registered object did not produce a handle");
+        expect(handle.Index == 17 && handle.SerialNumber == 42,
+               "object handle does not preserve index and serial number");
+        expect(resolveObject(handle) == &object,
+               "fresh object handle did not resolve to its object");
+        expect(resolveObject({handle.Index, handle.SerialNumber + 1}) == nullptr,
+               "stale object handle was accepted");
+
+        RuntimeObjects = previousObjects;
+        RuntimeNameConverter = previousConverter;
     });
 }
 
@@ -222,6 +468,44 @@ void peTests() {
     });
 }
 
+void sdkSnapshotCapturePolicyTests() {
+    test("SDK snapshots are captured once per build by default", [] {
+        const auto root = std::filesystem::temp_directory_path() /
+            (L"BriefcaseSnapshotPolicy-" + std::to_wstring(GetCurrentProcessId()));
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(
+            root / L"Briefcase" / L"Core" / L"Sdk" / L"Metadata");
+
+        constexpr briefcase::profile::RuntimeProfile profile{
+            briefcase::profile::TargetKind::Client,
+            L"Client",
+            L"Briefcase.DeceiveInc.Client.Sdk",
+            0x1234ABCD,
+            0x00102000};
+        expect(briefcase::metadata::shouldCaptureSdkSnapshot(root, profile),
+               "a missing build snapshot was treated as reusable");
+
+        const auto snapshot = root / L"Briefcase" / L"Core" / L"Sdk" /
+            L"Metadata" / L"DeceiveInc.Client.1234ABCD-00102000.bsnap";
+        std::ofstream(snapshot, std::ios::binary).put('x');
+        expect(!briefcase::metadata::shouldCaptureSdkSnapshot(root, profile),
+               "an existing non-empty build snapshot was scheduled for recapture");
+
+        const auto configuration = root / L"Briefcase" / L"loader.json";
+        std::ofstream(configuration, std::ios::binary | std::ios::trunc)
+            << R"({"sdkSnapshotFormat":"binary","sdkSnapshotRefresh":"always"})";
+        expect(briefcase::metadata::shouldCaptureSdkSnapshot(root, profile),
+               "the explicit always refresh policy was ignored");
+
+        std::ofstream(configuration, std::ios::binary | std::ios::trunc)
+            << R"({"sdkSnapshotFormat":"json","sdkSnapshotRefresh":"missing"})";
+        expect(briefcase::metadata::shouldCaptureSdkSnapshot(root, profile),
+               "a missing snapshot in the selected JSON format was treated as reusable");
+        std::filesystem::remove_all(root, cleanupError);
+    });
+}
+
 int validateProfile(
     const wchar_t* path,
     std::uint32_t expectedObjects,
@@ -297,6 +581,12 @@ int wmain(int argc, wchar_t** argv) {
     relativeTests();
     peTests();
     binarySnapshotWriterTests();
+    sdkSnapshotCapturePolicyTests();
+    unrealReflectionTests();
+    unrealMarshallingTests();
+    unrealValueCodecTests();
+    unrealInvocationTests();
+    unrealPatchingTests();
     if (Failures != 0) {
         std::cerr << "[FAIL] " << Failures << " assertion(s) failed across "
                   << Tests << " native tests.\n";

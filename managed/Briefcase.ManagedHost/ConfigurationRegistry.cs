@@ -1,8 +1,7 @@
 #if !BRIEFCASE_HEADLESS
-using System.Numerics;
 using System.Text.Json;
+using Briefcase.ClientModApi;
 using Briefcase.ModApi;
-using ImGuiNET;
 
 namespace Briefcase.ManagedHost;
 
@@ -12,9 +11,9 @@ namespace Briefcase.ManagedHost;
 /// before the mod starts doing work. Disposing the scope also removes every
 /// callback that could otherwise keep a collectible mod assembly alive.
 /// </summary>
-internal sealed class ConfigurationRegistry : IDisposable
+internal sealed partial class ConfigurationRegistry : IDisposable
 {
-    private const string FrameworkTabId = "$briefcase";
+    internal const string FrameworkTabId = "$briefcase";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -25,14 +24,21 @@ internal sealed class ConfigurationRegistry : IDisposable
     private readonly Action<string> _info;
     private readonly Action<string> _warning;
     private readonly Action<string> _error;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, ModScope> _scopes =
+    internal readonly object _gate = new();
+    internal readonly Dictionary<string, ModScope> _scopes =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _saveTimer;
-    private FrameworkSettingsDocument _document;
-    private bool _placementApplied;
+    internal FrameworkSettingsDocument _document;
     private bool _disposed;
-    private IFrameworkModControl? _modControl;
+    private long _uiRevision;
+    internal IFrameworkModControl? _modControl;
+
+    internal long UiRevision => Volatile.Read(ref _uiRevision);
+
+    internal void ReportClientUiError(Exception exception) =>
+        _error($"Client UI component failed: {exception}");
+
+    private void NotifyUiChanged() => Interlocked.Increment(ref _uiRevision);
 
     public ConfigurationRegistry(
         string path,
@@ -51,6 +57,7 @@ internal sealed class ConfigurationRegistry : IDisposable
     public ModScope RegisterMod(ModInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
+        ModScope scope;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -65,10 +72,11 @@ internal sealed class ConfigurationRegistry : IDisposable
                 ScheduleSave();
             }
 
-            var scope = new ModScope(this, info, persisted);
+            scope = new ModScope(this, info, persisted);
             _scopes.Add(info.Id, scope);
-            return scope;
         }
+        NotifyUiChanged();
+        return scope;
     }
 
     public void AttachModControl(IFrameworkModControl modControl) =>
@@ -89,196 +97,6 @@ internal sealed class ConfigurationRegistry : IDisposable
         }
     }
 
-    /// <summary>Draws the only window controlled by the framework F1 key.</summary>
-    public bool Draw(RenderFrame frame)
-    {
-        ModScope[] scopes;
-        FrameworkWindowSettings window;
-        lock (_gate)
-        {
-            if (_disposed) return false;
-            scopes = _scopes.Values
-                .OrderBy(scope => scope.Info.Name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            window = _document.Window;
-        }
-
-        ApplySavedPlacement(frame, window);
-        ImGui.SetNextWindowSizeConstraints(new Vector2(520, 360), new Vector2(
-            Math.Max(520, frame.Width), Math.Max(360, frame.Height)));
-
-        var open = true;
-        var visible = ImGui.Begin(
-            "Briefcase configuration###Briefcase.Framework.Configuration",
-            ref open,
-            ImGuiNET.ImGuiWindowFlags.NoSavedSettings);
-        try
-        {
-            RememberPlacement();
-            if (!visible) return open;
-
-            ImGui.TextColored(new Vector4(72 / 255f, 219 / 255f, 184 / 255f, 1),
-                "BRIEFCASE");
-            ImGui.SameLine();
-            ImGui.TextDisabled("Mod configuration");
-            ImGui.Separator();
-
-            var serverPanels = scopes
-                .SelectMany(scope => scope.SnapshotServerPanels())
-                .OrderBy(panel => panel.Name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var serverView = string.Equals(
-                window.SelectedView, "Server", StringComparison.OrdinalIgnoreCase);
-            if (ImGui.RadioButton("Client", !serverView))
-            {
-                serverView = false;
-                RememberSelectedView("Client");
-            }
-            ImGui.SameLine();
-            if (ImGui.RadioButton("Server", serverView))
-            {
-                serverView = true;
-                RememberSelectedView("Server");
-            }
-            ImGui.Separator();
-
-            if (serverView)
-            {
-                DrawServerView(frame, serverPanels);
-                return open;
-            }
-
-            var clientScopes = scopes.Where(scope => scope.Info.ShowConfigurationTab).ToArray();
-            var frameworkSelected = string.Equals(
-                window.SelectedModId, FrameworkTabId, StringComparison.OrdinalIgnoreCase);
-            var selectedScope = clientScopes.FirstOrDefault(scope =>
-                                    string.Equals(
-                                        scope.Info.Id,
-                                        window.SelectedModId,
-                                        StringComparison.OrdinalIgnoreCase))
-                                ?? clientScopes.FirstOrDefault();
-            if (!frameworkSelected && selectedScope is null)
-            {
-                frameworkSelected = true;
-                RememberSelectedMod(FrameworkTabId);
-            }
-
-            var available = ImGui.GetContentRegionAvail();
-            var navigationWidth = Math.Clamp(available.X * 0.27f, 190, 260);
-            var navigationVisible = ImGui.BeginChild(
-                "Briefcase.ModNavigation",
-                new Vector2(navigationWidth, 0),
-                ImGuiNET.ImGuiChildFlags.Borders);
-            try
-            {
-                if (navigationVisible)
-                {
-                    if (ImGui.Selectable(
-                            "Briefcase###Briefcase.FrameworkTab",
-                            frameworkSelected,
-                            ImGuiNET.ImGuiSelectableFlags.None,
-                            new Vector2(0, 46)))
-                    {
-                        frameworkSelected = true;
-                        RememberSelectedMod(FrameworkTabId);
-                    }
-                    ImGui.Separator();
-                    foreach (var scope in clientScopes)
-                    {
-                        var selected = !frameworkSelected && ReferenceEquals(scope, selectedScope);
-                        if (ImGui.Selectable(
-                                $"{scope.Info.Name}###{scope.Info.Id}",
-                                selected,
-                                ImGuiNET.ImGuiSelectableFlags.None,
-                                new Vector2(0, 42)))
-                        {
-                            frameworkSelected = false;
-                            selectedScope = scope;
-                            RememberSelectedMod(scope.Info.Id);
-                        }
-                    }
-                }
-            }
-            finally
-            {
-                ImGui.EndChild();
-            }
-            ImGui.SameLine();
-            var contentVisible = ImGui.BeginChild(
-                "Briefcase.ModContent",
-                Vector2.Zero,
-                ImGuiNET.ImGuiChildFlags.Borders);
-            try
-            {
-                if (contentVisible)
-                {
-                    if (frameworkSelected)
-                        DrawFrameworkContent();
-                    else if (selectedScope is not null)
-                        DrawModContent(selectedScope, frame);
-                }
-            }
-            finally
-            {
-                ImGui.EndChild();
-            }
-        }
-        finally
-        {
-            ImGui.End();
-        }
-        return open;
-    }
-
-    private void DrawServerView(
-        RenderFrame frame,
-        ModScope.ServerPanelRegistration[] panels)
-    {
-        var visible = ImGui.BeginChild(
-            "Briefcase.ServerContent", Vector2.Zero, ImGuiNET.ImGuiChildFlags.Borders);
-        try
-        {
-            if (!visible) return;
-            if (panels.Length == 0)
-            {
-                ImGui.TextDisabled("The Briefcase server administration service is unavailable.");
-                return;
-            }
-
-            if (panels.Length == 1)
-            {
-                InvokeServerPanel(panels[0], frame);
-                return;
-            }
-
-            if (!ImGui.BeginTabBar("Briefcase.ServerPanels")) return;
-            try
-            {
-                foreach (var panel in panels)
-                {
-                    if (!ImGui.BeginTabItem(panel.Name)) continue;
-                    InvokeServerPanel(panel, frame);
-                    ImGui.EndTabItem();
-                }
-            }
-            finally { ImGui.EndTabBar(); }
-        }
-        finally { ImGui.EndChild(); }
-    }
-
-    private void InvokeServerPanel(
-        ModScope.ServerPanelRegistration panel,
-        RenderFrame frame)
-    {
-        try { panel.Invoke(new ConfigurationPanelContext(frame)); }
-        catch (Exception exception)
-        {
-            _error($"Server panel '{panel.Name}' failed: {exception}");
-            ImGui.TextColored(new Vector4(1, 0.35f, 0.35f, 1),
-                "The server panel raised an exception. See Briefcase.log.");
-        }
-    }
-
     public void Dispose()
     {
         lock (_gate)
@@ -294,175 +112,13 @@ internal sealed class ConfigurationRegistry : IDisposable
         _saveTimer.Dispose();
     }
 
-    private void DrawModContent(ModScope scope, RenderFrame frame)
-    {
-        ImGui.PushID(scope.Info.Id);
-        try
-        {
-            ImGui.TextColored(
-                new Vector4(72 / 255f, 219 / 255f, 184 / 255f, 1),
-                scope.Info.Name);
-            ImGui.TextDisabled(
-                $"{scope.Info.Author}  |  {scope.Info.Version}  |  {scope.Info.Id}");
-            if (!string.IsNullOrWhiteSpace(scope.Info.Description))
-                ImGui.TextWrapped(scope.Info.Description);
-            ImGui.Separator();
-
-            var entries = scope.SnapshotEntries();
-            foreach (var section in entries
-                         .GroupBy(entry => entry.Section, StringComparer.OrdinalIgnoreCase))
-            {
-                ImGui.SeparatorText(section.Key);
-                foreach (var entry in section)
-                    DrawEntry(entry);
-                ImGui.Spacing();
-            }
-
-            var panels = scope.SnapshotPanels();
-            if (entries.Length == 0 && panels.Length == 0)
-                ImGui.TextDisabled("This mod does not expose configurable settings.");
-            foreach (var panel in panels)
-            {
-                try
-                {
-                    panel.Invoke(new ConfigurationPanelContext(frame));
-                }
-                catch (Exception exception)
-                {
-                    _error(
-                        $"Configuration panel failed for {scope.Info.Name}: {exception}");
-                    ImGui.TextColored(new Vector4(1, 0.35f, 0.35f, 1),
-                        "This mod's configuration panel raised an exception. See Briefcase.log.");
-                }
-            }
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
-
-    private void DrawFrameworkContent()
-    {
-        ImGui.PushID(FrameworkTabId);
-        try
-        {
-            ImGui.TextColored(
-                new Vector4(72 / 255f, 219 / 255f, 184 / 255f, 1),
-                "Briefcase");
-            ImGui.TextDisabled("Framework and installed mod management");
-            ImGui.Separator();
-
-            var control = _modControl;
-            if (control is null)
-            {
-                ImGui.TextDisabled("The managed mod controller is not ready.");
-                return;
-            }
-
-            ImGui.SeparatorText("Mod library");
-            ImGui.TextWrapped(
-                "Add a mod by copying its DLL into this directory. Replacing a loaded DLL " +
-                "updates it through Briefcase hot reload.");
-            ImGui.TextDisabled(control.ModsDirectory);
-            if (ImGui.Button("Refresh")) control.Refresh();
-            ImGui.SameLine();
-            if (ImGui.Button("Open Mods folder")) OpenModsDirectory(control.ModsDirectory);
-
-            ImGui.Spacing();
-            ImGui.SeparatorText("Installed mods");
-            var mods = control.SnapshotInstalledMods();
-            if (mods.Length == 0)
-            {
-                ImGui.TextDisabled("No mod DLL is installed.");
-                return;
-            }
-
-            foreach (var mod in mods)
-            {
-                ImGui.PushID(mod.FileName);
-                try
-                {
-                    var enabled = mod.Enabled;
-                    var disableBlocked = enabled && !mod.CanStop;
-                    if (disableBlocked) ImGui.BeginDisabled();
-                    if (ImGui.Checkbox("##Enabled", ref enabled))
-                        TryModAction(() => control.SetEnabled(mod.FileName, enabled));
-                    if (disableBlocked) ImGui.EndDisabled();
-                    DrawBlockedTooltip(disableBlocked, mod.StopBlockReason);
-                    ImGui.SameLine();
-                    ImGui.Text(mod.DisplayName);
-                    ImGui.TextDisabled(
-                        string.IsNullOrWhiteSpace(mod.Version)
-                            ? mod.FileName
-                            : $"{mod.FileName}  |  {mod.Version}");
-
-                    if (mod.LastError is not null)
-                        ImGui.TextColored(new Vector4(1, 0.35f, 0.35f, 1),
-                            $"Error: {mod.LastError}");
-                    else
-                        ImGui.TextColored(
-                            mod.Loaded
-                                ? new Vector4(0.35f, 0.9f, 0.55f, 1)
-                                : new Vector4(0.75f, 0.75f, 0.75f, 1),
-                            mod.Loaded ? "Loaded" : "Unloaded");
-
-                    if (mod.Loaded)
-                    {
-                        if (!mod.CanStop) ImGui.BeginDisabled();
-                        if (ImGui.Button("Reload"))
-                            TryModAction(() => control.Reload(mod.FileName));
-                        if (!mod.CanStop) ImGui.EndDisabled();
-                        DrawBlockedTooltip(!mod.CanStop, mod.StopBlockReason);
-                        ImGui.SameLine();
-                        if (!mod.CanStop) ImGui.BeginDisabled();
-                        if (ImGui.Button("Unload"))
-                            TryModAction(() => control.Unload(mod.FileName));
-                        if (!mod.CanStop) ImGui.EndDisabled();
-                        DrawBlockedTooltip(!mod.CanStop, mod.StopBlockReason);
-                    }
-                    else if (ImGui.Button("Load"))
-                    {
-                        TryModAction(() => control.Load(mod.FileName));
-                    }
-
-                    if (mod.Dependencies.Count > 0)
-                        ImGui.TextDisabled(
-                            $"Requires: {string.Join(", ", mod.Dependencies)}");
-                    if (!string.IsNullOrWhiteSpace(mod.Description))
-                        ImGui.TextWrapped(mod.Description);
-                    ImGui.Separator();
-                }
-                finally
-                {
-                    ImGui.PopID();
-                }
-            }
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
-
-    private void TryModAction(Action action)
+    internal void TryModAction(Action action)
     {
         try { action(); }
         catch (Exception exception) { _error(exception.Message); }
     }
 
-    private static void DrawBlockedTooltip(bool blocked, string? reason)
-    {
-        if (!blocked || string.IsNullOrWhiteSpace(reason) ||
-            !ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) return;
-        ImGui.BeginTooltip();
-        ImGui.PushTextWrapPos(420);
-        ImGui.TextUnformatted(reason);
-        ImGui.PopTextWrapPos();
-        ImGui.EndTooltip();
-    }
-
-    private void OpenModsDirectory(string directory)
+    internal void OpenModsDirectory(string directory)
     {
         try
         {
@@ -479,7 +135,7 @@ internal sealed class ConfigurationRegistry : IDisposable
         }
     }
 
-    private void RememberSelectedMod(string modId)
+    internal void RememberSelectedMod(string modId)
     {
         lock (_gate)
         {
@@ -493,134 +149,13 @@ internal sealed class ConfigurationRegistry : IDisposable
         }
     }
 
-    private void RememberSelectedView(string view)
+    internal void RememberSelectedView(string view)
     {
         lock (_gate)
         {
             if (string.Equals(_document.Window.SelectedView, view,
                     StringComparison.OrdinalIgnoreCase)) return;
             _document.Window.SelectedView = view;
-            ScheduleSave();
-        }
-    }
-
-    private static void DrawEntry(IConfigurationEntry entry)
-    {
-        ImGui.PushID($"{entry.Section}/{entry.Key}");
-        try
-        {
-            switch (entry.ValueType)
-            {
-                case var type when type == typeof(bool):
-                {
-                    var value = (bool)entry.BoxedValue;
-                    if (ImGui.Checkbox(entry.Key, ref value)) entry.BoxedValue = value;
-                    break;
-                }
-                case var type when type == typeof(int):
-                {
-                    var value = (int)entry.BoxedValue;
-                    var changed = entry.Minimum is int minimum && entry.Maximum is int maximum
-                        ? ImGui.SliderInt(entry.Key, ref value, minimum, maximum)
-                        : ImGui.InputInt(entry.Key, ref value);
-                    if (changed) entry.BoxedValue = value;
-                    break;
-                }
-                case var type when type == typeof(float):
-                {
-                    var value = (float)entry.BoxedValue;
-                    var changed = entry.Minimum is float minimum && entry.Maximum is float maximum
-                        ? ImGui.SliderFloat(entry.Key, ref value, minimum, maximum)
-                        : ImGui.InputFloat(entry.Key, ref value);
-                    if (changed) entry.BoxedValue = value;
-                    break;
-                }
-                case var type when type == typeof(double):
-                {
-                    var value = (double)entry.BoxedValue;
-                    if (ImGui.InputDouble(entry.Key, ref value)) entry.BoxedValue = value;
-                    break;
-                }
-                case var type when type == typeof(string):
-                {
-                    var value = (string)entry.BoxedValue;
-                    var flags = entry.Secret
-                        ? ImGuiNET.ImGuiInputTextFlags.Password
-                        : ImGuiNET.ImGuiInputTextFlags.None;
-                    if (ImGui.InputText(entry.Key, ref value, 1024, flags))
-                        entry.BoxedValue = value;
-                    break;
-                }
-                case var type when type.IsEnum:
-                    DrawEnum(entry, type);
-                    break;
-            }
-
-            if (!string.IsNullOrWhiteSpace(entry.Description))
-            {
-                ImGui.Indent();
-                ImGui.TextDisabled(entry.Description);
-                ImGui.Unindent();
-            }
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
-
-    private static void DrawEnum(IConfigurationEntry entry, Type enumType)
-    {
-        var current = entry.BoxedValue;
-        if (!ImGui.BeginCombo(entry.Key, current.ToString())) return;
-        try
-        {
-            foreach (var value in Enum.GetValues(enumType))
-            {
-                var selected = Equals(value, current);
-                if (ImGui.Selectable(value.ToString(), selected))
-                    entry.BoxedValue = value;
-                if (selected) ImGui.SetItemDefaultFocus();
-            }
-        }
-        finally
-        {
-            ImGui.EndCombo();
-        }
-    }
-
-    private void ApplySavedPlacement(RenderFrame frame, FrameworkWindowSettings window)
-    {
-        if (_placementApplied) return;
-        _placementApplied = true;
-
-        var width = Math.Clamp(window.Width, 520, Math.Max(520, frame.Width));
-        var height = Math.Clamp(window.Height, 360, Math.Max(360, frame.Height));
-        var x = Math.Clamp(window.X, 0, Math.Max(0, frame.Width - 80));
-        var y = Math.Clamp(window.Y, 0, Math.Max(0, frame.Height - 60));
-        ImGui.SetNextWindowPos(new Vector2(x, y), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(width, height), ImGuiCond.Always);
-    }
-
-    private void RememberPlacement()
-    {
-        var position = ImGui.GetWindowPos();
-        var size = ImGui.GetWindowSize();
-        if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) ||
-            !float.IsFinite(size.X) || !float.IsFinite(size.Y) ||
-            size.X < 1 || size.Y < 1)
-            return;
-
-        lock (_gate)
-        {
-            var current = _document.Window;
-            if (NearlyEqual(current.X, position.X) && NearlyEqual(current.Y, position.Y) &&
-                NearlyEqual(current.Width, size.X) && NearlyEqual(current.Height, size.Y))
-                return;
-            current.X = position.X;
-            current.Y = position.Y;
-            current.Width = size.X;
-            current.Height = size.Y;
             ScheduleSave();
         }
     }
@@ -669,12 +204,14 @@ internal sealed class ConfigurationRegistry : IDisposable
 
     private void Remove(ModScope scope)
     {
+        var removed = false;
         lock (_gate)
         {
             if (_scopes.TryGetValue(scope.Info.Id, out var registered) &&
                 ReferenceEquals(scope, registered))
-                _scopes.Remove(scope.Info.Id);
+                removed = _scopes.Remove(scope.Info.Id);
         }
+        if (removed) NotifyUiChanged();
     }
 
     private void ScheduleSave() =>
@@ -701,14 +238,14 @@ internal sealed class ConfigurationRegistry : IDisposable
     private static bool NearlyEqual(float left, float right) =>
         Math.Abs(left - right) < 0.5f;
 
-    internal sealed class ModScope : IModConfigurationScope, IDisposable
+    internal sealed class ModScope : IModConfigurationScope, IClientUiScope, IDisposable
     {
         private readonly ConfigurationRegistry _owner;
         private readonly object _gate = new();
         private readonly Dictionary<string, IConfigurationEntry> _entries =
             new(StringComparer.OrdinalIgnoreCase);
-        private readonly List<PanelRegistration> _panels = [];
-        private readonly List<ServerPanelRegistration> _serverPanels = [];
+        private readonly List<UiPanelRegistration> _uiPanels = [];
+        private readonly List<ServerUiPanelRegistration> _serverUiPanels = [];
 
         public ModScope(
             ConfigurationRegistry owner,
@@ -723,6 +260,20 @@ internal sealed class ConfigurationRegistry : IDisposable
         public ModInfo Info { get; }
         public ModSettingsDocument Persisted { get; }
         public bool IsDisposed { get; private set; }
+
+        /// <summary>
+        /// A client navigation tab is reserved for mods that explicitly register
+        /// complex content. Bind-only configuration stays in the central Mods page.
+        /// </summary>
+        public bool ShouldShowClientTab
+        {
+            get
+            {
+                lock (_gate)
+                    return Info.ShowConfigurationTab &&
+                           _uiPanels.Any(panel => panel.IsActive);
+            }
+        }
 
         public ConfigEntry<T> Bind<T>(
             string section,
@@ -770,46 +321,56 @@ internal sealed class ConfigurationRegistry : IDisposable
             return entry;
         }
 
-        public IDisposable RegisterPanel(Action<ConfigurationPanelContext> draw)
+        IDisposable IClientUiScope.RegisterPanel(UiComponent content)
         {
-            ArgumentNullException.ThrowIfNull(draw);
+            ArgumentNullException.ThrowIfNull(content);
+            UiPanelRegistration registration;
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(IsDisposed, this);
-                var registration = new PanelRegistration(this, draw);
-                _panels.Add(registration);
-                return registration;
+                registration = new UiPanelRegistration(this, content);
+                _uiPanels.Add(registration);
             }
+            _owner.NotifyUiChanged();
+            return registration;
         }
 
-        public IDisposable RegisterServerPanel(
-            string name,
-            Action<ConfigurationPanelContext> draw)
+        IDisposable IClientUiScope.RegisterServerPanel(string name, UiComponent content)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
-            ArgumentNullException.ThrowIfNull(draw);
+            ArgumentNullException.ThrowIfNull(content);
+            ServerUiPanelRegistration registration;
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(IsDisposed, this);
-                var registration = new ServerPanelRegistration(this, name.Trim(), draw);
-                _serverPanels.Add(registration);
-                return registration;
+                registration = new ServerUiPanelRegistration(this, name.Trim(), content);
+                _serverUiPanels.Add(registration);
             }
+            _owner.NotifyUiChanged();
+            return registration;
         }
+
+        /// <summary>
+        /// Adds both persistent configuration and the client-only UI capability to a
+        /// mod context. Keeping the two together prevents alternate loading paths from
+        /// creating a client mod context that cannot register its panel.
+        /// </summary>
+        public ModContext AttachTo(ModContext context) =>
+            context.WithConfiguration(this).WithExtension(this);
 
         public IConfigurationEntry[] SnapshotEntries()
         {
             lock (_gate) return _entries.Values.ToArray();
         }
 
-        public PanelRegistration[] SnapshotPanels()
+        public UiPanelRegistration[] SnapshotUiPanels()
         {
-            lock (_gate) return _panels.Where(panel => panel.IsActive).ToArray();
+            lock (_gate) return _uiPanels.Where(panel => panel.IsActive).ToArray();
         }
 
-        public ServerPanelRegistration[] SnapshotServerPanels()
+        public ServerUiPanelRegistration[] SnapshotServerUiPanels()
         {
-            lock (_gate) return _serverPanels.Where(panel => panel.IsActive).ToArray();
+            lock (_gate) return _serverUiPanels.Where(panel => panel.IsActive).ToArray();
         }
 
         public string EntryId(string section, string key) => $"{section}/{key}";
@@ -826,22 +387,24 @@ internal sealed class ConfigurationRegistry : IDisposable
             {
                 if (IsDisposed) return;
                 IsDisposed = true;
-                foreach (var panel in _panels.ToArray()) panel.DisposeFromOwner();
-                foreach (var panel in _serverPanels.ToArray()) panel.DisposeFromOwner();
-                _panels.Clear();
-                _serverPanels.Clear();
+                foreach (var panel in _uiPanels.ToArray()) panel.DisposeFromOwner();
+                foreach (var panel in _serverUiPanels.ToArray()) panel.DisposeFromOwner();
+                _uiPanels.Clear();
+                _serverUiPanels.Clear();
                 _entries.Clear();
             }
         }
 
-        private void Remove(PanelRegistration panel)
+        private void Remove(UiPanelRegistration panel)
         {
-            lock (_gate) _panels.Remove(panel);
+            lock (_gate) _uiPanels.Remove(panel);
+            _owner.NotifyUiChanged();
         }
 
-        private void Remove(ServerPanelRegistration panel)
+        private void Remove(ServerUiPanelRegistration panel)
         {
-            lock (_gate) _serverPanels.Remove(panel);
+            lock (_gate) _serverUiPanels.Remove(panel);
+            _owner.NotifyUiChanged();
         }
 
         private T LoadPersisted<T>(string id, T fallback) where T : notnull
@@ -888,88 +451,44 @@ internal sealed class ConfigurationRegistry : IDisposable
             return value;
         }
 
-        internal sealed class PanelRegistration : IDisposable
+        internal abstract class ComponentRegistration : IDisposable
         {
-            private readonly ModScope _owner;
-            private readonly object _invocationGate = new();
             private int _active = 1;
-
-            public PanelRegistration(ModScope owner, Action<ConfigurationPanelContext> draw)
+            protected ComponentRegistration(ModScope owner, UiComponent content)
             {
-                _owner = owner;
-                Draw = draw;
+                Owner = owner;
+                Content = content;
             }
 
-            public Action<ConfigurationPanelContext> Draw { get; }
+            protected ModScope Owner { get; }
+            public UiComponent Content { get; }
             public bool IsActive => Volatile.Read(ref _active) != 0;
+            protected bool Deactivate() => Interlocked.Exchange(ref _active, 0) != 0;
+            public void DisposeFromOwner() => Interlocked.Exchange(ref _active, 0);
+            public abstract void Dispose();
+        }
 
-            public void Invoke(ConfigurationPanelContext context)
+        internal sealed class UiPanelRegistration(ModScope owner, UiComponent content)
+            : ComponentRegistration(owner, content)
+        {
+            public override void Dispose()
             {
-                lock (_invocationGate)
-                {
-                    if (!IsActive) return;
-                    Draw(context);
-                }
-            }
-
-            public void Dispose()
-            {
-                lock (_invocationGate)
-                {
-                    if (Interlocked.Exchange(ref _active, 0) == 0) return;
-                }
-                _owner.Remove(this);
-            }
-
-            public void DisposeFromOwner()
-            {
-                lock (_invocationGate) Interlocked.Exchange(ref _active, 0);
+                if (Deactivate()) Owner.Remove(this);
             }
         }
 
-
-        internal sealed class ServerPanelRegistration : IDisposable
+        internal sealed class ServerUiPanelRegistration(
+            ModScope owner,
+            string name,
+            UiComponent content) : ComponentRegistration(owner, content)
         {
-            private readonly ModScope _owner;
-            private readonly object _invocationGate = new();
-            private int _active = 1;
-
-            public ServerPanelRegistration(
-                ModScope owner,
-                string name,
-                Action<ConfigurationPanelContext> draw)
+            public string Name { get; } = name;
+            public override void Dispose()
             {
-                _owner = owner;
-                Name = name;
-                Draw = draw;
-            }
-
-            public string Name { get; }
-            private Action<ConfigurationPanelContext> Draw { get; }
-            public bool IsActive => Volatile.Read(ref _active) != 0;
-
-            public void Invoke(ConfigurationPanelContext context)
-            {
-                lock (_invocationGate)
-                {
-                    if (IsActive) Draw(context);
-                }
-            }
-
-            public void Dispose()
-            {
-                lock (_invocationGate)
-                {
-                    if (Interlocked.Exchange(ref _active, 0) == 0) return;
-                }
-                _owner.Remove(this);
-            }
-
-            public void DisposeFromOwner()
-            {
-                lock (_invocationGate) Interlocked.Exchange(ref _active, 0);
+                if (Deactivate()) Owner.Remove(this);
             }
         }
+
     }
 
     internal sealed class FrameworkSettingsDocument

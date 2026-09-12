@@ -14,9 +14,31 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup><OutDir>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutDir><IntDir>$(MSBuildProjectDirectory)\obj\Briefcase.UnrealRuntime\$(Configuration)\</IntDir><TargetName>Briefcase.UnrealRuntime</TargetName></PropertyGroup>
   <ItemDefinitionGroup>
-    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard><RuntimeLibrary>MultiThreaded</RuntimeLibrary><ExceptionHandling>Sync</ExceptionHandling><AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\..\sdk\BriefcaseModApi\include;$(MSBuildProjectDirectory)\..\..\third_party\minhook-1.3.4\include;$(MSBuildProjectDirectory)\..\..\third_party\minhook-1.3.4\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>BRIEFCASE_VERSION_MAJOR=$(BriefcaseVersionMajor);BRIEFCASE_VERSION_MINOR=$(BriefcaseVersionMinor);BRIEFCASE_VERSION_BUILD=$(BriefcaseVersionBuild);UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard><RuntimeLibrary>MultiThreaded</RuntimeLibrary><ExceptionHandling>Sync</ExceptionHandling><AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\Briefcase.Native.Foundation\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Discovery\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Invocation\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Marshalling\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Patching\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Metadata\src;$(MSBuildProjectDirectory)\..\Briefcase.Unreal.Reflection\src;$(MSBuildProjectDirectory)\..\..\sdk\BriefcaseModApi\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>BRIEFCASE_VERSION_MAJOR=$(BriefcaseVersionMajor);BRIEFCASE_VERSION_MINOR=$(BriefcaseVersionMinor);BRIEFCASE_VERSION_BUILD=$(BriefcaseVersionBuild);UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="src\BinarySnapshotWriter.cpp" /><ClCompile Include="src\DotNetHost.cpp" /><ClCompile Include="src\Log.cpp" /><ClCompile Include="src\ModHost.cpp" /><ClCompile Include="src\RuntimeBootstrap.cpp" /><ClCompile Include="src\UnrealProbe.cpp" /><ClCompile Include="src\PeImageView.cpp" /><ClCompile Include="src\RuntimeSymbolResolver.cpp" /><ClCompile Include="src\SignatureScanner.cpp" /><ClCompile Include="..\..\third_party\minhook-1.3.4\src\buffer.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile><ClCompile Include="..\..\third_party\minhook-1.3.4\src\hook.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile><ClCompile Include="..\..\third_party\minhook-1.3.4\src\trampoline.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile><ClCompile Include="..\..\third_party\minhook-1.3.4\src\hde\hde64.c"><WarningLevel>TurnOffAllWarnings</WarningLevel><TreatWarningAsError>false</TreatWarningAsError></ClCompile></ItemGroup>
-  <ItemGroup><ClInclude Include="src\BinarySnapshotWriter.h" /><ClInclude Include="src\DotNetHost.h" /><ClInclude Include="src\Log.h" /><ClInclude Include="src\ModHost.h" /><ClInclude Include="src\PeImageView.h" /><ClInclude Include="src\RuntimeProfile.h" /><ClInclude Include="src\RuntimeSymbolResolver.h" /><ClInclude Include="src\SignatureScanner.h" /><ClInclude Include="src\UnrealLayout.h" /><ClInclude Include="src\UnrealProbe.h" /></ItemGroup>
+  <ItemGroup><ClCompile Include="src\DotNetHost.cpp" /><ClCompile Include="src\ModHost.cpp" /><ClCompile Include="src\RuntimeBootstrap.cpp" /><ClCompile Include="src\StartupModuleHost.cpp" /><ClCompile Include="src\UnrealProbe.cpp" /></ItemGroup>
+  <ItemGroup><ClInclude Include="src\DotNetHost.h" /><ClInclude Include="src\ModHost.h" /><ClInclude Include="src\StartupModuleHost.h" /><ClInclude Include="src\UnrealProbe.h" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Briefcase.Native.Foundation\Briefcase.Native.Foundation.vcxproj">
+      <Project>{5CDFF6BE-9A2C-4475-B46A-474C6E4C78AD}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Discovery\Briefcase.Unreal.Discovery.vcxproj">
+      <Project>{D8E30167-CE75-4B8D-8A32-D65C50F83A6C}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Marshalling\Briefcase.Unreal.Marshalling.vcxproj">
+      <Project>{8822B7D6-C43F-4EFF-B7D4-34C9119A917A}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Invocation\Briefcase.Unreal.Invocation.vcxproj">
+      <Project>{B5D93441-91CF-4F7B-9E2D-18C41C51EADB}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Patching\Briefcase.Unreal.Patching.vcxproj">
+      <Project>{C7E53B64-52BA-4A57-9CF5-BCB524E71F24}</Project>
+    </ProjectReference>    <ProjectReference Include="..\Briefcase.Unreal.Metadata\Briefcase.Unreal.Metadata.vcxproj">
+      <Project>{4534B8F8-4268-4A66-B8D4-58D7930655D2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Briefcase.Unreal.Reflection\Briefcase.Unreal.Reflection.vcxproj">
+      <Project>{7FA7625C-9AA8-481F-81A2-48029620D885}</Project>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

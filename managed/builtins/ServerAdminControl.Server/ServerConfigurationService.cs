@@ -112,9 +112,9 @@ internal sealed class ServerConfigurationService
         if (requested.GamePort == requested.QueryPort)
             throw new InvalidOperationException("Game port and query port must differ.");
         ValidateRange(requested.BotsAmount, 0, 8, "Bot amount");
-        var maximumPlayers = GetMaximumPlayers(gameMode);
-        ValidateRange(requested.MaxPlayers, 1, maximumPlayers,
-            $"Maximum players for {gameMode}");
+        ValidateRange(
+            requested.MaxPlayers, 1, ServerAdminProtocol.MaximumPlayerCount,
+            "Maximum players");
         ValidateRange(requested.AutoShutdownEmptyMinutes, 0, 1440,
             "Auto-shutdown delay");
         ValidateRange(requested.CivilianHeatPercent, -1, 100, "Civilian heat percentage");
@@ -373,10 +373,6 @@ internal sealed class ServerConfigurationService
             throw new InvalidOperationException(
                 $"{name} has an unsupported value: '{value}'.");
     }
-
-    private static int GetMaximumPlayers(string gameMode) =>
-        gameMode.Equals("Solo", StringComparison.OrdinalIgnoreCase) ? 8 :
-        gameMode.Equals("Duo", StringComparison.OrdinalIgnoreCase) ? 10 : 12;
 
     internal static string CreateRestartScript(
         int processId,

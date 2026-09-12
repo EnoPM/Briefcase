@@ -6,15 +6,33 @@
     <Project Path="managed/Briefcase.ManagedHost/Briefcase.ManagedHost.csproj" />
     <Project Path="managed/Briefcase.SdkEmitter/Briefcase.SdkEmitter.csproj" />
     <Project Path="managed/Briefcase.SdkSnapshots/Briefcase.SdkSnapshots.csproj" />
-    <Project Path="runtime/Briefcase.UnrealRuntime/Briefcase.UnrealRuntime.vcxproj" />
-    <Project Path="loader/Briefcase.VersionProxy/Briefcase.VersionProxy.vcxproj" />
     <File Path="managed/builtins/ServerAdminControl.Shared/ServerAdminProtocol.cs" />
     <File Path="managed/builtins/ServerAdminControl.Shared/ServerAdminAuthentication.cs" />
     <File Path="managed/builtins/ServerAdminControl.Shared/ModHandshakeProtocol.cs" />
   </Folder>
 
+  <Folder Name="/Core/Native/">
+    <Project Path="loader/Briefcase.VersionProxy/Briefcase.VersionProxy.vcxproj" />
+    <Project Path="loader/Briefcase.Bootstrap/Briefcase.Bootstrap.vcxproj" />
+    <Project Path="runtime/Briefcase.Native.Foundation/Briefcase.Native.Foundation.vcxproj" />
+    <Project Path="runtime/Briefcase.Unreal.Discovery/Briefcase.Unreal.Discovery.vcxproj" />
+    <Project Path="runtime/Briefcase.Unreal.Invocation/Briefcase.Unreal.Invocation.vcxproj" />
+    <Project Path="runtime/Briefcase.Unreal.Marshalling/Briefcase.Unreal.Marshalling.vcxproj" />
+    <Project Path="runtime/Briefcase.Unreal.Patching/Briefcase.Unreal.Patching.vcxproj" />
+    <Project Path="runtime/Briefcase.Unreal.Metadata/Briefcase.Unreal.Metadata.vcxproj" />
+    <Project Path="runtime/Briefcase.Unreal.Reflection/Briefcase.Unreal.Reflection.vcxproj" />
+    <Project Path="runtime/Briefcase.UnrealRuntime/Briefcase.UnrealRuntime.vcxproj" />
+  </Folder>
+
+  <Folder Name="/Launcher/">
+    <Project Path="loader/Briefcase.Launcher/Briefcase.Launcher.vcxproj" />
+  </Folder>
+
   <Folder Name="/Core/Client/">
+    <Project Path="managed/Briefcase.ClientModApi/Briefcase.ClientModApi.csproj" />
     <Project Path="managed/Briefcase.Rendering/Briefcase.Rendering.csproj" />
+    <Project Path="managed/Briefcase.AvaloniaUi/Briefcase.AvaloniaUi.csproj" />
+    <Project Path="managed/Briefcase.AvaloniaMenu/Briefcase.AvaloniaMenu.csproj" />
     <Project Path="managed/builtins/Briefcase.ServerBrowser.Client/Briefcase.ServerBrowser.Client.csproj" />
     <Project Path="managed/builtins/ServerAdminControl.Client/ServerAdminControl.Client.csproj" />
   </Folder>
@@ -35,9 +53,11 @@
   <Folder Name="/Tests/Integration/">
     <Project Path="validation/Briefcase.ServerAdministration.Validation/Briefcase.ServerAdministration.Validation.csproj" />
     <Project Path="validation/Briefcase.GameThread.Validation/Briefcase.GameThread.Validation.csproj" />
+    <Project Path="validation/Briefcase.Avalonia.Validation/Briefcase.Avalonia.Validation.csproj" />
   </Folder>
 
   <Folder Name="/Samples/">
+    <Project Path="samples/Briefcase.EventSample/Briefcase.EventSample.csproj" />
     <Project Path="samples/Briefcase.HelloSample/Briefcase.HelloSample.csproj" />
     <Project Path="samples/Briefcase.HotReloadSample/Briefcase.HotReloadSample.csproj" />
   </Folder>

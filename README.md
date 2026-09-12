@@ -21,12 +21,23 @@ DeceiveInc/Binaries/Win64/
     |   |-- Briefcase.ModApi.dll
     |   |-- Briefcase.SdkEmitter.dll
     |   |-- Briefcase.SdkSnapshots.dll
+    |   |-- Briefcase.ClientModApi.dll       (client only)
+    |   |-- Briefcase.Rendering.dll         (client only)
     |   |-- BuiltIns/
+    |   |-- Ui/Avalonia/
+    |   |   |-- Briefcase.AvaloniaUi.dll
+    |   |   `-- Briefcase.AvaloniaMenu.dll
+    |   |-- ThirdPartyLibraries/
     |   |-- DotNet/
     |   |-- Sdk/
     |   `-- Cache/
     `-- Mods/
 ```
+
+Installed packages contain no PDB files. Briefcase-owned assemblies stay in
+`Core`, while external managed and native libraries are deduplicated in
+`Core/ThirdPartyLibraries`. The private Microsoft runtime keeps its standard
+layout under `Core/DotNet`.
 
 `version.dll` only forwards the Windows Version API and loads the native runtime
 from `Briefcase/Core/Native`. `Briefcase.UnrealRuntime.dll` initializes Unreal,
@@ -35,7 +46,9 @@ starts the bundled CoreCLR, and passes a versioned native service table to
 current executable and then loads C# mod DLLs from `Briefcase/Mods` into collectible
 `AssemblyLoadContext` instances. A scoped
 game-thread API provides queued calls, asynchronous invocation, timers, ticks, and
-engine/world lifecycle observations to client and server mods.
+engine/world lifecycle observations to client and server mods. Generated dynamic
+multicast delegates can be observed through mod-scoped `context.Events`
+subscriptions that are removed automatically during unload and hot reload.
 
 Runtime profiles keep only the PE timestamp, image size, target name, and SDK
 identity. `FName::ToString` is found by one masked function signature in `.text`.
@@ -47,20 +60,30 @@ disable the Unreal API before any resolved address is dereferenced.
 Runtime snapshots use the compact Briefcase Snapshot binary format by
 default. Set `sdkSnapshotFormat` to `json` in `Briefcase/loader.json` when a
 human-readable snapshot is useful during reverse engineering or SDK development.
+Snapshots are captured once per executable build. Set
+`sdkSnapshotRefresh` to `always` only while refreshing reverse-engineering metadata;
+the default `missing` policy reuses the existing snapshot and avoids a full UObject
+registry scan during every game launch.
 
 The build-specific SDK describes classes, structures, enums, property offsets,
 packed booleans and recursive Unreal types such as arrays, sets and maps. Mods
 can inspect the complete read-only surface through generated `Reflection` and
 `Metadata` members. Typed getters and methods are emitted separately when the
-native ABI has an explicit, ownership-safe contract for the value.
+native ABI has an explicit, ownership-safe contract for the value. Generated
+methods support owning `FString` and `FText` inputs, returns, `out` parameters
+and writable `ref` parameters without exposing their native representations.
 
 F1 opens the managed Briefcase menu. A top switch selects the local **Client**
 configuration or remote **Server** administration. The Client view uses vertical
 tabs for Briefcase and each configurable user mod.
 
+The [Avalonia client UI](docs/AvaloniaUiPreview.md) provides the startup view, F1
+configuration menu, and real-time mod overlay. Its startup view and lazily loaded
+menu live in separate assemblies.
+
 The dedicated-server package uses a separate headless managed host. It keeps
 the same mod lifecycle and generated SDK, but contains no rendering backend,
-ImGui dependency, input hook, or F1 configuration window. Server settings are
+client UI dependency, input hook, or F1 configuration window. Server settings are
 still persisted in `Briefcase/settings.json`.
 
 ## Build
@@ -165,8 +188,15 @@ publishes archives.
 ## Projects
 
 - `loader/Briefcase.VersionProxy`: `version.dll` bootstrap and Windows export forwarding.
-- `runtime/Briefcase.UnrealRuntime`: native Unreal, patching, and hosting services.
-- `managed/Briefcase.Rendering`: managed ImGui.NET, Direct3D 11, DirectComposition, and input backend.
+- `runtime/Briefcase.Native.Foundation`: process-wide native logging.
+- `runtime/Briefcase.Unreal.Discovery`: validated PE and Unreal symbol discovery.
+- `runtime/Briefcase.Unreal.Reflection`: validated Unreal layouts, names, objects, and members.
+- `runtime/Briefcase.Unreal.Marshalling`: property kinds, native value lifetime, BVC1 value encoding, allocation, and text conversion.
+- `runtime/Briefcase.Unreal.Invocation`: direct and prepared `ProcessEvent` calls with game-thread and token validation.
+- `runtime/Briefcase.Unreal.Patching`: the shared `ProcessEvent` detour, game-thread scheduler, delegates, and reflected/native patches.
+- `runtime/Briefcase.Unreal.Metadata`: bounded SDK snapshot inventory and encoding.
+- `runtime/Briefcase.UnrealRuntime`: public native API composition, Unreal bootstrap, and managed hosting orchestration.
+- `managed/Briefcase.Rendering`: Avalonia UI coordination, input polling, and toolkit-neutral mod overlay callbacks.
 - `managed/Briefcase.ModApi`: stable C# API used by mods.
 - `managed/Briefcase.ManagedHost`: SDK and managed mod lifecycle.
 - `managed/Briefcase.SdkEmitter`: persisted build-specific SDK emitter.
@@ -187,7 +217,7 @@ repository. The public solution and release pipeline contain no references to
 those projects.
 
 See `docs/BriefcaseArchitecture.md`, `docs/CSharpRuntime.md`, `docs/GameThread.md`, `docs/ModConfiguration.md`,
-`docs/AutomaticSdkGeneration.md`, `docs/Patching.md`, and
+`docs/AutomaticSdkGeneration.md`, `docs/Patching.md`, `docs/UnrealEvents.md`, and
 `docs/Versioning.md` for the internal model. Dependency declarations and lifecycle
 ordering are documented in `docs/ModDependencies.md`; the player/server manifest
 exchange is documented in `docs/ModHandshake.md`.

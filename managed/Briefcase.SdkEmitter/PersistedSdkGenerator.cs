@@ -26,7 +26,7 @@ public sealed record PersistedSdkGenerationResult(
 /// </summary>
 public static class PersistedSdkGenerator
 {
-    private const string EmitterSchema = "3";
+    public const string CurrentEmitterSchema = "8";
 
     public static PersistedSdkGenerationResult Generate(
         string coreDirectory, string snapshotPath)
@@ -42,7 +42,7 @@ public static class PersistedSdkGenerator
         var readyPath = Path.Combine(output, ".ready");
         var completionPath = Path.Combine(output, ".complete");
         var snapshotHash = SnapshotHash(snapshotPath);
-        var fingerprint = $"emitter={EmitterSchema}{Environment.NewLine}" +
+        var fingerprint = $"emitter={CurrentEmitterSchema}{Environment.NewLine}" +
                           $"snapshot={snapshotHash}{Environment.NewLine}";
 
         Directory.CreateDirectory(Path.GetDirectoryName(assemblyPath)!);
@@ -74,7 +74,7 @@ public static class PersistedSdkGenerator
         WriteAtomically(
             readyPath,
             $"schema={snapshot.SchemaVersion}{Environment.NewLine}" +
-            $"emitter={EmitterSchema}{Environment.NewLine}" +
+            $"emitter={CurrentEmitterSchema}{Environment.NewLine}" +
             $"build={buildKey}{Environment.NewLine}" +
             $"snapshot={snapshotHash}{Environment.NewLine}");
 

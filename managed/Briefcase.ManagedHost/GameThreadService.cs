@@ -16,7 +16,7 @@ internal interface IGameThreadDriver : IDisposable
 {
     bool IsAvailable { get; }
     bool IsGameThread { get; }
-    void Start(Action<GameThreadPump> callback);
+    bool TryStart(Action<GameThreadPump> callback);
     void RequestPump();
 }
 
@@ -27,14 +27,17 @@ internal interface IGameThreadDriver : IDisposable
 internal sealed class GameThreadService : IDisposable
 {
     private readonly object _gate = new();
+    private readonly object _driverGate = new();
     private readonly IGameThreadDriver _driver;
     private readonly Func<UnrealObjectHandle, string?> _worldPath;
     private readonly Action<string> _info;
     private readonly Action<string> _error;
+    private readonly TimeSpan _driverRetryDelay;
+    private readonly CancellationTokenSource _driverStartCancellation = new();
     private readonly HashSet<Registration> _registrations = [];
     private bool _engineReady;
     private UnrealWorldInfo? _currentWorld;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     [ThreadStatic] private static Scope? _executingScope;
 
@@ -51,16 +54,64 @@ internal sealed class GameThreadService : IDisposable
         IGameThreadDriver driver,
         Func<UnrealObjectHandle, string?> worldPath,
         Action<string> info,
-        Action<string> error)
+        Action<string> error,
+        TimeSpan? driverRetryDelay = null)
     {
         _driver = driver;
         _worldPath = worldPath;
         _info = info;
         _error = error;
+        _driverRetryDelay = driverRetryDelay ?? TimeSpan.FromMilliseconds(250);
+
         if (!_driver.IsAvailable)
-            throw new InvalidOperationException("The native game-thread API is unavailable.");
-        _driver.Start(Pump);
-        _info("Game-thread scheduler registered; waiting for the first engine pulse.");
+        {
+            _error("The native game-thread API is unavailable. The Briefcase UI remains active, " +
+                   "but Unreal work cannot run.");
+            return;
+        }
+
+        if (TryStartDriver())
+        {
+            _info("Game-thread scheduler registered; waiting for the first engine pulse.");
+            return;
+        }
+
+        _info("Game-thread scheduler is waiting for a stable Unreal ProcessEvent anchor; " +
+              "framework startup continues.");
+        _ = RetryDriverStartAsync(_driverStartCancellation.Token);
+    }
+
+    private bool TryStartDriver()
+    {
+        lock (_driverGate)
+        {
+            return !_disposed && _driver.IsAvailable && _driver.TryStart(Pump);
+        }
+    }
+
+    private async Task RetryDriverStartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(_driverRetryDelay, cancellationToken).ConfigureAwait(false);
+                if (!TryStartDriver()) continue;
+
+                _info("Game-thread scheduler registered after Unreal completed early startup; " +
+                      "waiting for the first engine pulse.");
+                _driver.RequestPump();
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Normal framework shutdown while Unreal was still starting.
+        }
+        catch (Exception exception)
+        {
+            _error($"Deferred game-thread scheduler registration failed: {exception}");
+        }
     }
 
     public IGameThreadScope CreateScope(string owner)
@@ -241,7 +292,9 @@ internal sealed class GameThreadService : IDisposable
             foreach (var registration in _registrations.ToArray())
                 RemoveLocked(registration, cancel: true);
         }
-        _driver.Dispose();
+        _driverStartCancellation.Cancel();
+        lock (_driverGate) _driver.Dispose();
+        _driverStartCancellation.Dispose();
     }
 
     private sealed class Scope(GameThreadService owner, string name) : IGameThreadScope
@@ -449,42 +502,74 @@ internal sealed class GameThreadService : IDisposable
 
 internal sealed unsafe class NativeGameThreadDriver : IGameThreadDriver
 {
+    private readonly object _gate = new();
     private NativeGameThreadApi* _api;
     private ulong _registrationId;
     private GCHandle _callbackHandle;
 
     public NativeGameThreadDriver(NativeGameThreadApi* api) => _api = api;
 
-    public bool IsAvailable => _api != null &&
-        _api->ApiVersion >= BriefcaseAbi.GameThreadApiVersion &&
-        _api->RegisterCallback != null && _api->UnregisterCallback != null &&
-        _api->RequestPump != null && _api->IsGameThread != null;
+    public bool IsAvailable
+    {
+        get
+        {
+            lock (_gate) return IsAvailableLocked();
+        }
+    }
 
-    public bool IsGameThread => IsAvailable && _api->IsGameThread(_api->Context) != 0;
+    public bool IsGameThread
+    {
+        get
+        {
+            NativeGameThreadApi* api;
+            lock (_gate)
+            {
+                if (!IsAvailableLocked()) return false;
+                api = _api;
+            }
+            return api->IsGameThread(api->Context) != 0;
+        }
+    }
 
-    public void Start(Action<GameThreadPump> callback)
+    public bool TryStart(Action<GameThreadPump> callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
-        if (!IsAvailable)
-            throw new InvalidOperationException("The native game-thread API is unavailable.");
-        if (_registrationId != 0)
-            throw new InvalidOperationException("The game-thread driver is already started.");
-        _callbackHandle = GCHandle.Alloc(callback);
-        ulong registration = 0;
-        if (_api->RegisterCallback(
-                _api->Context, &Pump, (void*)GCHandle.ToIntPtr(_callbackHandle),
-                &registration) == 0 || registration == 0)
+        lock (_gate)
         {
-            _callbackHandle.Free();
-            throw new InvalidOperationException("The native host rejected the game-thread scheduler.");
+            if (!IsAvailableLocked()) return false;
+            if (_registrationId != 0) return true;
+
+            var callbackHandle = GCHandle.Alloc(callback);
+            ulong registration = 0;
+            if (_api->RegisterCallback(
+                    _api->Context, &Pump, (void*)GCHandle.ToIntPtr(callbackHandle),
+                    &registration) == 0 || registration == 0)
+            {
+                callbackHandle.Free();
+                return false;
+            }
+
+            _callbackHandle = callbackHandle;
+            _registrationId = registration;
+            return true;
         }
-        _registrationId = registration;
     }
 
     public void RequestPump()
     {
-        if (IsAvailable) _api->RequestPump(_api->Context);
+        NativeGameThreadApi* api;
+        lock (_gate)
+        {
+            if (!IsAvailableLocked()) return;
+            api = _api;
+        }
+        api->RequestPump(api->Context);
     }
+
+    private bool IsAvailableLocked() => _api != null &&
+        _api->ApiVersion >= BriefcaseAbi.GameThreadApiVersion &&
+        _api->RegisterCallback != null && _api->UnregisterCallback != null &&
+        _api->RequestPump != null && _api->IsGameThread != null;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void Pump(void* context, NativeGameThreadFrame* frame)
@@ -506,12 +591,25 @@ internal sealed unsafe class NativeGameThreadDriver : IGameThreadDriver
 
     public void Dispose()
     {
-        var api = _api;
-        if (api == null) return;
-        _api = null;
-        if (_registrationId != 0)
-            api->UnregisterCallback(api->Context, _registrationId);
-        _registrationId = 0;
-        if (_callbackHandle.IsAllocated) _callbackHandle.Free();
+        NativeGameThreadApi* api;
+        ulong registrationId;
+        GCHandle callbackHandle;
+        lock (_gate)
+        {
+            api = _api;
+            if (api == null) return;
+            _api = null;
+            registrationId = _registrationId;
+            _registrationId = 0;
+            callbackHandle = _callbackHandle;
+            _callbackHandle = default;
+        }
+
+        // Native unregistration waits for any callback already in flight.
+        // Never hold the driver lock while waiting: a managed callback is
+        // allowed to query IsGameThread or request another pump.
+        if (registrationId != 0)
+            api->UnregisterCallback(api->Context, registrationId);
+        if (callbackHandle.IsAllocated) callbackHandle.Free();
     }
 }

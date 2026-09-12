@@ -5,11 +5,10 @@ namespace Briefcase.ModApi.Interop;
 public static class BriefcaseAbi
 {
     public const uint HostApiVersion = 1;
-    public const uint RenderingApiVersion = 4;
     public const uint InputApiVersion = 1;
-    public const uint PatchingApiVersion = 5;
+    public const uint PatchingApiVersion = 7;
     public const uint GameThreadApiVersion = 1;
-    public const uint UnrealApiVersion = 8;
+    public const uint UnrealApiVersion = 16;
     public const ulong CoreCapability = 1UL << 0;
     public const ulong UnrealReflectionCapability = 1UL << 1;
     public const ulong UnrealInvocationCapability = 1UL << 2;
@@ -31,7 +30,8 @@ public enum NativeUnrealResult : uint
     TypeMismatch,
     LayoutMismatch,
     Unreadable,
-    Unsupported
+    Unsupported,
+    WrongThread
 }
 
 public enum UnrealPropertyKind : uint
@@ -70,6 +70,47 @@ public enum NativeTextArgumentFlags : uint
 {
     Input = 1,
     Output = 2
+}
+
+[Flags]
+public enum NativePreparedParameterFlags : uint
+{
+    Input = 1,
+    Output = 2,
+    Return = 4,
+    Reference = 8
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativePreparedParameter
+{
+    public uint StructSize;
+    public int Offset;
+    public int ElementSize;
+    public UnrealPropertyKind Kind;
+    public NativePreparedParameterFlags Flags;
+    public uint Reserved0;
+    public fixed ulong Reserved[1];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeOwnedValueBuffer
+{
+    public byte* Data;
+    public uint Size;
+    public uint Reserved0;
+    public fixed ulong Reserved[2];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeValueInput
+{
+    public uint StructSize;
+    public int ParameterOffset;
+    public byte* Data;
+    public uint Size;
+    public uint Reserved0;
+    public fixed ulong Reserved[2];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -144,7 +185,7 @@ public unsafe struct NativeHostApi
     public ulong Capabilities;
     public NativeCoreApi* Core;
     public NativeUnrealApi* Unreal;
-    public NativeRenderingApi* Rendering;
+    public void* ReservedRendering;
     public NativeInputApi* Input;
     public NativePatchingApi* Patching;
     public NativeGameThreadApi* GameThread;
@@ -197,6 +238,7 @@ public unsafe struct NativePatchingApi
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, byte*, uint, uint*, NativeUnrealResult> CopyValue;
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, void*, uint, NativeUnrealResult> WriteValue;
     public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, char*, uint, NativeUnrealResult> WriteText;
+    public delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint, UnrealPropertyKind, byte*, uint, NativeUnrealResult> WriteEncodedValue;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -225,59 +267,6 @@ public unsafe struct NativeGameThreadApi
 }
 
 [StructLayout(LayoutKind.Sequential)]
-public unsafe struct NativeRenderFrame
-{
-    public uint StructSize;
-    public uint Width;
-    public uint Height;
-    public uint MenuVisible;
-    public float DeltaSeconds;
-    public uint Reserved0;
-    public ulong FrameNumber;
-    public fixed ulong Reserved[4];
-}
-
-[StructLayout(LayoutKind.Sequential)]
-public unsafe struct NativeRenderingApi
-{
-    public uint StructSize;
-    public uint ApiVersion;
-    public void* Context;
-    public delegate* unmanaged[Cdecl]<void*, delegate* unmanaged[Cdecl]<void*, NativeRenderFrame*, void>, void*, ulong*, uint> RegisterCallback;
-    public delegate* unmanaged[Cdecl]<void*, ulong, uint> UnregisterCallback;
-    public delegate* unmanaged[Cdecl]<void*, ulong, uint, uint> SetCallbackActive;
-    public delegate* unmanaged[Cdecl]<void*, uint, void> SetMenuVisible;
-    public delegate* unmanaged[Cdecl]<void*, uint> GetMenuVisible;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint*, uint, uint> Begin;
-    public delegate* unmanaged[Cdecl]<void*, void> End;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, void> Text;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint*, uint> Checkbox;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, float*, float, float, byte*, uint, uint> SliderFloat;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, float, float, uint> Button;
-    public delegate* unmanaged[Cdecl]<void*, void> SameLine;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, void> SeparatorText;
-    public delegate* unmanaged[Cdecl]<void*, float, float, uint, float, float, void> SetNextWindowPosition;
-    public delegate* unmanaged[Cdecl]<void*, float, float, uint, void> SetNextWindowSize;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, float, float, uint, uint, uint> BeginChild;
-    public delegate* unmanaged[Cdecl]<void*, void> EndChild;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint, uint, float, float, uint> Selectable;
-    public delegate* unmanaged[Cdecl]<void*, void> Separator;
-    public delegate* unmanaged[Cdecl]<void*, void> Spacing;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, int*, int, int, byte*, uint, uint> SliderInt;
-    public delegate* unmanaged[Cdecl]<void*, float, void> SetNextItemWidth;
-    public delegate* unmanaged[Cdecl]<void*, uint, byte*, uint, void> TextColored;
-    public delegate* unmanaged[Cdecl]<void*, float> GetFramerate;
-    public delegate* unmanaged[Cdecl]<void*, float, float, float, uint, int, float, uint, void> DrawCircle;
-    public delegate* unmanaged[Cdecl]<void*, float, float, float, float, uint, float, void> DrawLine;
-    public delegate* unmanaged[Cdecl]<void*, float, float, float, float, uint, float, void> DrawRectFilled;
-    public delegate* unmanaged[Cdecl]<void*, float, float, uint, byte*, uint, void> DrawText;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, byte*, uint, uint, uint> BeginCombo;
-    public delegate* unmanaged[Cdecl]<void*, void> EndCombo;
-    public delegate* unmanaged[Cdecl]<void*, byte*, uint, byte*, uint, uint, uint> InputText;
-    public fixed ulong Reserved[5];
-}
-
-[StructLayout(LayoutKind.Sequential)]
 public unsafe struct NativeUnrealApi
 {
     public uint StructSize;
@@ -299,6 +288,23 @@ public unsafe struct NativeUnrealApi
     public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, byte*, uint, uint*, NativeUnrealResult> ReadValueProperty;
     public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, void*, uint, NativeUnrealResult> WriteProperty;
     public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, char*, uint, NativeUnrealResult> WriteTextProperty;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, byte*, uint, uint, NativePreparedParameter*, uint, ulong*, NativeUnrealResult> PrepareFunction;
+    public delegate* unmanaged[Cdecl]<void*, ulong, UnrealObjectHandle, void*, uint, NativeUnrealResult> InvokePreparedFunction;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, byte*, uint, int, int, int, UnrealPropertyKind, ulong*, NativeUnrealResult> PrepareProperty;
+    public delegate* unmanaged[Cdecl]<void*, ulong, UnrealObjectHandle, void*, uint, NativeUnrealResult> ReadPreparedProperty;
+    public delegate* unmanaged[Cdecl]<void*, ulong, UnrealObjectHandle, void*, uint, NativeUnrealResult> WritePreparedProperty;
+    public delegate* unmanaged[Cdecl]<void*, ulong, UnrealObjectHandle, void*, uint, NativeOwnedValueBuffer*, NativeUnrealResult> InvokePreparedValueFunction;
+    public delegate* unmanaged[Cdecl]<void*, NativeOwnedValueBuffer*, void> ReleaseValueBuffer;
+    public delegate* unmanaged[Cdecl]<void*, ulong, UnrealObjectHandle, void*, uint, NativeValueInput*, uint, NativeOwnedValueBuffer*, NativeUnrealResult> InvokePreparedValueFunctionV2;
+    public delegate* unmanaged[Cdecl]<void*, ulong, UnrealObjectHandle, byte*, uint, NativeUnrealResult> WritePreparedValueProperty;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle*, NativeUnrealResult> GetClassDefaultObject;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle*, NativeUnrealResult> GetObjectOuter;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, uint*, NativeUnrealResult> GetObjectFlags;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, byte*, uint, UnrealObjectHandle*, NativeUnrealResult> LoadObject;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, NativeUnrealResult> AcquireObjectRoot;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, NativeUnrealResult> ReleaseObjectRoot;
+    public delegate* unmanaged[Cdecl]<void*, UnrealObjectHandle, UnrealObjectHandle, byte*, uint, int, int, int, delegate* unmanaged[Cdecl]<void*, NativePatchCall*, uint*, void>, void*, ulong*, NativeUnrealResult> SubscribeMulticastDelegate;
+    public delegate* unmanaged[Cdecl]<void*, ulong, uint> UnsubscribeDelegate;
 }
 
 [StructLayout(LayoutKind.Sequential)]

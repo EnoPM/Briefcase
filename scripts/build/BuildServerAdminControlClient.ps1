@@ -16,8 +16,9 @@ try {
     New-Item -ItemType Directory -Path $gameCore,$gameMods -Force | Out-Null
     $output=Join-Path $root "managed\builtins\ServerAdminControl.Client\bin\$Configuration\net10.0"
     Copy-Item -LiteralPath (Join-Path $output 'ServerAdminControl.Client.dll') -Destination $gameCore -Force
-    $symbols=Join-Path $output 'ServerAdminControl.Client.pdb'
-    if(Test-Path -LiteralPath $symbols) { Copy-Item -LiteralPath $symbols -Destination $gameCore -Force }
+    Get-ChildItem -LiteralPath $gameFramework -Filter '*.pdb' -File -Recurse |
+        Remove-Item -Force
+
     foreach($legacyName in @('CommunityBalancing.Client.dll','CommunityBalancing.Client.pdb','ServerAdminControl.Client.dll','ServerAdminControl.Client.pdb')) {
         $legacy=Join-Path $gameMods $legacyName
         if(Test-Path -LiteralPath $legacy) { Remove-Item -LiteralPath $legacy -Force }

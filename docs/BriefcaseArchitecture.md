@@ -1,5 +1,17 @@
 # Briefcase architecture
 
+## Managed startup boundary
+
+The native runtime resolves and validates the minimum Unreal symbols on its
+bootstrap worker, then waits for Deceive Inc's initial object registry to reach
+the reviewed startup threshold. CoreCLR and the minimal managed scheduler are
+created after that boundary. SDK validation, mod discovery, and Core services
+then continue on a below-normal-priority startup thread while the game keeps
+rendering. The selected client UI shows real progress for those phases and only
+constructs the complete configuration tree when startup finishes. The log
+records `managed startup deferred` and `managed startup released` around the
+native wait, so no Briefcase UI competes with the initial shader phase.
+
 ## Installation model
 
 The only file installed beside `DeceiveInc-Win64-Shipping.exe` is
@@ -18,6 +30,9 @@ Briefcase/
 |   |-- Briefcase.Rendering.dll
 |   |-- Briefcase.SdkEmitter.dll
 |   |-- Briefcase.SdkSnapshots.dll
+|   |-- Ui/Avalonia/
+|   |   |-- Briefcase.AvaloniaUi.dll
+|   |   `-- Briefcase.AvaloniaMenu.dll
 |   |-- DotNet/
 |   |-- Sdk/
 |   `-- Cache/
@@ -36,10 +51,13 @@ Windows loads version.dll
   -> the native runtime validates the Deceive Inc. executable profile
   -> Unreal reflection and patching services are initialized
   -> the private CoreCLR starts from Briefcase/Core/DotNet
+  -> external framework DLLs resolve from Briefcase/Core/ThirdPartyLibraries
   -> Briefcase.ManagedHost registers the scoped game-thread scheduler
-  -> Briefcase.ManagedHost loads or emits the SDK for this executable
-  -> Briefcase.Rendering creates the Win32/DirectComposition overlay and ImGui context
-  -> managed DLLs in Briefcase/Mods are loaded in filename order
+  -> Briefcase.AvaloniaUi creates the independent startup surface
+  -> a below-normal-priority worker loads or emits the SDK for this executable
+  -> installed mods are inspected and loaded in dependency order
+  -> Core services start and the startup surface is released
+  -> the first F1 opening loads Briefcase.AvaloniaMenu and builds its visual tree
   -> file changes unload and reload the affected collectible context
 ```
 
@@ -58,11 +76,12 @@ entry point or direct cooperation with the game's native code:
 
 The managed runtime owns framework policy and orchestration, mod discovery and
 lifecycle, configuration, logging, generated SDK consumption, input state, and
-the mod UI.
-`Briefcase.Rendering` owns the Dear ImGui context, transparent Win32 window,
-DirectComposition swap chain, Direct3D 11 renderer, font atlas, frame loop, and
-UI input backend. Mods can call ImGui.NET directly. `RenderFrame.ImGui` remains
-as a small managed compatibility adapter for existing Briefcase mods.
+the mod UI. `Briefcase.AvaloniaUi` owns the overlay window and startup view;
+`Briefcase.AvaloniaMenu` owns the lazily constructed configuration tree.
+`Briefcase.Rendering` coordinates F1 and focus polling, optional game-window
+chrome, and toolkit-neutral mod overlay callbacks. `Briefcase.AvaloniaUi` draws
+those command batches through Skia. Mods receive `RenderFrame.Overlay` and never
+own an Avalonia control, renderer, or native graphics resource.
 
 The native runtime and managed host exchange a C-shaped, versioned
 `BriefcaseHostApi` table. It contains fixed-width values and function pointers;
@@ -81,7 +100,7 @@ the native ABI headers.
 
 ## Framework configuration
 
-F1 opens the framework-owned ImGui.NET configuration window. A top switch
+F1 opens the framework-owned Avalonia configuration window. A top switch
 selects the local Client view or remote Server view. Client mods are selected
 from vertical tabs on the left. The window position, size, selected view,
 selected mod, and every typed setting are persisted in `Briefcase/settings.json`.

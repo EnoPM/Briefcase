@@ -20,9 +20,9 @@ public sealed record ModInfo(
     public IReadOnlyList<string> Dependencies { get; init; } = [];
 
     /// <summary>
-    /// Controls whether this component receives an entry in the client mod
-    /// navigation. Built-in Core services can expose a dedicated server view
-    /// while keeping the ordinary mod list focused on user-installed mods.
+    /// Controls whether a complex panel registered through the client UI API
+    /// receives its own navigation entry. Settings declared only with Bind are
+    /// always generated inside the central Mods page.
     /// </summary>
     public bool ShowConfigurationTab { get; init; } = true;
 }
@@ -40,6 +40,9 @@ public readonly unsafe struct ModContext
     private readonly ConfigurationApi _configuration;
     private readonly ModManagementApi _mods;
     private readonly GameThreadApi _gameThread;
+    private readonly UnrealAssetApi _assets;
+    private readonly UnrealEventApi _events;
+    private readonly object? _extension;
 
     public ModContext(NativeHostApi* api)
     {
@@ -47,30 +50,50 @@ public readonly unsafe struct ModContext
         _configuration = default;
         _mods = default;
         _gameThread = default;
+        _assets = default;
+        _events = default;
+        _extension = null;
     }
 
     private ModContext(
         NativeHostApi* api,
         ConfigurationApi configuration,
         ModManagementApi mods,
-        GameThreadApi gameThread)
+        GameThreadApi gameThread,
+        UnrealAssetApi assets,
+        UnrealEventApi events,
+        object? extension)
     {
         _api = api;
         _configuration = configuration;
         _mods = mods;
         _gameThread = gameThread;
+        _assets = assets;
+        _events = events;
+        _extension = extension;
     }
 
     internal ModContext WithConfiguration(IModConfigurationScope configuration) =>
-        new(_api, new ConfigurationApi(configuration), _mods, _gameThread);
+        new(_api, new ConfigurationApi(configuration), _mods, _gameThread, _assets, _events, _extension);
 
     internal ModContext WithModManagement(IModManagementBackend backend) =>
-        new(_api, _configuration, new ModManagementApi(backend), _gameThread);
+        new(_api, _configuration, new ModManagementApi(backend), _gameThread, _assets, _events, _extension);
 
     internal ModContext WithGameThread(IGameThreadScope scope) =>
-        new(_api, _configuration, _mods, new GameThreadApi(scope));
+        new(_api, _configuration, _mods, new GameThreadApi(scope), _assets, _events, _extension);
 
-    internal NativeRenderingApi* RenderingNative => IsValid ? _api->Rendering : null;
+    internal ModContext WithAssets(IUnrealAssetScope scope) =>
+        new(_api, _configuration, _mods, _gameThread, new UnrealAssetApi(scope), _events, _extension);
+
+    internal ModContext WithEvents(IUnrealEventScope scope) =>
+        new(_api, _configuration, _mods, _gameThread, _assets, new UnrealEventApi(scope), _extension);
+    internal ModContext WithExtension(object extension) =>
+        new(_api, _configuration, _mods, _gameThread, _assets, _events,
+            extension ?? throw new ArgumentNullException(nameof(extension)));
+
+    internal T? GetExtension<T>() where T : class => _extension as T;
+
+    internal NativeUnrealApi* UnrealNative => IsValid ? _api->Unreal : null;
     internal NativePatchingApi* PatchingNative => IsValid ? _api->Patching : null;
     internal NativeGameThreadApi* GameThreadNative => IsValid ? _api->GameThread : null;
 
@@ -85,11 +108,13 @@ public readonly unsafe struct ModContext
           (_mods.IsAvailable ? BriefcaseAbi.ModManagementCapability : 0)
         : 0;
     public UnrealApi Unreal => new(IsValid ? _api->Unreal : null);
-    public RenderingApi Rendering => new(IsValid ? _api->Rendering : null, this);
+    public RenderingApi Rendering => new();
     public InputApi Input => new();
     public ConfigurationApi Configuration => _configuration;
     public ModManagementApi Mods => _mods;
     public GameThreadApi GameThread => _gameThread;
+    public UnrealAssetApi Assets => _assets;
+    public UnrealEventApi Events => _events;
 
     public Version FrameworkVersion
     {
@@ -192,7 +217,20 @@ public interface IUnrealObject<TSelf> where TSelf : UnrealObject, IUnrealObject<
 
 public readonly record struct UnrealClass<T>(string Path)
     where T : UnrealObject, IUnrealObject<T>;
-public readonly record struct UnrealProperty<T>(string OwnerPath, string Name, int Offset, int Size);
+public readonly record struct UnrealProperty<T>(string OwnerPath, string Name, int Offset, int Size)
+{
+    /// <summary>
+    /// Reflected signature of this property when it is a delegate. It is null
+    /// for ordinary properties and for delegates from pre-schema-4 SDKs.
+    /// </summary>
+    public UnrealFunction? DelegateSignature { get; init; }
+
+    public UnrealProperty(
+        string ownerPath, string name, int offset, int size,
+        UnrealFunction? delegateSignature)
+        : this(ownerPath, name, offset, size) =>
+        DelegateSignature = delegateSignature;
+}
 public readonly record struct UnrealParameter(
     string Name, Type ManagedType, int Offset, int Size, bool IsOut = false)
 {
@@ -217,6 +255,8 @@ public sealed record UnrealFunction(
 }
 public readonly record struct UnrealObjectReference(UnrealObjectHandle Handle)
 {
+    public static UnrealObjectReference Null { get; } =
+        new(new UnrealObjectHandle(uint.MaxValue, 0));
     public bool IsNull => Handle.IsNull;
 }
 
@@ -232,6 +272,25 @@ public interface IUnrealStructValue
 }
 
 /// <summary>
+/// Marks a generated USTRUCT whose fields include owning Unreal values such as
+/// FString, FText or containers. These structs are ordinary managed snapshots:
+/// they never contain native pointers and are intentionally not blittable.
+/// </summary>
+public interface IUnrealManagedStructValue { }
+
+/// <summary>
+/// Identifies one reflected field in a managed USTRUCT snapshot. The decoder
+/// matches both Unreal's original name and native offset, so renamed C# members
+/// and inherited fields remain unambiguous.
+/// </summary>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class UnrealStructFieldAttribute(string name, int offset) : Attribute
+{
+    public string Name { get; } = name;
+    public int Offset { get; } = offset;
+}
+
+/// <summary>
 /// An address-free snapshot of a native <c>TArray&lt;T&gt;</c>. The runtime copies
 /// every element while the containing UObject is validated; no Unreal pointer
 /// is retained by managed code.
@@ -239,7 +298,13 @@ public interface IUnrealStructValue
 public sealed class UnrealArray<T> : IReadOnlyList<T>
 {
     private readonly T[] _items;
-    internal UnrealArray(T[] items) => _items = items;
+
+    /// <summary>Creates a value that can be assigned to a generated TArray property.</summary>
+    public UnrealArray(params T[] items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        _items = (T[])items.Clone();
+    }
     public int Count => _items.Length;
     public T this[int index] => _items[index];
     public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
@@ -287,7 +352,16 @@ public sealed class UnrealFieldPath : IReadOnlyList<UnrealName>
 public sealed class UnrealSet<T> : IReadOnlyCollection<T>
 {
     private readonly T[] _items;
-    internal UnrealSet(T[] items) => _items = items;
+
+    /// <summary>
+    /// Creates a value that can be assigned to a generated TSet property. Unreal's
+    /// reflected hash and equality rules are applied by the runtime at write time.
+    /// </summary>
+    public UnrealSet(params T[] items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        _items = (T[])items.Clone();
+    }
     public int Count => _items.Length;
     public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)_items).GetEnumerator();
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
@@ -305,7 +379,16 @@ public readonly record struct UnrealMapEntry<TKey, TValue>(TKey Key, TValue Valu
 public sealed class UnrealMap<TKey, TValue> : IReadOnlyList<UnrealMapEntry<TKey, TValue>>
 {
     private readonly UnrealMapEntry<TKey, TValue>[] _entries;
-    internal UnrealMap(UnrealMapEntry<TKey, TValue>[] entries) => _entries = entries;
+
+    /// <summary>
+    /// Creates a value that can be assigned to a generated TMap property. Duplicate
+    /// keys are rejected by the runtime according to Unreal's reflected equality.
+    /// </summary>
+    public UnrealMap(params UnrealMapEntry<TKey, TValue>[] entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        _entries = (UnrealMapEntry<TKey, TValue>[])entries.Clone();
+    }
     public int Count => _entries.Length;
     public UnrealMapEntry<TKey, TValue> this[int index] => _entries[index];
     public IEnumerator<UnrealMapEntry<TKey, TValue>> GetEnumerator() =>

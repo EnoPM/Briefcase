@@ -15,10 +15,9 @@
 #endif
 
 #define BRIEFCASE_HOST_API_VERSION 1u
-#define BRIEFCASE_UNREAL_API_VERSION 8u
-#define BRIEFCASE_RENDERING_API_VERSION 4u
+#define BRIEFCASE_UNREAL_API_VERSION 16u
 #define BRIEFCASE_INPUT_API_VERSION 1u
-#define BRIEFCASE_PATCHING_API_VERSION 5u
+#define BRIEFCASE_PATCHING_API_VERSION 7u
 #define BRIEFCASE_GAME_THREAD_API_VERSION 1u
 #define BRIEFCASE_MOD_ID_CAPACITY 64u
 #define BRIEFCASE_MOD_NAME_CAPACITY 96u
@@ -87,7 +86,8 @@ enum BriefcaseUnrealResult : uint32_t {
     BRIEFCASE_UNREAL_TYPE_MISMATCH = 6,
     BRIEFCASE_UNREAL_LAYOUT_MISMATCH = 7,
     BRIEFCASE_UNREAL_UNREADABLE = 8,
-    BRIEFCASE_UNREAL_UNSUPPORTED = 9
+    BRIEFCASE_UNREAL_UNSUPPORTED = 9,
+    BRIEFCASE_UNREAL_WRONG_THREAD = 10
 };
 
 enum BriefcasePropertyKind : uint32_t {
@@ -125,6 +125,47 @@ enum BriefcaseTextArgumentFlags : uint32_t {
     BRIEFCASE_TEXT_OUTPUT = 2
 };
 
+enum BriefcasePreparedParameterFlags : uint32_t {
+    BRIEFCASE_PREPARED_INPUT = 1,
+    BRIEFCASE_PREPARED_OUTPUT = 2,
+    BRIEFCASE_PREPARED_RETURN = 4,
+    BRIEFCASE_PREPARED_REFERENCE = 8
+};
+
+// Describes the generated ProcessEvent layout once. PrepareFunction validates
+// every entry against live reflection before returning an opaque runtime token.
+struct BriefcasePreparedParameter {
+    uint32_t StructSize;
+    int32_t Offset;
+    int32_t ElementSize;
+    uint32_t Kind;
+    uint32_t Flags;
+    uint32_t Reserved0;
+    uint64_t Reserved[1];
+};
+
+// Temporary address-free result owned by Briefcase.UnrealRuntime. Managed code
+// copies Data immediately and releases it through ReleaseValueBuffer. Data is a
+// BVO1 envelope containing BVC1 nodes; it never contains an Unreal address.
+struct BriefcaseOwnedValueBuffer {
+    uint8_t* Data;
+    uint32_t Size;
+    uint32_t Reserved0;
+    uint64_t Reserved[2];
+};
+
+// One BVC1-encoded input for an owning prepared parameter. The descriptor and
+// byte buffer only have to remain alive for InvokePreparedValueFunctionV2.
+// ParameterOffset binds the value to the already validated prepared layout.
+struct BriefcaseValueInput {
+    uint32_t StructSize;
+    int32_t ParameterOffset;
+    const uint8_t* Data;
+    uint32_t Size;
+    uint32_t Reserved0;
+    uint64_t Reserved[2];
+};
+
 // FText is an owning Unreal type and must never be copied across the managed
 // ABI as 24 opaque bytes. This descriptor transports UTF-16 text while the
 // runtime constructs and destroys the real FText inside ProcessEvent storage.
@@ -158,6 +199,28 @@ struct BriefcasePropertyInfo {
     uint64_t Flags;
     uint64_t Reserved[4];
 };
+
+// ProcessEvent calls are shared by attributed patches and delegate event
+// subscriptions. Parameters are valid only for the duration of the callback;
+// copy helpers in BriefcasePatchingApi create address-free managed values.
+enum BriefcasePatchPhase : uint32_t {
+    BRIEFCASE_PATCH_PREFIX = 0,
+    BRIEFCASE_PATCH_POSTFIX = 1
+};
+
+struct BriefcasePatchCall {
+    uint32_t StructSize;
+    BriefcasePatchPhase Phase;
+    BriefcaseObjectHandle Instance;
+    BriefcaseBool OriginalRan;
+    void* Parameters;
+    uint32_t ParameterSize;
+    uint32_t Reserved0;
+    uint64_t Reserved[4];
+};
+
+typedef void(BRIEFCASE_MOD_CALL* BriefcasePatchCallbackFn)(
+    void* userContext, BriefcasePatchCall* call, BriefcaseBool* runOriginal);
 
 typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseFindObjectFn)(
     void* context, const char* utf8Path, uint32_t pathLength, BriefcaseObjectHandle* result);
@@ -224,6 +287,58 @@ typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWriteTextPropertyFn)(
     int32_t expectedElementSize, int32_t expectedArrayDimension,
     BriefcasePropertyKind expectedKind, const uint16_t* characters,
     uint32_t characterCount);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcasePrepareFunctionFn)(
+    void* context, BriefcaseObjectHandle ownerClass, const char* utf8Name,
+    uint32_t nameLength, uint32_t expectedParameterSize,
+    const BriefcasePreparedParameter* parameters, uint32_t parameterCount,
+    uint64_t* preparedFunction);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseInvokePreparedFunctionFn)(
+    void* context, uint64_t preparedFunction, BriefcaseObjectHandle object,
+    void* parameters, uint32_t parameterSize);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseInvokePreparedValueFunctionFn)(
+    void* context, uint64_t preparedFunction, BriefcaseObjectHandle object,
+    void* parameters, uint32_t parameterSize, BriefcaseOwnedValueBuffer* outputs);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseInvokePreparedValueFunctionV2Fn)(
+    void* context, uint64_t preparedFunction, BriefcaseObjectHandle object,
+    void* parameters, uint32_t parameterSize,
+    const BriefcaseValueInput* inputs, uint32_t inputCount,
+    BriefcaseOwnedValueBuffer* outputs);
+typedef void(BRIEFCASE_MOD_CALL* BriefcaseReleaseValueBufferFn)(
+    void* context, BriefcaseOwnedValueBuffer* buffer);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcasePreparePropertyFn)(
+    void* context, BriefcaseObjectHandle ownerClass, const char* utf8Name,
+    uint32_t nameLength, int32_t expectedOffset, int32_t expectedElementSize,
+    int32_t expectedArrayDimension, BriefcasePropertyKind expectedKind,
+    uint64_t* preparedProperty);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseReadPreparedPropertyFn)(
+    void* context, uint64_t preparedProperty, BriefcaseObjectHandle object,
+    void* output, uint32_t outputSize);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePreparedPropertyFn)(
+    void* context, uint64_t preparedProperty, BriefcaseObjectHandle object,
+    const void* input, uint32_t inputSize);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePreparedValuePropertyFn)(
+    void* context, uint64_t preparedProperty, BriefcaseObjectHandle object,
+    const uint8_t* input, uint32_t inputSize);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseGetClassDefaultObjectFn)(
+    void* context, BriefcaseObjectHandle classHandle, BriefcaseObjectHandle* result);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseGetObjectOuterFn)(
+    void* context, BriefcaseObjectHandle object, BriefcaseObjectHandle* result);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseGetObjectFlagsFn)(
+    void* context, BriefcaseObjectHandle object, uint32_t* result);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseLoadObjectFn)(
+    void* context, BriefcaseObjectHandle expectedClass, const char* utf8Path,
+    uint32_t pathLength, BriefcaseObjectHandle* result);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseAcquireObjectRootFn)(
+    void* context, BriefcaseObjectHandle object);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseReleaseObjectRootFn)(
+    void* context, BriefcaseObjectHandle object);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseSubscribeMulticastDelegateFn)(
+    void* context, BriefcaseObjectHandle object, BriefcaseObjectHandle ownerClass,
+    const char* utf8Name, uint32_t nameLength, int32_t expectedOffset,
+    int32_t expectedElementSize, int32_t expectedArrayDimension,
+    BriefcasePatchCallbackFn callback, void* userContext, uint64_t* registrationId);
+typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseUnsubscribeDelegateFn)(
+    void* context, uint64_t registrationId);
 struct BriefcaseUnrealApi {
     uint32_t StructSize;
     uint32_t ApiVersion;
@@ -251,128 +366,42 @@ struct BriefcaseUnrealApi {
     BriefcaseReadValuePropertyFn ReadValueProperty;
     BriefcaseWritePropertyFn WriteProperty;
     BriefcaseWriteTextPropertyFn WriteTextProperty;
+    // API v10 resolves and validates generated SDK descriptors once, including
+    // recursive canonical conversion for fixed structs containing UObject handles.
+    // Tokens are process-local identifiers; Unreal addresses never cross this boundary.
+    BriefcasePrepareFunctionFn PrepareFunction;
+    BriefcaseInvokePreparedFunctionFn InvokePreparedFunction;
+    BriefcasePreparePropertyFn PrepareProperty;
+    BriefcaseReadPreparedPropertyFn ReadPreparedProperty;
+    BriefcaseWritePreparedPropertyFn WritePreparedProperty;
+    // API v11 returns recursively encoded owning out/return parameters while
+    // their FProperty-managed native storage is still alive.
+    BriefcaseInvokePreparedValueFunctionFn InvokePreparedValueFunction;
+    BriefcaseReleaseValueBufferFn ReleaseValueBuffer;
+    // API v13 reconstructs owning inputs and allocator-backed containers in
+    // FProperty-initialized storage. The same bounded BVC1 format powers
+    // generated property setters and writable patch values.
+    BriefcaseInvokePreparedValueFunctionV2Fn InvokePreparedValueFunctionV2;
+    BriefcaseWritePreparedValuePropertyFn WritePreparedValueProperty;
+    // API v14 exposes identity/lifecycle metadata as serial-checked handles.
+    // It never publishes UObject or UClass addresses to mods.
+    BriefcaseGetClassDefaultObjectFn GetClassDefaultObject;
+    BriefcaseGetObjectOuterFn GetObjectOuter;
+    BriefcaseGetObjectFlagsFn GetObjectFlags;
+    // API v15 loads a typed soft-object path through reflected vanilla
+    // KismetSystemLibrary calls. Root leases keep the object alive without
+    // exposing an address; every acquire must have one matching release.
+    BriefcaseLoadObjectFn LoadObject;
+    BriefcaseAcquireObjectRootFn AcquireObjectRoot;
+    BriefcaseReleaseObjectRootFn ReleaseObjectRoot;
+    // API v16 subscribes to reflected inline dynamic multicast delegates.
+    // The runtime validates the generated property layout, owns the physical
+    // binding, and removes it when the mod-scoped subscription is disposed.
+    BriefcaseSubscribeMulticastDelegateFn SubscribeMulticastDelegate;
+    BriefcaseUnsubscribeDelegateFn UnsubscribeDelegate;
 };
 
-struct BriefcaseRenderFrame {
-    uint32_t StructSize;
-    uint32_t Width;
-    uint32_t Height;
-    BriefcaseBool MenuVisible;
-    float DeltaSeconds;
-    uint32_t Reserved0;
-    uint64_t FrameNumber;
-    uint64_t Reserved[4];
-};
-
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseRenderCallbackFn)(
-    void* userContext, const BriefcaseRenderFrame* frame);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseRegisterRenderCallbackFn)(
-    void* context, BriefcaseRenderCallbackFn callback, void* userContext, uint64_t* registrationId);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseUnregisterRenderCallbackFn)(
-    void* context, uint64_t registrationId);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseSetRenderCallbackActiveFn)(
-    void* context, uint64_t registrationId, BriefcaseBool activeWhenMenuHidden);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseSetMenuVisibleFn)(void* context, BriefcaseBool visible);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseGetMenuVisibleFn)(void* context);
-
-// The first rendering ABI deliberately exposes only the ImGui calls needed by
-// the managed smoke-test menu. All calls must happen inside a render callback.
-// Text is UTF-8 and length-delimited; no variadic C functions cross the ABI.
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiBeginFn)(
-    void* context, const char* utf8Name, uint32_t nameLength, BriefcaseBool* open, uint32_t flags);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiEndFn)(void* context);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiTextFn)(
-    void* context, const char* utf8Text, uint32_t textLength);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiCheckboxFn)(
-    void* context, const char* utf8Label, uint32_t labelLength, BriefcaseBool* value);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiSliderFloatFn)(
-    void* context, const char* utf8Label, uint32_t labelLength, float* value,
-    float minimum, float maximum, const char* utf8Format, uint32_t formatLength);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiButtonFn)(
-    void* context, const char* utf8Label, uint32_t labelLength, float width, float height);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSameLineFn)(void* context);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSeparatorTextFn)(
-    void* context, const char* utf8Label, uint32_t labelLength);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSetNextWindowPositionFn)(
-    void* context, float x, float y, uint32_t condition, float pivotX, float pivotY);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSetNextWindowSizeFn)(
-    void* context, float width, float height, uint32_t condition);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiBeginChildFn)(
-    void* context, const char* utf8Id, uint32_t idLength, float width, float height,
-    uint32_t childFlags, uint32_t windowFlags);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiEndChildFn)(void* context);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiSelectableFn)(
-    void* context, const char* utf8Label, uint32_t labelLength, BriefcaseBool selected,
-    uint32_t flags, float width, float height);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSeparatorFn)(void* context);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSpacingFn)(void* context);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiSliderIntFn)(
-    void* context, const char* utf8Label, uint32_t labelLength, int32_t* value,
-    int32_t minimum, int32_t maximum, const char* utf8Format, uint32_t formatLength);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiSetNextItemWidthFn)(void* context, float width);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiTextColoredFn)(
-    void* context, uint32_t rgba, const char* utf8Text, uint32_t textLength);
-typedef float(BRIEFCASE_MOD_CALL* BriefcaseImGuiGetFramerateFn)(void* context);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiDrawCircleFn)(
-    void* context, float x, float y, float radius, uint32_t rgba,
-    int32_t segments, float thickness, BriefcaseBool filled);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiDrawLineFn)(
-    void* context, float x1, float y1, float x2, float y2,
-    uint32_t rgba, float thickness);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiDrawRectFilledFn)(
-    void* context, float minimumX, float minimumY, float maximumX, float maximumY,
-    uint32_t rgba, float rounding);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiDrawTextFn)(
-    void* context, float x, float y, uint32_t rgba,
-    const char* utf8Text, uint32_t textLength);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiBeginComboFn)(
-    void* context, const char* utf8Label, uint32_t labelLength,
-    const char* utf8Preview, uint32_t previewLength, uint32_t flags);
-typedef void(BRIEFCASE_MOD_CALL* BriefcaseImGuiEndComboFn)(void* context);
-typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseImGuiInputTextFn)(
-    void* context, const char* utf8Label, uint32_t labelLength,
-    char* utf8Buffer, uint32_t bufferCapacity, uint32_t flags);
-
-struct BriefcaseRenderingApi {
-    uint32_t StructSize;
-    uint32_t ApiVersion;
-    void* Context;
-    BriefcaseRegisterRenderCallbackFn RegisterCallback;
-    BriefcaseUnregisterRenderCallbackFn UnregisterCallback;
-    BriefcaseSetRenderCallbackActiveFn SetCallbackActive;
-    BriefcaseSetMenuVisibleFn SetMenuVisible;
-    BriefcaseGetMenuVisibleFn GetMenuVisible;
-    BriefcaseImGuiBeginFn Begin;
-    BriefcaseImGuiEndFn End;
-    BriefcaseImGuiTextFn Text;
-    BriefcaseImGuiCheckboxFn Checkbox;
-    BriefcaseImGuiSliderFloatFn SliderFloat;
-    BriefcaseImGuiButtonFn Button;
-    BriefcaseImGuiSameLineFn SameLine;
-    BriefcaseImGuiSeparatorTextFn SeparatorText;
-    BriefcaseImGuiSetNextWindowPositionFn SetNextWindowPosition;
-    BriefcaseImGuiSetNextWindowSizeFn SetNextWindowSize;
-    BriefcaseImGuiBeginChildFn BeginChild;
-    BriefcaseImGuiEndChildFn EndChild;
-    BriefcaseImGuiSelectableFn Selectable;
-    BriefcaseImGuiSeparatorFn Separator;
-    BriefcaseImGuiSpacingFn Spacing;
-    BriefcaseImGuiSliderIntFn SliderInt;
-    BriefcaseImGuiSetNextItemWidthFn SetNextItemWidth;
-    BriefcaseImGuiTextColoredFn TextColored;
-    BriefcaseImGuiGetFramerateFn GetFramerate;
-    BriefcaseImGuiDrawCircleFn DrawCircle;
-    BriefcaseImGuiDrawLineFn DrawLine;
-    BriefcaseImGuiDrawRectFilledFn DrawRectFilled;
-    BriefcaseImGuiDrawTextFn DrawText;
-    // API v3 consumes the first two v2 reserved slots without moving any
-    // earlier member. BeginCombo returning true must be paired with EndCombo.
-    BriefcaseImGuiBeginComboFn BeginCombo;
-    BriefcaseImGuiEndComboFn EndCombo;
-    // API v4 adds bounded, mutable UTF-8 text input.
-    BriefcaseImGuiInputTextFn InputText;
-    void* Reserved[5];
-};
+// This host-table slot is reserved for binary layout compatibility.
 
 typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseIsKeyDownFn)(void* context, uint32_t virtualKey);
 typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseGameHasFocusFn)(void* context);
@@ -388,24 +417,6 @@ struct BriefcaseInputApi {
     void* Reserved[8];
 };
 
-enum BriefcasePatchPhase : uint32_t {
-    BRIEFCASE_PATCH_PREFIX = 0,
-    BRIEFCASE_PATCH_POSTFIX = 1
-};
-
-struct BriefcasePatchCall {
-    uint32_t StructSize;
-    BriefcasePatchPhase Phase;
-    BriefcaseObjectHandle Instance;
-    BriefcaseBool OriginalRan;
-    void* Parameters;
-    uint32_t ParameterSize;
-    uint32_t Reserved0;
-    uint64_t Reserved[4];
-};
-
-typedef void(BRIEFCASE_MOD_CALL* BriefcasePatchCallbackFn)(
-    void* userContext, BriefcasePatchCall* call, BriefcaseBool* runOriginal);
 typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseRegisterPatchFn)(
     void* context, BriefcaseObjectHandle targetClass, BriefcaseObjectHandle functionOwnerClass,
     const char* utf8FunctionName, uint32_t functionNameLength, BriefcasePatchPhase phase,
@@ -443,6 +454,9 @@ typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePatchTextFn)(
     void* context, const BriefcasePatchCall* call, uint32_t parameterOffset,
     BriefcasePropertyKind expectedKind, const uint16_t* characters,
     uint32_t characterCount);
+typedef BriefcaseUnrealResult(BRIEFCASE_MOD_CALL* BriefcaseWritePatchEncodedValueFn)(
+    void* context, const BriefcasePatchCall* call, uint32_t parameterOffset,
+    BriefcasePropertyKind expectedKind, const uint8_t* input, uint32_t inputSize);
 
 struct BriefcasePatchingApi {
     uint32_t StructSize;
@@ -460,6 +474,9 @@ struct BriefcasePatchingApi {
     BriefcaseCopyPatchValueFn CopyValue;
     BriefcaseWritePatchValueFn WriteValue;
     BriefcaseWritePatchTextFn WriteText;
+    // API v6 reconstructs an owning patch value from bounded BVC1 bytes. The
+    // destination keeps Unreal ownership; no managed pointer is retained.
+    BriefcaseWritePatchEncodedValueFn WriteEncodedValue;
 };
 
 // Future services are separate versioned tables. Adding a field to reflection,
@@ -505,7 +522,7 @@ struct BriefcaseHostApi {
     uint64_t Capabilities;
     const BriefcaseCoreApi* Core;
     const BriefcaseUnrealApi* Unreal;
-    const BriefcaseRenderingApi* Rendering;
+    const void* ReservedRendering;
     const BriefcaseInputApi* Input;
     const BriefcasePatchingApi* Patching;
     // GameThread consumes the first v1 reserved slot.
@@ -515,7 +532,11 @@ struct BriefcaseHostApi {
 
 #if defined(__cplusplus)
 static_assert(sizeof(BriefcaseGameThreadFrame) == 64);
-static_assert(sizeof(BriefcaseUnrealApi) == 144);
+static_assert(sizeof(BriefcasePreparedParameter) == 32);
+static_assert(sizeof(BriefcaseOwnedValueBuffer) == 32);
+static_assert(sizeof(BriefcaseValueInput) == 40);
+static_assert(sizeof(BriefcaseUnrealApi) == 280);
+static_assert(sizeof(BriefcasePatchingApi) == 104);
 static_assert(sizeof(BriefcaseGameThreadApi) == 112);
 static_assert(sizeof(BriefcaseHostApi) == 112);
 #endif

@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Briefcase.ManagedHost;
 
 /// <summary>
-/// Keeps the ImGui configuration host independent from the mod loader's
+/// Keeps the Avalonia configuration host independent from the mod loader's
 /// implementation while still allowing the framework tab to issue lifecycle
 /// commands.
 /// </summary>

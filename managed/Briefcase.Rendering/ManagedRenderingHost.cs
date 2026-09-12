@@ -1,19 +1,27 @@
 using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+using System.Runtime.Versioning;
 using Briefcase.ModApi;
-using ImGuiNET;
 
 namespace Briefcase.Rendering;
 
 /// <summary>
-/// Runs the complete Briefcase overlay on one managed background thread. That
-/// thread owns the Win32 window, ImGui context, Direct3D device, and every render
-/// callback, which avoids cross-thread ImGui and D3D access.
+/// Coordinates the Avalonia client UI and toolkit-neutral mod overlay callbacks.
+/// It owns no graphics device; Avalonia/Skia is the sole visual renderer.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
 {
     private readonly Action<string> _info;
     private readonly Action<string> _error;
-    private readonly Func<RenderFrame, bool> _drawFrameworkMenu;
+    private readonly string _avaloniaAssemblyPath;
+    private readonly object _avaloniaState;
+    private readonly Func<AvaloniaWindowPlacement>? _loadAvaloniaPlacement;
+    private readonly Action<AvaloniaWindowPlacement>? _saveAvaloniaPlacement;
+    private readonly bool _enableGameWindowChrome;
+    private readonly FrameworkStartupProgress? _startupProgress;
     private readonly object _callbacksGate = new();
     private readonly List<Registration> _callbacks = [];
     private readonly CancellationTokenSource _stop = new();
@@ -25,16 +33,25 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
     public ManagedRenderingHost(
         Action<string> info,
         Action<string> error,
-        Func<RenderFrame, bool> drawFrameworkMenu)
+        string avaloniaAssemblyPath,
+        object avaloniaState,
+        Func<AvaloniaWindowPlacement>? loadAvaloniaPlacement = null,
+        Action<AvaloniaWindowPlacement>? saveAvaloniaPlacement = null,
+        bool enableGameWindowChrome = false,
+        FrameworkStartupProgress? startupProgress = null)
     {
         _info = info;
         _error = error;
-        _drawFrameworkMenu = drawFrameworkMenu;
+        _avaloniaAssemblyPath = avaloniaAssemblyPath;
+        _avaloniaState = avaloniaState;
+        _loadAvaloniaPlacement = loadAvaloniaPlacement;
+        _saveAvaloniaPlacement = saveAvaloniaPlacement;
+        _enableGameWindowChrome = enableGameWindowChrome;
+        _startupProgress = startupProgress;
     }
 
     public bool IsAvailable => Volatile.Read(ref _started) != 0;
     public bool IsReady => Volatile.Read(ref _ready) != 0;
-
     public bool MenuVisible
     {
         get => Volatile.Read(ref _menuVisible) != 0;
@@ -48,7 +65,7 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
         _thread = new Thread(Run)
         {
             IsBackground = true,
-            Name = "Briefcase managed renderer"
+            Name = "Briefcase client UI coordinator"
         };
         _thread.Start();
     }
@@ -79,31 +96,23 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
     {
         try
         {
-            _info("Managed rendering host: waiting for the Unreal window");
-            nint gameWindow = 0;
-            while (!_stop.IsCancellationRequested)
-            {
-                gameWindow = OverlayWindow.FindGameWindow();
-                if (Win32Native.IsWindow(gameWindow)) break;
-                Thread.Sleep(100);
-            }
-            if (_stop.IsCancellationRequested) return;
+            _info("Client UI: waiting for the Unreal window");
+            var gameWindow = WaitForGameWindow();
+            if (gameWindow == 0) return;
 
-            using var window = new OverlayWindow(gameWindow);
-            using var imgui = new ImGuiRuntime();
-            imgui.Initialize();
-            var input = new ImGuiInputBackend(window);
-            using var surface = new DirectCompositionSurface();
-            surface.Initialize(window.Handle, 800, 500);
-            using var renderer = new D3D11ImGuiRenderer(surface.Device, surface.Context);
+            using var gameWindowChrome = CreateGameWindowChrome(gameWindow);
+            using var avalonia = new LazyRetainedMenuHost(
+                () => CreateAvaloniaHost(gameWindow), _error);
+            _info("Client UI: starting Avalonia after the Unreal startup gate");
+            avalonia.Prepare();
 
             Volatile.Write(ref _ready, 1);
-            _info("Managed rendering host: ready; F1 opens Briefcase configuration");
-            RunFrames(window, input, imgui, surface, renderer);
+            _info("Client UI: ready; F1 opens Briefcase configuration");
+            RunFrames(gameWindow, avalonia, gameWindowChrome);
         }
         catch (Exception exception)
         {
-            _error($"Managed rendering host failed: {exception}");
+            _error($"Client UI failed: {exception}");
         }
         finally
         {
@@ -111,86 +120,180 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
             Volatile.Write(ref _started, 0);
             if (ReferenceEquals(ManagedRenderingBridge.Current, this))
                 ManagedRenderingBridge.Current = null;
-            _info("Managed rendering host: stopped");
+            _info("Client UI: stopped");
         }
     }
 
+    private nint WaitForGameWindow()
+    {
+        while (!_stop.IsCancellationRequested)
+        {
+            var found = FindGameWindow();
+            if (Win32Native.IsWindow(found)) return found;
+            Thread.Sleep(100);
+        }
+        return 0;
+    }
+
+    private static nint FindGameWindow()
+    {
+        nint found = 0;
+        var processId = checked((uint)Environment.ProcessId);
+        Win32Native.EnumWindows((window, _) =>
+        {
+            Win32Native.GetWindowThreadProcessId(window, out var owner);
+            if (owner != processId || !Win32Native.IsWindowVisible(window)) return true;
+            var name = new char[128];
+            var length = Win32Native.GetClassNameW(window, name, name.Length);
+            if (length <= 0 || new string(name, 0, length) != "UnrealWindow") return true;
+            found = window;
+            return false;
+        }, 0);
+        return found;
+    }
+
+    private GameWindowChrome? CreateGameWindowChrome(nint gameWindow)
+    {
+        if (!_enableGameWindowChrome) return null;
+        try { return new GameWindowChrome(gameWindow, _info, _error); }
+        catch (Exception exception)
+        {
+            _error($"Could not initialize the optional game window chrome: {exception.Message}");
+            return null;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private IRetainedMenuHost CreateAvaloniaHost(nint gameWindow)
+    {
+        var assemblyPath = Path.GetFullPath(_avaloniaAssemblyPath);
+        if (!File.Exists(assemblyPath))
+            throw new FileNotFoundException(
+                "The Briefcase Avalonia UI module is not installed.", assemblyPath);
+
+        var loadContext = new OptionalUiLoadContext(assemblyPath);
+        var assembly = loadContext.LoadFromAssemblyPath(assemblyPath);
+        var factoryType = assembly.GetType(
+            "Briefcase.AvaloniaUi.AvaloniaUiFactory", throwOnError: true)!;
+        var factory = factoryType.GetMethod(
+            "Create", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new MissingMethodException(factoryType.FullName, "Create");
+        var created = factory.Invoke(null,
+        [
+            gameWindow,
+            _avaloniaState,
+            (Action<bool>)(visible => MenuVisible = visible),
+            _loadAvaloniaPlacement,
+            _saveAvaloniaPlacement,
+            _info,
+            _error
+        ]);
+        return created as IRetainedMenuHost
+               ?? throw new InvalidCastException(
+                   "The Avalonia UI factory returned an incompatible host.");
+    }
+
+    private sealed class OptionalUiLoadContext : AssemblyLoadContext
+    {
+        private readonly AssemblyDependencyResolver _resolver;
+        private readonly string _thirdPartyDirectory;
+
+        public OptionalUiLoadContext(string mainAssemblyPath)
+            : base("Briefcase Avalonia UI", isCollectible: false)
+        {
+            _resolver = new AssemblyDependencyResolver(mainAssemblyPath);
+            _thirdPartyDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(mainAssemblyPath)!, "..", "..", "ThirdPartyLibraries"));
+        }
+
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            var shared = FindLoadedAssembly(assemblyName);
+            if (shared is not null) return shared;
+            var path = _resolver.ResolveAssemblyToPath(assemblyName);
+            if (path is not null && File.Exists(path)) return LoadFromAssemblyPath(path);
+            if (string.IsNullOrWhiteSpace(assemblyName.Name)) return null;
+            path = Path.Combine(_thirdPartyDirectory, assemblyName.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
+
+        protected override nint LoadUnmanagedDll(string unmanagedDllName)
+        {
+            var path = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);
+            if (path is not null && File.Exists(path))
+                return LoadUnmanagedDllFromPath(path);
+            if (string.IsNullOrWhiteSpace(unmanagedDllName) ||
+                Path.GetFileName(unmanagedDllName) != unmanagedDllName)
+                return 0;
+            path = Path.Combine(_thirdPartyDirectory, unmanagedDllName);
+            if (!Path.HasExtension(path)) path += ".dll";
+            return File.Exists(path) ? LoadUnmanagedDllFromPath(path) : 0;
+        }
+    }
+
+    internal static Assembly? FindLoadedAssembly(AssemblyName requested) =>
+        AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(candidate =>
+            AssemblyName.ReferenceMatchesDefinition(candidate.GetName(), requested));
+
     private void RunFrames(
-        OverlayWindow window,
-        ImGuiInputBackend input,
-        ImGuiRuntime imgui,
-        DirectCompositionSurface surface,
-        D3D11ImGuiRenderer renderer)
+        nint gameWindow,
+        LazyRetainedMenuHost avalonia,
+        GameWindowChrome? gameWindowChrome)
     {
         var previous = Stopwatch.GetTimestamp();
         var frameNumber = 0UL;
         var appliedVisibility = false;
         var f1WasDown = false;
 
-        while (!_stop.IsCancellationRequested && Win32Native.IsWindow(window.GameWindow))
+        while (!_stop.IsCancellationRequested && Win32Native.IsWindow(gameWindow))
         {
-            window.PumpMessages();
-            var focused = window.IsGameOrOverlayForeground();
+            gameWindowChrome?.Maintain();
+            var foreground = Win32Native.GetAncestor(
+                Win32Native.GetForegroundWindow(), Win32Native.GaRoot);
+            var focused = foreground == gameWindow || avalonia.IsForeground;
             var f1Down = IsKeyDown(Win32Native.VkF1);
-            if (f1Down && !f1WasDown && focused) MenuVisible = !MenuVisible;
+            if (f1Down && !f1WasDown && focused &&
+                _startupProgress?.Snapshot.IsComplete != false)
+                MenuVisible = !MenuVisible;
             f1WasDown = f1Down;
-            if ((Win32Native.GetAsyncKeyState(Win32Native.VkEscape) & 1) != 0 && window.Interactive)
-                MenuVisible = false;
             if (!focused) MenuVisible = false;
 
             var visible = MenuVisible;
             if (visible != appliedVisibility)
             {
-                window.SetInteractive(visible, !visible);
-                ImGui.GetIO().MouseDrawCursor = visible;
-                if (!visible) input.Clear();
+                avalonia.SetVisible(visible);
                 appliedVisibility = visible;
-                _info(visible
-                    ? "Managed rendering host: menu opened"
-                    : "Managed rendering host: menu closed");
+                _info(visible ? "Client UI: menu opened" : "Client UI: menu closed");
             }
 
-            var callbacks = SnapshotCallbacks();
-            var renderInBackground = callbacks.Any(item => item.RenderWhenMenuHidden);
-            if ((!visible && !renderInBackground) || window.GameIsMinimized)
+            if (!Win32Native.GetClientRect(gameWindow, out var rectangle) ||
+                rectangle.Width <= 0 || rectangle.Height <= 0 ||
+                Win32Native.IsIconic(gameWindow))
             {
-                window.Hide();
-                Thread.Sleep(10);
-                continue;
-            }
-            if (!window.AlignToGame(out var width, out var height))
-            {
-                Thread.Sleep(10);
+                avalonia.SubmitOverlay(OverlayFrameSnapshot.Empty);
+                Thread.Sleep(25);
                 continue;
             }
 
-            surface.Resize(width, height);
             var current = Stopwatch.GetTimestamp();
-            var delta = (float)Stopwatch.GetElapsedTime(previous, current).TotalSeconds;
+            var delta = (float)Math.Clamp(
+                Stopwatch.GetElapsedTime(previous, current).TotalSeconds,
+                1.0 / 1000.0,
+                0.25);
             previous = current;
-            input.Update();
-            imgui.BeginFrame(new System.Numerics.Vector2(width, height), delta);
-
+            var buffer = new OverlayCommandBuffer(1 / delta);
             var frame = new RenderFrame(
-                width, height, delta, ++frameNumber, visible, ImGuiApi.Managed);
-            foreach (var callback in callbacks)
-                callback.Invoke(frame, _error);
-            if (visible)
-            {
-                try
-                {
-                    if (!_drawFrameworkMenu(frame)) MenuVisible = false;
-                }
-                catch (Exception exception)
-                {
-                    _error($"Briefcase configuration menu failed: {exception}");
-                }
-            }
-
-            var drawData = imgui.EndFrame();
-            surface.BeginFrame();
-            renderer.Render(drawData);
-            surface.Present();
+                checked((uint)rectangle.Width),
+                checked((uint)rectangle.Height),
+                delta,
+                ++frameNumber,
+                visible,
+                new OverlayDrawingApi(buffer));
+            foreach (var callback in SnapshotCallbacks())
+                if (visible || callback.RenderWhenMenuHidden)
+                    callback.Invoke(frame, _error);
+            avalonia.SubmitOverlay(buffer.Snapshot(frame.Width, frame.Height));
+            Thread.Sleep(8);
         }
     }
 
@@ -222,7 +325,6 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
         }
 
         public bool IsActive => Volatile.Read(ref _active) != 0;
-
         public bool RenderWhenMenuHidden
         {
             get => Volatile.Read(ref _renderWhenMenuHidden) != 0;
@@ -235,7 +337,10 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
             {
                 if (!IsActive) return;
                 try { _draw(frame); }
-                catch (Exception exception) { error($"Managed render callback failed: {exception}"); }
+                catch (Exception exception)
+                {
+                    error($"Managed overlay callback failed: {exception}");
+                }
             }
         }
 

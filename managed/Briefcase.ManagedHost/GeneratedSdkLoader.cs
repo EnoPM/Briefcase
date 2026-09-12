@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using Briefcase.ModApi;
 using Briefcase.SdkEmitter;
 
@@ -7,8 +8,12 @@ namespace Briefcase.ManagedHost;
 
 internal static class GeneratedSdkLoader
 {
-    public static Assembly? Load(ModContext context, string coreDirectory)
+    public static Assembly? Load(
+        ModContext context,
+        string coreDirectory,
+        Action<double, string>? progress = null)
     {
+        progress?.Invoke(0.05, "Reading the game build identity...");
         var build = context.GameBuild;
         if (build.PeTimestamp == 0 || build.ImageSize == 0)
         {
@@ -34,6 +39,19 @@ internal static class GeneratedSdkLoader
         }
 
         var selected = available[0];
+        progress?.Invoke(0.2, "Validating the generated SDK cache...");
+        if (TryValidateCachedPublication(selected, buildKey, out var cachedIdentity))
+        {
+            progress?.Invoke(0.85, "Loading the validated generated SDK...");
+            var cached = LoadIntoFrameworkContext(cachedIdentity!, selected.AssemblyPath);
+            context.Info(
+                $"Shared generated SDK loaded from validated cache: " +
+                $"{cachedIdentity!.Name} ({buildKey}).");
+            progress?.Invoke(1, "Generated SDK cache is ready.");
+            return cached;
+        }
+
+        progress?.Invoke(0.35, "Generating the typed SDK from the metadata snapshot...");
         PersistedSdkGenerationResult generation;
         try
         {
@@ -54,21 +72,15 @@ internal static class GeneratedSdkLoader
             !selected.IsReady)
             throw new InvalidOperationException("Generated SDK publication does not match the host target.");
 
+        progress?.Invoke(0.82, "Validating the generated SDK publication...");
         var identity = AssemblyName.GetAssemblyName(generation.AssemblyPath);
         if (!string.Equals(identity.Name, selected.ExpectedAssemblyName, StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"Generated SDK identity mismatch: expected {selected.ExpectedAssemblyName}, " +
                 $"found {identity.Name ?? "<missing>"}.");
 
-        // hostfxr may place this component in a dedicated context rather than
-        // AssemblyLoadContext.Default. Loading beside Briefcase.ModApi is essential:
-        // generated base types and patch attributes must resolve to the exact
-        // same Briefcase.ModApi type identities used by the manager.
-        var frameworkContext = AssemblyLoadContext.GetLoadContext(typeof(ModContext).Assembly) ??
-            throw new InvalidOperationException("Could not identify the framework load context.");
-        var existing = frameworkContext.Assemblies.FirstOrDefault(
-            assembly => AssemblyName.ReferenceMatchesDefinition(assembly.GetName(), identity));
-        var loaded = existing ?? frameworkContext.LoadFromAssemblyPath(generation.AssemblyPath);
+        progress?.Invoke(0.92, "Loading the generated SDK assembly...");
+        var loaded = LoadIntoFrameworkContext(identity, generation.AssemblyPath);
         context.Info(
             $"Shared generated SDK {(generation.Generated ? "generated" : "reused")}: " +
             $"{identity.Name} ({buildKey}); {generation.TypeCount} types, " +
@@ -82,7 +94,54 @@ internal static class GeneratedSdkLoader
                 $"Generated SDK callable ABI report: {generation.SkippedTypeCount} types, " +
                 $"{generation.SkippedPropertyCount} properties/fields, " +
                 $"{generation.SkippedFunctionCount} functions skipped");
+        progress?.Invoke(1, "Generated SDK is ready.");
         return loaded;
+    }
+
+    private static bool TryValidateCachedPublication(
+        Candidate candidate,
+        string buildKey,
+        out AssemblyName? identity)
+    {
+        identity = null;
+        if (!candidate.IsReady || !File.Exists(candidate.SnapshotPath)) return false;
+        try
+        {
+            var marker = File.ReadAllLines(candidate.ReadyPath)
+                .Select(line => line.Split('=', 2, StringSplitOptions.TrimEntries))
+                .Where(parts => parts.Length == 2)
+                .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
+            if (!marker.TryGetValue("emitter", out var emitter) ||
+                emitter != PersistedSdkGenerator.CurrentEmitterSchema ||
+                !marker.TryGetValue("build", out var readyBuild) || readyBuild != buildKey ||
+                !marker.TryGetValue("snapshot", out var expectedHash))
+                return false;
+
+            using var snapshot = File.OpenRead(candidate.SnapshotPath);
+            var actualHash = Convert.ToHexString(SHA256.HashData(snapshot));
+            if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) return false;
+
+            identity = AssemblyName.GetAssemblyName(candidate.AssemblyPath);
+            return string.Equals(
+                identity.Name, candidate.ExpectedAssemblyName, StringComparison.Ordinal);
+        }
+        catch
+        {
+            identity = null;
+            return false;
+        }
+    }
+
+    private static Assembly LoadIntoFrameworkContext(AssemblyName identity, string assemblyPath)
+    {
+        // hostfxr may place this component in a dedicated context rather than
+        // AssemblyLoadContext.Default. Loading beside Briefcase.ModApi keeps
+        // generated base types and patch attributes on the framework identity.
+        var frameworkContext = AssemblyLoadContext.GetLoadContext(typeof(ModContext).Assembly) ??
+            throw new InvalidOperationException("Could not identify the framework load context.");
+        var existing = frameworkContext.Assemblies.FirstOrDefault(
+            assembly => AssemblyName.ReferenceMatchesDefinition(assembly.GetName(), identity));
+        return existing ?? frameworkContext.LoadFromAssemblyPath(assemblyPath);
     }
 
     private sealed record Candidate(

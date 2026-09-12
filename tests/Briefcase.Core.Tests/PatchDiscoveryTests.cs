@@ -49,6 +49,44 @@ public sealed class PatchDiscoveryTests
     }
 
     [Fact]
+    public void Unreal_patch_accepts_writable_owning_struct_snapshots()
+    {
+        var method = typeof(PatchDiscoveryTests).GetMethod(
+            nameof(OwningStructPatch), BindingFlags.NonPublic | BindingFlags.Static)!;
+        var function = new UnrealFunction(
+            "/Script/DeceiveInc.TestActor", "SetPayload", 16,
+            [new UnrealParameter("payload", typeof(TestManagedPayload), 0, 16)]);
+        var validate = typeof(PatchDiscovery).GetMethod(
+            "ValidateMethod", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var error = Record.Exception(() =>
+            validate.Invoke(null, [method, typeof(TestActor), function, PatchPhase.Prefix]));
+
+        Assert.Null(error);
+    }
+
+    private static void OwningStructPatch(ref TestManagedPayload payload) { }
+
+    [Fact]
+    public void Unreal_patch_accepts_container_backed_struct_writeback()
+    {
+        var method = typeof(PatchDiscoveryTests).GetMethod(
+            nameof(ContainerStructPatch), BindingFlags.NonPublic | BindingFlags.Static)!;
+        var function = new UnrealFunction(
+            "/Script/DeceiveInc.TestActor", "SetPayload", 16,
+            [new UnrealParameter("payload", typeof(TestContainerPayload), 0, 16)]);
+        var validate = typeof(PatchDiscovery).GetMethod(
+            "ValidateMethod", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var error = Record.Exception(() =>
+            validate.Invoke(null, [method, typeof(TestActor), function, PatchPhase.Prefix]));
+
+        Assert.Null(error);
+    }
+
+    private static void ContainerStructPatch(ref TestContainerPayload payload) { }
+
+    [Fact]
     public void Discover_distinguishes_native_patches()
     {
         var assembly = CreatePatchAssembly(
@@ -107,4 +145,16 @@ public sealed class TestActor : UnrealObject, IUnrealObject<TestActor>
             sizeof(int),
             [new UnrealParameter("value", typeof(int), 0, sizeof(int))]);
     }
+}
+
+public struct TestManagedPayload : IUnrealManagedStructValue
+{
+    [UnrealStructField("Label", 0)] public string? Label;
+    public TestManagedPayload() => Label = null;
+}
+
+public struct TestContainerPayload : IUnrealManagedStructValue
+{
+    [UnrealStructField("Values", 0)] public UnrealArray<int>? Values;
+    public TestContainerPayload() => Values = null;
 }

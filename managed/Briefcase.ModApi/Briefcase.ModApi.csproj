@@ -9,8 +9,4 @@
   <PropertyGroup Condition="'$(BriefcaseHeadless)' == 'true'">
     <DefineConstants>$(DefineConstants);BRIEFCASE_HEADLESS</DefineConstants>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="ImGui.NET" Version="1.91.6.1"
-                      Condition="'$(BriefcaseHeadless)' != 'true'" />
-  </ItemGroup>
 </Project>

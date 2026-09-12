@@ -6,7 +6,7 @@ namespace Briefcase.ManagedHost;
 
 /// <summary>
 /// Persists server-mod settings without creating a window, input hook, or
-/// ImGui callback. It deliberately exposes the same scope contract as the
+/// client UI callback. It deliberately exposes the same scope contract as the
 /// client registry so the managed mod loader stays target agnostic.
 /// </summary>
 internal sealed class ConfigurationRegistry : IDisposable
@@ -206,22 +206,12 @@ internal sealed class ConfigurationRegistry : IDisposable
             return entry;
         }
 
-        public IDisposable RegisterPanel(Action<ConfigurationPanelContext> draw)
-        {
-            ArgumentNullException.ThrowIfNull(draw);
-            throw new NotSupportedException(
-                "Configuration panels are unavailable in the Briefcase server host.");
-        }
-
-        public IDisposable RegisterServerPanel(
-            string name,
-            Action<ConfigurationPanelContext> draw)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name);
-            ArgumentNullException.ThrowIfNull(draw);
-            throw new NotSupportedException(
-                "Server panels are unavailable in the Briefcase server host.");
-        }
+        /// <summary>
+        /// Adds persistent configuration to a server-mod context. The headless scope
+        /// intentionally has no client UI extension.
+        /// </summary>
+        public ModContext AttachTo(ModContext context) =>
+            context.WithConfiguration(this);
 
         public IConfigurationEntry[] SnapshotEntries()
         {

@@ -30,12 +30,16 @@ internal sealed class BriefcaseServerEndpoint : IDisposable
     {
         _administration = administration;
         _handshake = handshake;
-        _authenticator = new ServerAdminAuthenticator(administrationSecret);
         _warning = warning;
+        info("Unified Briefcase endpoint: deriving the administration key.");
+        _authenticator = new ServerAdminAuthenticator(administrationSecret);
+        info("Unified Briefcase endpoint: parsing the listen address.");
         if (!IPAddress.TryParse(listenAddress?.Trim(), out var address))
             throw new FormatException("The Briefcase listen address must be IPv4 or IPv6.");
         _listener = new TcpListener(address, port);
+        info("Unified Briefcase endpoint: starting the TCP listener.");
         _listener.Start();
+        info("Unified Briefcase endpoint: starting the accept loop.");
         _acceptLoop = AcceptLoopAsync(_stop.Token);
         info($"Unified Briefcase endpoint listening on {address}:{port}/TCP " +
              $"(admin v{ServerAdminProtocol.Version}, handshake v{ModHandshakeProtocol.Version}, " +

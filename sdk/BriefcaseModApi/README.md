@@ -10,6 +10,11 @@ runtime. Each public service table starts with its structure size and API
 version, allowing the native and managed sides to validate compatibility before
 calling one another.
 
+`Briefcase/BriefcaseStartupModule.h` defines a separate, minimal ABI for native
+companions that must run before Unreal reflection and CoreCLR are available.
+Briefcase loads them from `Briefcase/Mods/Startup`; ordinary mods remain managed
+and use `Briefcase.ModApi`.
+
 The ABI covers core logging, Unreal object and reflection services, rendering,
 input, and patch dispatch. It avoids C++ containers, exceptions, CRT-owned
 memory, and raw Unreal pointers across the managed boundary.

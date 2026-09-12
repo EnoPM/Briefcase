@@ -77,6 +77,12 @@ For development, switch one setting in `Briefcase/loader.json`:
 }
 ```
 
+Briefcase captures a snapshot once for each executable build. To deliberately
+replace an existing snapshot during SDK development, set
+`sdkSnapshotRefresh` to `always` beside the selected format. Restore it to
+`missing` after capture so the live UObject registry scan does not compete with
+game startup.
+
 Accepted values are `binary` and `json`. After an atomic write succeeds,
 the runtime removes the snapshot for the same target and build in the other
 format, so switching formats never leaves two production copies. Repository
@@ -137,7 +143,10 @@ so the example deliberately calls a different generated method.
 
 The callable ABI covers UObject classes, reflected inheritance, scalar and
 object properties, `FName`, `ScriptStruct` value types, ordinary inputs,
-multiple `out/ref` values, `FString`, bounded `TArray<uint8>` inputs and `FText`.
+multiple `out/ref` values, bounded `TArray<uint8>` inputs, and every parameter
+direction for `FString` and `FText`: input, return, pure `out` and writable
+`ref`. It also reads owning `USTRUCT` fields recursively and supports those
+structs as pure `out` parameters or return values.
 For example:
 
 ```csharp
@@ -153,22 +162,81 @@ The ABI never copies the private 24-byte `FText` representation into managed
 code. The native bridge converts UTF-16 through `KismetTextLibrary`, constructs
 the owning engine value immediately before `ProcessEvent`, converts outputs
 back to UTF-16, and destroys every temporary with the reflected `FProperty`.
-This preserves Unreal's reference-counted lifetime rules. `FText` nested inside
-a copied `ScriptStruct` remains metadata-only until field-by-field struct
-marshalling can provide the same ownership guarantee.
+This preserves Unreal's reference-counted lifetime rules.
 
-Generated structs use explicit offsets and native size, including opaque
-structs whose native fields are not reflected. Arrays, sets and maps are copied
-recursively into immutable `UnrealArray<T>`, `UnrealSet<T>` and
-`UnrealMap<TKey,TValue>` snapshots. Interfaces, weak/lazy/soft references,
-delegates and field paths are exposed without native addresses. Scalar,
-object-handle, `FName`, generated struct, `FString` and `FText` properties have
-generated setters. Owning containers and delegate bindings remain read-only and
-are changed through generated game functions.
+The generator chooses one of two representations for each `ScriptStruct`.
+Structs made only of fixed values use explicit offsets and native size and keep
+the zero-allocation canonical path. A struct containing `FString`, `FText`, a
+container, a delegate, a soft reference, or another owning struct becomes an
+ordinary managed value struct implementing `IUnrealManagedStructValue`. Its
+fields carry `UnrealStructFieldAttribute`, which records the Unreal name and
+native offset used by the BVC1 decoder. It contains copied managed values and no
+native addresses.
+
+Arrays, sets and maps are copied recursively into immutable `UnrealArray<T>`,
+`UnrealSet<T>` and `UnrealMap<TKey,TValue>` snapshots. Interfaces,
+weak/lazy/soft references, delegates and field paths are exposed without native
+addresses. Scalar, object-handle, `FName`, fixed generated struct, `FString` and
+`FText` properties have generated setters. API v13 also emits a setter for an
+owning struct when its complete field tree can be reconstructed with reflected
+initialization: scalars, object handles, `FName`, `FString`, `FText` and nested
+admitted structs. `TArray`, `TSet` and `TMap` properties receive setters when
+their complete element tree follows the same rules. Delegate bindings remain
+read-only.
 
 Every aggregate copy uses the bounded BVC1 wire format. It has a 32 MiB value
 limit, 100,000-element container limit and eight-level recursion limit. Object
 pointers become serial-checked handles before managed code sees them.
+
+## Prepared generated fast path
+
+Unreal API v10 introduced the generated prepared path. API v11 extends it with
+owning `USTRUCT` outputs, API v12 adds owning inputs and writable references,
+API v13 adds allocator-backed `TArray`, `TSet` and `TMap` reconstruction, and
+API v14 adds validated class-default-object, Outer and object-flag access, and
+API v15 adds typed synchronous asset loading plus counted strong-reference leases.
+These operations still return only index/serial handles; generated code never
+receives an Unreal address.
+The generated
+assembly stores each property and function descriptor in a static field. On the
+first use, the native runtime resolves the owner and reflected member, validates
+the complete generated parameter layout, and returns an opaque process-local
+token. The token contains no Unreal address and cannot be used as one.
+
+For scalar, `FName`, UObject-handle and fixed-layout struct signatures, the
+wrapper builds an address-free canonical buffer with `localloc`. Pointer-free
+signatures use it directly. When a struct contains nested UObject or weak-object
+fields, the native prepared plan recursively resolves those handles into a
+temporary ProcessEvent buffer and converts outputs back to handles. Steady-state
+calls create no `object[]`, boxing, managed buffer, list, dictionary or UTF-8
+name. Native code still validates the instance index/serial handle and its owner
+class on every call. Calls from any thread other than the captured game thread
+fail with `WrongThread` before Unreal is invoked.
+
+Generated structs enter the canonical prepared path when every nested field has
+fixed storage: scalars, packed booleans, `FName`, object handles and other
+admitted structs. An owning struct made from strings, text and those fixed
+values uses the BVC1 input path instead.
+
+For an owning `FString`, `FText` or managed-struct `out` parameter or return
+value, API v11 creates the real native value with the reflected `FProperty`,
+invokes `ProcessEvent`, emits one bounded BVO1 envelope containing recursive
+BVC1 nodes, then destroys the native value. API v13 performs the inverse for
+inputs and `ref`: it initializes native storage with the reflected `FProperty`,
+decodes the managed BVC1 snapshot into that storage, invokes `ProcessEvent`,
+copies outputs to BVO1, and destroys the temporary. At no point does an owning
+Unreal pointer cross into C#.
+
+Container storage is allocated through the executable's `GMalloc`. Every child
+is initialized and destroyed through its reflected `FProperty`; set elements and
+map keys use `GetValueTypeHash` and `Identical`. A set or map whose key property
+does not advertise Unreal's hash contract remains read-only. Counts are limited
+to 100,000 elements, encoded values to 32 MiB and nesting to eight levels.
+
+The allocation regression baseline lives in
+`PreparedUnrealApiTests.Prepared_invocation_has_zero_steady_state_managed_allocations`.
+It warms both paths, then verifies that 1,000 prepared calls allocate zero managed
+bytes while the dynamic descriptor path remains a measurable non-zero baseline.
 
 ## Development and runtime use
 
@@ -200,7 +268,7 @@ as the final commit marker.
 Client and dedicated-server generation have both been runtime-validated against
 the September 2026 beta executables. The server build emits
 `Briefcase.DeceiveInc.Server.Sdk` and runs through the headless managed host;
-its distribution contains no ImGui or rendering binaries.
+its distribution contains no client UI or rendering binaries.
 
 ## Persisted IL emitter implementation
 

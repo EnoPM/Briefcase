@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Briefcase.ManagedHost;
 using Briefcase.ModApi;
@@ -7,6 +8,18 @@ namespace Briefcase.Core.Tests;
 
 public sealed class GameThreadServiceTests
 {
+    [Fact]
+    public void Prepared_Unreal_ABI_v16_layouts_match_the_public_header()
+    {
+        Assert.Equal((uint)16, BriefcaseAbi.UnrealApiVersion);
+        Assert.Equal((uint)7, BriefcaseAbi.PatchingApiVersion);
+        Assert.Equal(32, Marshal.SizeOf<NativePreparedParameter>());
+        Assert.Equal(32, Marshal.SizeOf<NativeOwnedValueBuffer>());
+        Assert.Equal(40, Marshal.SizeOf<NativeValueInput>());
+        Assert.Equal(280, Marshal.SizeOf<NativeUnrealApi>());
+        Assert.Equal(104, Marshal.SizeOf<NativePatchingApi>());
+    }
+
     [Fact]
     public void Native_game_thread_contract_has_the_expected_x64_layout()
     {
@@ -110,6 +123,56 @@ public sealed class GameThreadServiceTests
     }
 
     [Fact]
+    public void Driver_registration_retries_without_blocking_framework_startup()
+    {
+        var driver = new DeferredGameThreadDriver();
+        var info = new ConcurrentQueue<string>();
+        var errors = new ConcurrentQueue<string>();
+        using var service = new GameThreadService(
+            driver,
+            _ => null,
+            info.Enqueue,
+            errors.Enqueue,
+            TimeSpan.FromMilliseconds(5));
+        using var scope = service.CreateScope("test.mod");
+        var api = new GameThreadApi(scope);
+        var executed = false;
+        api.Post(() => executed = true);
+
+        Assert.True(SpinWait.SpinUntil(() => driver.Attempts >= 2, TimeSpan.FromSeconds(1)));
+        Assert.False(driver.IsStarted);
+        driver.AllowRegistration();
+        Assert.True(SpinWait.SpinUntil(() => driver.IsStarted, TimeSpan.FromSeconds(1)));
+
+        driver.Pump(default);
+
+        Assert.True(executed);
+        Assert.Contains(info, message => message.Contains(
+            "framework startup continues", StringComparison.Ordinal));
+        Assert.Contains(info, message => message.Contains(
+            "registered after Unreal", StringComparison.Ordinal));
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void Missing_native_driver_keeps_non_Unreal_services_available()
+    {
+        var errors = new List<string>();
+        using var service = new GameThreadService(
+            new UnavailableGameThreadDriver(),
+            _ => null,
+            _ => { },
+            errors.Add);
+
+        using var scope = service.CreateScope("ui.mod");
+        var api = new GameThreadApi(scope);
+
+        Assert.False(api.IsEngineReady);
+        Assert.Single(errors);
+        Assert.Contains("UI remains active", errors[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Timers_reject_invalid_durations()
     {
         var driver = new ManualGameThreadDriver();
@@ -144,7 +207,11 @@ internal sealed class ManualGameThreadDriver : IGameThreadDriver
     public bool IsGameThread => _pumping;
     public int RequestCount { get; private set; }
 
-    public void Start(Action<GameThreadPump> callback) => _callback = callback;
+    public bool TryStart(Action<GameThreadPump> callback)
+    {
+        _callback = callback;
+        return true;
+    }
     public void RequestPump() => RequestCount++;
 
     public void Pump(UnrealObjectHandle world)
@@ -155,4 +222,44 @@ internal sealed class ManualGameThreadDriver : IGameThreadDriver
     }
 
     public void Dispose() => _callback = null;
+}
+
+internal sealed class DeferredGameThreadDriver : IGameThreadDriver
+{
+    private Action<GameThreadPump>? _callback;
+    private int _attempts;
+    private int _allowRegistration;
+    private int _started;
+    private ulong _sequence;
+
+    public bool IsAvailable => true;
+    public bool IsGameThread => false;
+    public int Attempts => Volatile.Read(ref _attempts);
+    public bool IsStarted => Volatile.Read(ref _started) != 0;
+
+    public bool TryStart(Action<GameThreadPump> callback)
+    {
+        Interlocked.Increment(ref _attempts);
+        if (Volatile.Read(ref _allowRegistration) == 0) return false;
+        _callback = callback;
+        Volatile.Write(ref _started, 1);
+        return true;
+    }
+
+    public void AllowRegistration() => Volatile.Write(ref _allowRegistration, 1);
+    public void RequestPump() { }
+
+    public void Pump(UnrealObjectHandle world) =>
+        _callback!(new GameThreadPump(123, ++_sequence, 1.0f / 60.0f, world));
+
+    public void Dispose() => _callback = null;
+}
+
+internal sealed class UnavailableGameThreadDriver : IGameThreadDriver
+{
+    public bool IsAvailable => false;
+    public bool IsGameThread => false;
+    public bool TryStart(Action<GameThreadPump> callback) => false;
+    public void RequestPump() { }
+    public void Dispose() { }
 }

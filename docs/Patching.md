@@ -1,8 +1,9 @@
 # Attributed Unreal and native patches
 
 The generated SDK represents Unreal objects as C# classes. An Unreal patch
-intercepts a reflected call that crosses `UObject::ProcessEvent`:
-receives an ordinary typed object and targets an ordinary generated method:
+receives an ordinary typed object and targets an ordinary generated method.
+Briefcase observes reflected calls through `UObject::ProcessEvent` and, for
+void native UFunctions, through the function's `UFunction::Func` thunk:
 
 ```csharp
 [UnrealPostfixPatch(typeof(Spy), nameof(Spy.BP_OnCoverRatioUpdate))]
@@ -192,43 +193,54 @@ the generated target and complete patch signature. Patch declarations retain
 `MethodInfo` and `Type` objects from the collectible mod assembly, so the
 registry clears them before hot reload unloads that assembly.
 
-Generated method invocation is implemented by the versioned Unreal API. The native side
-resolves the object and owner handles, finds the named UFunction in reflected
-metadata, checks `UFunction::ParmsSize`, checks the ProcessEvent vtable entry,
-and only then invokes the function. UObject parameters cross the ABI as an
-index/serial handle; the native runtime resolves them immediately before ProcessEvent
-and converts object outputs back to handles. Game pointers are never exposed to
-C#.
+Generated method invocation is implemented by the versioned Unreal API. For safe,
+fixed-layout signatures, API v10 resolves the owner and UFunction and validates
+`UFunction::ParmsSize`, parameter offsets, kinds and flags once. Later calls use
+the opaque prepared token and a generated stack buffer. API v11 additionally
+initializes owning `USTRUCT` output storage through `FProperty`, copies its
+fields through BVC1, and destroys it after `ProcessEvent`. API v13 reconstructs
+owning inputs, containers and writable references in initialized native storage. The dynamic path
+keeps the same per-call lookup for other owning or runtime-described values. UObject
+parameters cross either ABI as index/serial handles; the native runtime resolves
+them immediately before `ProcessEvent` and converts object outputs back to
+handles. Game pointers are never exposed to C#.
 
-For now, call generated functions from Unreal callbacks, which already execute
-on the appropriate engine thread. A later game-thread scheduling API will make
-calls from arbitrary mod tasks equally simple.
+Generated invocations must run on Unreal's captured game thread. Direct calls
+from another thread fail with `WrongThread`; mods can use `GameThread.Invoke`,
+`InvokeAsync`, timers or tick callbacks to schedule the work.
 
-The framework includes the `UObject::ProcessEvent` dispatcher. It
-validates the target class and UFunction, installs one process-wide detour on
-the engine's `ProcessEvent` implementation, runs prefixes before the original
-and postfixes afterward, and waits for an in-flight callback before a
-hot-reloaded assembly can unload. The detour stays installed for the process
-lifetime and forwards directly when no registrations match an event.
+The framework includes coordinated `UObject::ProcessEvent` and bounded
+`UFunction::Func` dispatchers. It validates the target class and UFunction,
+deduplicates the native implementations present in cooked vtables, runs
+prefixes before the original and postfixes afterward, and waits for an
+in-flight callback before a hot-reloaded assembly can unload. `ReceiveBeginPlay`
+also uses the profiled UE 4.27 `AActor::BeginPlay` slot so native actors that
+bypass reflected dispatch still expose the expected lifecycle patch. Installed
+detours stay for the process lifetime and forward directly when no registration
+matches an event.
 
-Priority and ordering are deterministic across loaded mods. Primitive,
-generated value struct, UObject-handle, `FString` and `FText` patch parameters
-use type-specific copying; writable values are copied back before native control
-returns. Aggregate containers and delegate binding mutation remain read-only.
+Priority and ordering are deterministic across loaded mods. Primitive, fixed or managed generated value struct, UObject-handle, `FString`
+and `FText` patch parameters use type-specific copying. Managed owning structs
+are available as address-free values to callbacks. Patching API v7 accepts
+writable `ref` owning structs made from scalars, handles, `FName`, strings, text
+and nested admitted structs, including `TArray`, `TSet` and `TMap` fields, and
+reconstructs them through `FProperty` before native control returns. Direct
+container `ref` parameters use the same BVC1 path. Delegate bindings remain
+read-only.
 
 ## Generated value structs
 
-Snapshot schema 2 records `referencedTypePath` for every reflected
-`StructProperty`. The generator emits each `/Script/...` `ScriptStruct` as a
-blittable C# struct with `LayoutKind.Explicit`, Unreal field offsets, and the
-exact reflected native size. Unreal's reflected name `Geometry` consequently
-becomes the familiar C++-style C# name `FGeometry`. When a native struct has no
-reflected fields, the SDK still emits an opaque, correctly sized value type;
-mods can pass it through a patch without inventing its internal layout.
+Snapshot schema 3 records the recursive property tree and referenced type path
+for every `StructProperty`. Fixed structs are blittable C# structs with
+`LayoutKind.Explicit`, Unreal field offsets and the exact reflected native size;
+they implement `IUnrealStructValue`. Unreal's reflected name `Geometry`
+consequently becomes the familiar C++-style C# name `FGeometry`.
 
-Generated structs implement `IUnrealStructValue` explicitly. This lets the SDK
-copy them into a bounded parameter buffer with statically generated code and no
-dependency on dynamic marshalling metadata.
+Owning structs implement `IUnrealManagedStructValue`. Their generated fields
+use managed strings, text and immutable container snapshots, and each field is
+identified by `[UnrealStructField(name, offset)]`. Patch callbacks can inspect
+them without retaining native pointers. A `ref` owning struct uses BVC1 for
+write-back when every nested field belongs to the supported writable set.
 
 Harmony IL transpilers do not apply to Unreal's compiled C++ functions. Native
 prefixes and postfixes operate at the function boundary; instruction-level

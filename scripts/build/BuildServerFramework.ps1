@@ -160,25 +160,25 @@ try {
 
     $modOutput=Join-Path $root "managed\builtins\ServerAdminControl.Server\bin\$Configuration\net10.0"
     Copy-Item -LiteralPath (Join-Path $modOutput 'ServerAdminControl.Server.dll') -Destination $builtIns
-    $symbols=Join-Path $modOutput 'ServerAdminControl.Server.pdb'
-    if(Test-Path -LiteralPath $symbols) { Copy-Item -LiteralPath $symbols -Destination $builtIns }
     # Server mods are built and distributed independently from Briefcase Core.
     [IO.File]::WriteAllText(
         (Join-Path $framework 'loader.json'),
-        "{`n  `"schemaVersion`": 1,`n  `"sdkSnapshotFormat`": `"binary`"`n}`n",
+        "{`n  `"schemaVersion`": 1,`n  `"sdkSnapshotFormat`": `"binary`",`n  `"sdkSnapshotRefresh`": `"missing`"`n}`n",
         [Text.UTF8Encoding]::new($false))
 
+    Organize-BriefcaseFrameworkPackage $framework
+
     $forbidden=@(Get-ChildItem -LiteralPath $framework -File -Recurse | Where-Object {
-        $_.Name -match '^(ImGui|cimgui|Briefcase\.Rendering|Vortice\.|SharpGen\.)'
+        $_.Name -match '^(ImGui|cimgui|Briefcase\.Rendering|Briefcase\.ClientModApi|Briefcase\.AvaloniaUi|Briefcase\.AvaloniaMenu|Avalonia\.|SkiaSharp|Vortice\.|SharpGen\.)'
     })
     if($forbidden.Count -ne 0) {
-        throw "The server package contains rendering files: $($forbidden.Name -join ', ')"
+        throw "The server package contains client UI files: $($forbidden.Name -join ', ')"
     }
 
     Write-Host "[OK] Headless server package: $distribution"
     Write-Host "[OK] Generated server SDK: $generatedProps"
     Write-Host "[OK] Bundled .NET ${runtimeVersion}: $dotnetDistribution"
-    Write-Host '[OK] No ImGui, rendering, Vortice, or SharpGen binary is present.'
+    Write-Host '[OK] No client UI, Avalonia, rendering, or Skia binary is present.'
     exit 0
 } catch {
     Write-Host "[ERROR] $($_.Exception.Message)"

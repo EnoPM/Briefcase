@@ -30,6 +30,48 @@ internal sealed class CommunityBalanceStore
 
     public string ProfilePath => _profilePath;
 
+    /// <summary>
+    /// Loads the profile that the dedicated server will consume on its next
+    /// start. This makes remote editing available before any player connects
+    /// and triggers the vanilla profile synchronization RPC.
+    /// </summary>
+    public BalanceProfileEnvelope? LoadPersistedProfile()
+    {
+        if (!File.Exists(_profilePath)) return null;
+
+        var file = new FileInfo(_profilePath);
+        if (file.Length is <= 0 or > MaximumProfileBytes)
+            throw new InvalidDataException(
+                $"The persisted profile must contain between 1 and " +
+                $"{MaximumProfileBytes:N0} bytes.");
+
+        var utf8 = File.ReadAllBytes(_profilePath);
+        if (utf8.Length is <= 0 or > MaximumProfileBytes)
+            throw new InvalidDataException(
+                "The persisted profile changed to an invalid size while it was read.");
+
+        var json = new UTF8Encoding(false, true).GetString(utf8);
+        using (JsonDocument.Parse(utf8)) { }
+
+        var compressed = Compress(utf8);
+        var contentHash = Convert.ToHexString(SHA256.HashData(utf8));
+        const string gameHash = "pending-server-restart";
+        var profile = new StoredProfile(
+            compressed,
+            utf8.Length,
+            gameHash,
+            new BalanceProfileEnvelope(
+                json, contentHash, gameHash,
+                compressed.Length, utf8.Length, true));
+
+        lock (_gate)
+        {
+            _persisted = profile;
+            _revision++;
+            return profile.Envelope;
+        }
+    }
+
     public long Revision
     {
         get { lock (_gate) return _revision; }
@@ -78,9 +120,9 @@ internal sealed class CommunityBalanceStore
         // or the zlib payload. Reusing the old value with edited JSON makes the
         // receiving client reject synchronization and leave the server.
         //
-        // Briefcase asks the dedicated server to reload this file on the game
-        // thread. Deceive Inc. then calculates its own valid transport hash.
-        const string effectiveGameHash = "pending-vanilla-reload";
+        // Deceive Inc. reloads this file during the next dedicated-server
+        // startup and calculates its own valid transport hash.
+        const string effectiveGameHash = "pending-server-restart";
         var profile = new StoredProfile(
             compressed,
             utf8.Length,
@@ -97,7 +139,7 @@ internal sealed class CommunityBalanceStore
             PersistAtomically(json);
             _persisted = profile;
             _revision++;
-            _pendingReloadRevision = _revision;
+            _pendingReloadRevision = null;
             _pendingSynchronizationRevision = null;
             return profile.Envelope;
         }

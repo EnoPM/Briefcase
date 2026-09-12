@@ -12,12 +12,12 @@
     <InformationalVersion>$(BriefcaseVersion)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
-    <BriefcaseInstalledClientSdkProps>D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase\Core\Sdk\Generated\Client\Current.props</BriefcaseInstalledClientSdkProps>
+    <BriefcaseInstalledClientSdkProps Condition="'$(BriefcaseInstalledClientSdkProps)' == '' And '$(BRIEFCASE_CLIENT_GAME_DIR)' != ''">$(BRIEFCASE_CLIENT_GAME_DIR)\Briefcase\Core\Sdk\Generated\Client\Current.props</BriefcaseInstalledClientSdkProps>
     <BriefcaseRepositoryClientSdkProps>$(MSBuildThisFileDirectory)artifacts\build-sdk\Core\Sdk\Generated\Client\Current.props</BriefcaseRepositoryClientSdkProps>
     <BriefcaseGeneratedClientProps Condition="'$(BriefcaseGeneratedClientProps)' == '' And Exists('$(BriefcaseInstalledClientSdkProps)')">$(BriefcaseInstalledClientSdkProps)</BriefcaseGeneratedClientProps>
     <BriefcaseGeneratedClientProps Condition="'$(BriefcaseGeneratedClientProps)' == '' And Exists('$(BriefcaseRepositoryClientSdkProps)')">$(BriefcaseRepositoryClientSdkProps)</BriefcaseGeneratedClientProps>
 
-    <BriefcaseInstalledServerSdkProps>D:\GameServers\steamcmd\steamapps\common\Deceive Inc. Dedicated Server\DeceiveInc\Binaries\Win64\Briefcase\Core\Sdk\Generated\Server\Current.props</BriefcaseInstalledServerSdkProps>
+    <BriefcaseInstalledServerSdkProps Condition="'$(BriefcaseInstalledServerSdkProps)' == '' And '$(BRIEFCASE_SERVER_GAME_DIR)' != ''">$(BRIEFCASE_SERVER_GAME_DIR)\Briefcase\Core\Sdk\Generated\Server\Current.props</BriefcaseInstalledServerSdkProps>
     <BriefcaseRepositoryServerSdkProps>$(MSBuildThisFileDirectory)artifacts\server-sdk\Core\Sdk\Generated\Server\Current.props</BriefcaseRepositoryServerSdkProps>
     <BriefcaseGeneratedServerProps Condition="'$(BriefcaseGeneratedServerProps)' == '' And Exists('$(BriefcaseInstalledServerSdkProps)')">$(BriefcaseInstalledServerSdkProps)</BriefcaseGeneratedServerProps>
     <BriefcaseGeneratedServerProps Condition="'$(BriefcaseGeneratedServerProps)' == '' And Exists('$(BriefcaseRepositoryServerSdkProps)')">$(BriefcaseRepositoryServerSdkProps)</BriefcaseGeneratedServerProps>

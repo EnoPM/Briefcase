@@ -101,10 +101,10 @@ internal sealed class ServerAdminServer
             request.ProfileJson, request.GameProfileHash, request.ExpectedRevision);
         _info(
             $"Community balance profile saved to {_store.ProfilePath} " +
-            $"({profile.UncompressedBytes:N0} bytes). Live reload queued on the game thread.");
+            $"({profile.UncompressedBytes:N0} bytes). Restart required.");
         return Success(
             request,
-            "Profile saved. Live vanilla reload and synchronization queued.",
+            "Profile saved. Restart the server to apply it.",
             profile);
     }
 

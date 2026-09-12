@@ -53,6 +53,29 @@ public sealed class ServerAdminControlServerMod : BriefcaseMod
     {
         _context = context;
         _active = this;
+        try
+        {
+            var persisted = _store.LoadPersistedProfile();
+            if (persisted is null)
+            {
+                context.Warning(
+                    $"No community balance profile exists at {_store.ProfilePath}. " +
+                    "The editor will become available after the game creates one.");
+            }
+            else
+            {
+                context.Info(
+                    $"Loaded community balance profile from {_store.ProfilePath} " +
+                    $"({persisted.UncompressedBytes:N0} bytes).");
+            }
+        }
+        catch (Exception exception)
+        {
+            context.Warning(
+                $"Could not load the persisted community balance profile: " +
+                exception.Message);
+        }
+        context.Info("ServerAdminControl.Server: binding endpoint configuration.");
         _endpointEnabled = context.Configuration.Bind(
             "Unified endpoint", "Enabled", true,
             "Starts the Briefcase TCP endpoint for players and local administration.");
@@ -60,12 +83,13 @@ public sealed class ServerAdminControlServerMod : BriefcaseMod
             "Unified endpoint", "Listen address", "0.0.0.0",
             "Network interface used by the public handshake channel.");
         _listenPort = context.Configuration.Bind(
-            "Unified endpoint", "Port", 50000,
-            "TCP may reuse the numeric port owned by Unreal over UDP.",
+            "Unified endpoint", "Port", 47000,
+            "Dedicated TCP port for administration and mod handshakes. Keep it separate from the Unreal game port.",
             new ConfigurationRange<int>(1024, 65535));
         _endpointEnabled.ValueChanged += EndpointSettingChanged;
         _listenAddress.ValueChanged += EndpointSettingChanged;
         _listenPort.ValueChanged += EndpointSettingChanged;
+        context.Info("ServerAdminControl.Server: starting unified endpoint.");
         RestartEndpoint();
         context.Info("ServerAdminControl.Server loaded; unified endpoint is ready.");
     }
@@ -94,6 +118,7 @@ public sealed class ServerAdminControlServerMod : BriefcaseMod
         if (_endpointEnabled?.Value != true) return;
         try
         {
+            _context.Info("ServerAdminControl.Server: creating handshake service.");
             _handshakeServer = new ModHandshakeServer(_context, Info);
             var administration = new ServerAdminServer(
                 _store,
@@ -102,12 +127,15 @@ public sealed class ServerAdminControlServerMod : BriefcaseMod
                 _players,
                 () => _handshakeServer?.SnapshotClients() ?? [],
                 _context.Info);
+            _context.Info("ServerAdminControl.Server: reading server configuration.");
+            var administrationSecret = _serverConfiguration.Snapshot().AdminPassword;
+            _context.Info("ServerAdminControl.Server: creating TCP listener.");
             _serverEndpoint = new BriefcaseServerEndpoint(
                 administration,
                 _handshakeServer,
-                _serverConfiguration.Snapshot().AdminPassword,
+                administrationSecret,
                 _listenAddress?.Value ?? "0.0.0.0",
-                _listenPort?.Value ?? 50000,
+                _listenPort?.Value ?? 47000,
                 _context.Info,
                 _context.Warning);
         }

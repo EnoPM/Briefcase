@@ -118,6 +118,23 @@ public sealed class ConfigurationRegistryTests
         Assert.True(document.RootElement.TryGetProperty("Mods", out _));
     }
 
+    [Fact]
+    public void Avalonia_window_placement_uses_the_existing_settings_document()
+    {
+        using var directory = new TemporaryDirectory();
+        var settingsPath = Path.Combine(directory.Path, "settings.json");
+
+        using (var registry = CreateRegistry(settingsPath, []))
+            registry.RememberAvaloniaPlacement(
+                new Briefcase.Rendering.AvaloniaWindowPlacement(120, 75, 910, 640));
+
+        using var restored = CreateRegistry(settingsPath, []);
+        var placement = restored.GetAvaloniaPlacement();
+        Assert.Equal(120, placement.X);
+        Assert.Equal(75, placement.Y);
+        Assert.Equal(910, placement.Width);
+        Assert.Equal(640, placement.Height);
+    }
     private static ConfigurationRegistry CreateRegistry(
         string path, List<string> messages) =>
         new(path, _ => { }, messages.Add, messages.Add);

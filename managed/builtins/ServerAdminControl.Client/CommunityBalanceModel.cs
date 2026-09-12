@@ -147,7 +147,7 @@ internal sealed class BalanceValue(
 internal static class CommunityBalanceState
 {
     private static CommunityBalanceSnapshot? _snapshot;
-    private static string _status = "Waiting for a profile from a community server...";
+    private static string _status = "Waiting for a profile from the Briefcase server...";
 
     public static CommunityBalanceSnapshot? Snapshot => Volatile.Read(ref _snapshot);
     public static string Status => Volatile.Read(ref _status);
@@ -167,7 +167,7 @@ internal static class CommunityBalanceState
     public static void Reset()
     {
         Volatile.Write(ref _snapshot, null);
-        Volatile.Write(ref _status, "Waiting for a profile from a community server...");
+        Volatile.Write(ref _status, "Waiting for a profile from the Briefcase server...");
     }
 }
 

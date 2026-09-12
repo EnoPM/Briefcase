@@ -59,6 +59,12 @@ public sealed class UnrealTypeSnapshot
     [JsonPropertyName("underlyingType")] public UnrealTypeSnapshot? UnderlyingType { get; init; }
     [JsonPropertyName("booleanLayout")] public BooleanLayoutSnapshot? BooleanLayout { get; init; }
 
+    /// <summary>
+    /// Complete UFunction signature for a reflected delegate property (schema 4+).
+    /// Older snapshots leave this null and remain readable.
+    /// </summary>
+    [JsonPropertyName("delegateSignature")] public FunctionSnapshot? DelegateSignature { get; init; }
+
     public static UnrealTypeSnapshot FromLegacy(PropertySnapshot property) => new()
     {
         UnrealType = string.IsNullOrEmpty(property.UnrealType)

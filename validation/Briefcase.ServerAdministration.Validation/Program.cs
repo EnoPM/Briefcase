@@ -9,6 +9,23 @@ try
     var configuration = Path.Combine(root, "TripwireServer.ini");
     var framework = Path.Combine(root, "Briefcase");
     Directory.CreateDirectory(root);
+
+    var persistedProfilePath = Path.Combine(root, "CommunityBalanceProfile.json");
+    const string persistedProfileJson =
+        """{"format":"DeceiveCommunityBalanceProfile","schemaVersion":1,"overrides":[]}""";
+    File.WriteAllText(persistedProfilePath, persistedProfileJson);
+    var profileStore = new CommunityBalanceStore(persistedProfilePath);
+    var persistedProfile = profileStore.LoadPersistedProfile() ??
+        throw new InvalidOperationException(
+            "The persisted community profile was not loaded before a player connected.");
+    Assert(persistedProfile.Json == persistedProfileJson,
+        "The persisted community profile JSON changed while loading.");
+    Assert(persistedProfile.UncompressedBytes ==
+           System.Text.Encoding.UTF8.GetByteCount(persistedProfileJson),
+        "The persisted community profile size is incorrect.");
+    Assert(profileStore.Revision == 1,
+        "Loading the persisted profile did not create the initial server revision.");
+
     File.WriteAllText(configuration, """
         ; preserved comment
         [/Script/DeceiveInc.TripwireServerSettings]
@@ -45,7 +62,7 @@ try
         FillWithBots = true,
         BotsDifficulty = "Difficult",
         BotsAmount = 7,
-        MaxPlayers = 8,
+        MaxPlayers = 12,
         CivilianHeatPercent = 20,
         StaffHeatPercent = 21,
         GuardHeatPercent = 22,
@@ -75,6 +92,16 @@ try
         "Crossplay or UPnP was not saved.");
     Assert(text.Contains("HeatDelayToDecay=1.25") && text.Contains("HeatDecayRate=1.5"),
         "Heat settings were not written with invariant decimal formatting.");
+    Assert(text.Contains("MaxPlayers=12"),
+        "The raised 12-player Solo limit was not persisted.");
+
+    var duoWithTwelvePlayers = service.Update(updated with
+    {
+        GameMode = "Duo",
+        MaxPlayers = 12
+    });
+    Assert(duoWithTwelvePlayers.MaxPlayers == 12,
+        "The raised 12-player Duo limit was rejected.");
 
     try
     {
@@ -85,14 +112,14 @@ try
         exception.Message.Contains("line break", StringComparison.OrdinalIgnoreCase)) { }
 
     AssertRejected(
-        () => service.Update(updated with { MaxPlayers = 9 }),
-        "Maximum players for Solo");
+        () => service.Update(updated with { MaxPlayers = 13 }),
+        "Maximum players");
     AssertRejected(
-        () => service.Update(updated with { GameMode = "Duo", MaxPlayers = 11 }),
-        "Maximum players for Duo");
+        () => service.Update(updated with { GameMode = "Duo", MaxPlayers = 13 }),
+        "Maximum players");
     AssertRejected(
         () => service.Update(updated with { GameMode = "Trio", MaxPlayers = 13 }),
-        "Maximum players for Trio");
+        "Maximum players");
     AssertRejected(
         () => service.Update(updated with { BotsAmount = 9 }),
         "Bot amount");

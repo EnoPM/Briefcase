@@ -17,8 +17,9 @@ try {
     New-Item -ItemType Directory -Path $serverCore,$serverMods -Force | Out-Null
     $output=Join-Path $root "managed\builtins\ServerAdminControl.Server\bin\$Configuration\net10.0"
     Copy-Item -LiteralPath (Join-Path $output 'ServerAdminControl.Server.dll') -Destination $serverCore -Force
-    $symbols=Join-Path $output 'ServerAdminControl.Server.pdb'
-    if(Test-Path -LiteralPath $symbols) { Copy-Item -LiteralPath $symbols -Destination $serverCore -Force }
+    Get-ChildItem -LiteralPath $serverFramework -Filter '*.pdb' -File -Recurse |
+        Remove-Item -Force
+
     foreach($legacyName in @('CommunityBalancing.Server.dll','CommunityBalancing.Server.pdb','ServerAdminControl.Server.dll','ServerAdminControl.Server.pdb')) {
         $legacy=Join-Path $serverMods $legacyName
         if(Test-Path -LiteralPath $legacy) { Remove-Item -LiteralPath $legacy -Force }

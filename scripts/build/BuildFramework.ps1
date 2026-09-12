@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    [string]$GameWin64='')
 
 . (Join-Path $PSScriptRoot '..\Common.ps1')
 
@@ -20,16 +22,20 @@ function Build-ManagedProject(
 
 function Copy-BuiltIn([string]$Root, [string]$ProjectName, [string]$Destination) {
     $output=Join-Path $Root "managed\builtins\$ProjectName\bin\$Configuration\net10.0"
-    foreach($extension in @('dll','pdb')) {
-        $source=Join-Path $output "$ProjectName.$extension"
-        if(Test-Path -LiteralPath $source) {
-            Copy-Item -LiteralPath $source -Destination $Destination -Force
-        }
-    }
+    $source=Join-Path $output "$ProjectName.dll"
+    Copy-Item -LiteralPath $source -Destination $Destination -Force
 }
 
 try {
     $root=Get-ModRoot
+    if([string]::IsNullOrWhiteSpace($GameWin64)) {
+        $GameWin64=$env:BRIEFCASE_CLIENT_GAME_DIR
+    }
+    $gameDirectory=if([string]::IsNullOrWhiteSpace($GameWin64)) {
+        $null
+    } else {
+        [IO.Path]::GetFullPath($GameWin64)
+    }
     $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $install=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
     if ($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }
@@ -61,7 +67,34 @@ try {
     Write-Host "Publishing Briefcase managed host | $Configuration | framework-dependent"
     $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
         'publish',$managedHostProject,'-c',$Configuration,'--self-contained','false',
-        '--output',$managedHostPublish)
+        '--runtime','win-x64','--output',$managedHostPublish)
+    if($result -ne 0){ exit $result }
+
+    $avaloniaProject=Join-Path $root 'managed\Briefcase.AvaloniaUi\Briefcase.AvaloniaUi.csproj'
+    $avaloniaMenuProject=Join-Path $root 'managed\Briefcase.AvaloniaMenu\Briefcase.AvaloniaMenu.csproj'
+    $avaloniaPublish=Join-Path $root 'artifacts\publish\AvaloniaUi'
+    if(Test-Path -LiteralPath $avaloniaPublish) {
+        $resolvedAvalonia=[IO.Path]::GetFullPath($avaloniaPublish)
+        $artifactPrefix=[IO.Path]::GetFullPath((Join-Path $root 'artifacts')) +
+            [IO.Path]::DirectorySeparatorChar
+        if(-not $resolvedAvalonia.StartsWith($artifactPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe Avalonia publish path: $resolvedAvalonia"
+        }
+        Remove-Item -LiteralPath $resolvedAvalonia -Recurse -Force
+    }
+    Write-Host "Building Briefcase Avalonia UI | $Configuration"
+    # This is a component assembly loaded into Briefcase's existing .NET host.
+    # A RID publish would also republish ManagedHost's executable tooling and
+    # can produce duplicate apphost artifacts. A clean build output contains
+    # the component deps file and all package assets required by its ALC.
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        'build',$avaloniaProject,'-c',$Configuration,'--no-incremental',
+        '--output',$avaloniaPublish)
+    if($result -ne 0){ exit $result }
+    Write-Host "Building lazy Briefcase Avalonia menu | $Configuration"
+    $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
+        'build',$avaloniaMenuProject,'-c',$Configuration,'--no-incremental',
+        '--output',$avaloniaPublish)
     if($result -ne 0){ exit $result }
 
     # Compile repository code against the reviewed, complete snapshot for this
@@ -69,13 +102,12 @@ try {
     # bounded and therefore omit types that were not loaded during that launch;
     # it is only a fallback when the repository snapshot is unavailable.
     $build='6A96564B-06283000'
-    $gameDirectory='D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64'
     $snapshotSource=Join-Path $root "sdk\snapshots\DeceiveInc.Client.$build.json"
-    if(-not (Test-Path -LiteralPath $snapshotSource)) {
+    if(-not (Test-Path -LiteralPath $snapshotSource) -and $null -ne $gameDirectory) {
         $snapshotSource=Join-Path $gameDirectory "Briefcase\Core\Sdk\Metadata\DeceiveInc.Client.$build.json"
     }
     if(-not (Test-Path -LiteralPath $snapshotSource)) {
-        throw "No client SDK snapshot is available for build $build."
+        throw "No client SDK snapshot is available for build $build. Provide -GameWin64 or BRIEFCASE_CLIENT_GAME_DIR to use an installed snapshot."
     }
     $buildCore=Join-Path $root 'artifacts\build-sdk\Core'
     if(Test-Path -LiteralPath $buildCore) {
@@ -101,6 +133,7 @@ try {
     }
 
     foreach($projectName in @(
+        'Briefcase.EventSample',
         'Briefcase.HelloSample',
         'Briefcase.HotReloadSample')) {
         Build-ManagedProject $root `
@@ -117,14 +150,18 @@ try {
         'Briefcase Core server administration (client)' `
         $generatedSdkProps
 
-    $gameExe='D:\SteamLibrary\steamapps\common\DeceiveInc\DeceiveInc\Binaries\Win64\DeceiveInc-Win64-Shipping.exe'
-    if(Test-Path -LiteralPath $gameExe) {
+    $gameExe=if($null -eq $gameDirectory) {
+        $null
+    } else {
+        Join-Path $gameDirectory 'DeceiveInc-Win64-Shipping.exe'
+    }
+    if($null -ne $gameExe -and (Test-Path -LiteralPath $gameExe)) {
         $bytes=[IO.File]::ReadAllBytes($gameExe)
         $pe=[BitConverter]::ToInt32($bytes,0x3C)
         $timestamp=[BitConverter]::ToUInt32($bytes,$pe+8)
         $imageSize=[BitConverter]::ToUInt32($bytes,$pe+0x50)
         if($timestamp -ne 0x6A96564B -or $imageSize -ne 0x06283000){
-            throw 'Installed game no longer matches RuntimeProfile.h.'
+            throw "Game executable does not match RuntimeProfile.h: $gameExe"
         }
         Write-Host '[OK] Installed executable matches the Briefcase runtime profile.'
     }
@@ -140,10 +177,11 @@ try {
     $frameworkDistribution=Join-Path $distribution 'Briefcase'
     $coreDistribution=Join-Path $frameworkDistribution 'Core'
     $nativeDistribution=Join-Path $coreDistribution 'Native'
+    $avaloniaDistribution=Join-Path $coreDistribution 'Ui\Avalonia'
     $builtInsDistribution=Join-Path $coreDistribution 'BuiltIns'
     $dotNetDistribution=Join-Path $coreDistribution 'DotNet'
     $modsDistribution=Join-Path $frameworkDistribution 'Mods'
-    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$builtInsDistribution,$modsDistribution -Force | Out-Null
+    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$avaloniaDistribution,$builtInsDistribution,$modsDistribution -Force | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $root 'VERSION') `
         -Destination (Join-Path $frameworkDistribution 'VERSION') -Force
@@ -154,6 +192,39 @@ try {
         -Destination (Join-Path $nativeDistribution 'Briefcase.UnrealRuntime.dll') -Force
 
     Copy-Item -Path (Join-Path $managedHostPublish '*') -Destination $coreDistribution -Recurse -Force
+    Copy-Item -Path (Join-Path $avaloniaPublish '*') -Destination $avaloniaDistribution -Recurse -Force
+    # The Avalonia publish contains project-reference copies. Core already owns
+    # those assemblies; the custom load context deliberately shares them.
+    @(
+        'Briefcase.ManagedHost.dll',
+        'Briefcase.ManagedHost.pdb',
+        'Briefcase.ModApi.dll',
+        'Briefcase.ModApi.pdb',
+        'Briefcase.ClientModApi.dll',
+        'Briefcase.ClientModApi.pdb',
+        'Briefcase.Rendering.dll',
+        'Briefcase.Rendering.pdb',
+        'Briefcase.SdkEmitter.dll',
+        'Briefcase.SdkEmitter.pdb',
+        'Briefcase.SdkSnapshots.dll',
+        'Briefcase.SdkSnapshots.pdb'
+    ) | ForEach-Object {
+        $sharedCopy=Join-Path $avaloniaDistribution $_
+        if(Test-Path -LiteralPath $sharedCopy) { Remove-Item -LiteralPath $sharedCopy -Force }
+    }
+    # Native package symbols are useful when developing Avalonia itself, but
+    # add tens of megabytes and are not useful for diagnosing Briefcase code.
+    Get-ChildItem -LiteralPath $coreDistribution -Filter '*.pdb' -File -Recurse |
+        Where-Object { $_.Name -like 'lib*Sharp.pdb' -or $_.DirectoryName -like '*\runtimes\*' } |
+        Remove-Item -Force
+    # The package is Windows x64-only. Keep the component deps metadata,
+    # but omit native assets for platforms that this loader cannot start on.
+    $runtimeAssets=Join-Path $avaloniaDistribution 'runtimes'
+    if(Test-Path -LiteralPath $runtimeAssets) {
+        Get-ChildItem -LiteralPath $runtimeAssets -Directory |
+            Where-Object { $_.Name -ne 'win-x64' } |
+            Remove-Item -Recurse -Force
+    }
     # Briefcase.SdkEmitter is a library at runtime. Its CLI companions are used
     # only by repository validation and do not belong in the game package.
     @(
@@ -193,13 +264,22 @@ try {
     $loaderConfiguration = @'
 {
   "schemaVersion": 1,
-  "sdkSnapshotFormat": "binary"
+  "sdkSnapshotFormat": "binary",
+  "sdkSnapshotRefresh": "missing",
+  "avaloniaMenuLifetime": "cached",
+  "avaloniaMenuMargins": {
+    "horizontalPercent": 12.5,
+    "verticalPercent": 8.0
+  },
+  "gameWindowChrome": false
 }
 '@
     [IO.File]::WriteAllText(
         (Join-Path $frameworkDistribution 'loader.json'),
         $loaderConfiguration,
         [Text.UTF8Encoding]::new($false))
+
+    Organize-BriefcaseFrameworkPackage $frameworkDistribution
 
     Write-Host "[OK] Briefcase package: $distribution"
     Write-Host "[OK] Bundled .NET ${runtimeVersion}: $dotNetDistribution"

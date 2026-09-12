@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Briefcase.ModApi\Briefcase.ModApi.csproj" Private="false" />
+    <ProjectReference Include="..\..\Briefcase.ClientModApi\Briefcase.ClientModApi.csproj" Private="false" />
     <Compile Include="..\CommunityServerConnection.cs"
              Link="ClientSupport\CommunityServerConnection.cs" />
   </ItemGroup>

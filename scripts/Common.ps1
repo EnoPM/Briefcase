@@ -24,5 +24,52 @@ function Invoke-ModNative {
     }
     finally { Pop-Location }
 }
+function Organize-BriefcaseFrameworkPackage {
+    param([Parameter(Mandatory=$true)][string]$FrameworkDirectory)
 
+    $framework=[IO.Path]::GetFullPath($FrameworkDirectory)
+    $core=[IO.Path]::GetFullPath((Join-Path $framework 'Core'))
+    if(-not (Test-Path -LiteralPath $core -PathType Container)) {
+        throw "Briefcase Core directory is missing: $core"
+    }
 
+    $thirdParty=[IO.Path]::GetFullPath((Join-Path $core 'ThirdPartyLibraries'))
+    New-Item -ItemType Directory -Path $thirdParty -Force | Out-Null
+    $dotNetPrefix=[IO.Path]::GetFullPath((Join-Path $core 'DotNet')).TrimEnd('\') + '\'
+    $thirdPartyPrefix=$thirdParty.TrimEnd('\') + '\'
+
+    $libraries=@(Get-ChildItem -LiteralPath $core -Filter '*.dll' -File -Recurse | Where-Object {
+        $full=[IO.Path]::GetFullPath($_.FullName)
+        -not $full.StartsWith($dotNetPrefix,[StringComparison]::OrdinalIgnoreCase) -and
+        -not $full.StartsWith($thirdPartyPrefix,[StringComparison]::OrdinalIgnoreCase) -and
+        $_.Name -notmatch '^(Briefcase\.|ServerAdminControl\.)'
+    })
+    foreach($library in $libraries) {
+        $destination=Join-Path $thirdParty $library.Name
+        if(Test-Path -LiteralPath $destination) {
+            $sourceHash=(Get-FileHash -LiteralPath $library.FullName -Algorithm SHA256).Hash
+            $destinationHash=(Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+            if($sourceHash -ne $destinationHash) {
+                throw "Third-party library name collision: $($library.Name)"
+            }
+            Remove-Item -LiteralPath $library.FullName -Force
+        }
+        else {
+            Move-Item -LiteralPath $library.FullName -Destination $destination
+        }
+    }
+
+    # Installed packages never contain symbols. Repository build directories
+    # retain their PDB files for local debugging.
+    Get-ChildItem -LiteralPath $framework -Filter '*.pdb' -File -Recurse |
+        Remove-Item -Force
+
+    # Moving native runtime assets can leave empty NuGet runtime directories.
+    Get-ChildItem -LiteralPath $core -Directory -Recurse |
+        Sort-Object { $_.FullName.Length } -Descending |
+        Where-Object {
+            $_.FullName -ne $thirdParty -and
+            @(Get-ChildItem -LiteralPath $_.FullName -Force).Count -eq 0
+        } |
+        Remove-Item -Force
+}

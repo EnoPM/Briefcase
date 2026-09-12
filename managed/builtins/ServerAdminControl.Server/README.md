@@ -2,11 +2,11 @@
 
 This headless Briefcase Core built-in captures the community balance profile at
 the `Client_ReceiveCommunityBalanceProfile` RPC boundary. It exposes managed
-copies through a length-prefixed JSON protocol on `0.0.0.0:50000/TCP` by
+copies through a length-prefixed JSON protocol on `0.0.0.0:47000/TCP` by
 default. Unreal continues to own `50000/UDP`. A channel discriminator routes
 handshake and administration frames through the single Briefcase listener.
 
-Protocol version 6 supports typed server configuration and restart operations,
+Protocol version 7 supports typed server configuration and restart operations,
 the balancing profile operations, plus `get-mods`,
 `refresh-mods`, `set-mod-enabled`, `load-mod`, `reload-mod` and `unload-mod`.
 A staged profile is sent after the game's normal reply the next time a client

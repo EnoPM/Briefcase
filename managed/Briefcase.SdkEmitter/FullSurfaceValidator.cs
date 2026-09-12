@@ -58,12 +58,23 @@ internal static class FullSurfaceValidator
 
     private static void ValidateStruct(PlannedType plan, Type expected, Type actual)
     {
-        if (!actual.IsValueType || !actual.IsExplicitLayout ||
-            !typeof(IUnrealStructValue).IsAssignableFrom(actual))
+        if (!actual.IsValueType || !expected.IsValueType)
             throw new InvalidDataException($"{plan.FullName} has an invalid struct contract.");
-        if (actual.StructLayoutAttribute?.Size != plan.Snapshot.Size ||
-            expected.StructLayoutAttribute?.Size != plan.Snapshot.Size)
-            throw new InvalidDataException($"{plan.FullName} has an invalid native size.");
+        if (plan.UsesManagedStructRepresentation)
+        {
+            if (!typeof(IUnrealManagedStructValue).IsAssignableFrom(actual) ||
+                !typeof(IUnrealManagedStructValue).IsAssignableFrom(expected))
+                throw new InvalidDataException($"{plan.FullName} has an invalid managed struct contract.");
+        }
+        else
+        {
+            if (!actual.IsExplicitLayout || !expected.IsExplicitLayout ||
+                !typeof(IUnrealStructValue).IsAssignableFrom(actual) ||
+                !typeof(IUnrealStructValue).IsAssignableFrom(expected) ||
+                actual.StructLayoutAttribute?.Size != plan.Snapshot.Size ||
+                expected.StructLayoutAttribute?.Size != plan.Snapshot.Size)
+                throw new InvalidDataException($"{plan.FullName} has an invalid native struct contract.");
+        }
         CompareConstant(expected, actual, "UnrealPath");
         CompareConstant(expected, actual, "NativeSize");
         ValidateMetadata(plan, expected, actual);
@@ -76,17 +87,31 @@ internal static class FullSurfaceValidator
             var actualField = actual.GetField(
                 property.MemberName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
                 ?? throw new MissingFieldException(actual.FullName, property.MemberName);
-            if (TypeIdentity(expectedField.FieldType) != TypeIdentity(actualField.FieldType) ||
-                Marshal.OffsetOf(expected, property.MemberName) !=
-                Marshal.OffsetOf(actual, property.MemberName))
+            if (TypeIdentity(expectedField.FieldType) != TypeIdentity(actualField.FieldType))
                 throw new InvalidDataException(
                     $"{plan.FullName}.{property.MemberName} differs from the reference SDK.");
+            if (plan.UsesManagedStructRepresentation)
+            {
+                var expectedIdentity = expectedField.GetCustomAttribute<UnrealStructFieldAttribute>();
+                var actualIdentity = actualField.GetCustomAttribute<UnrealStructFieldAttribute>();
+                if (expectedIdentity?.Name != actualIdentity?.Name ||
+                    expectedIdentity?.Offset != actualIdentity?.Offset)
+                    throw new InvalidDataException(
+                        $"{plan.FullName}.{property.MemberName} has a different Unreal field identity.");
+            }
+            else if (Marshal.OffsetOf(expected, property.MemberName) !=
+                     Marshal.OffsetOf(actual, property.MemberName))
+                throw new InvalidDataException(
+                    $"{plan.FullName}.{property.MemberName} has a different native offset.");
         }
 
-        var bytes = new byte[plan.Snapshot.Size];
-        ((IUnrealStructValue)Activator.CreateInstance(actual)!).WriteTo(bytes);
-        if (bytes.Any(value => value != 0))
-            throw new InvalidDataException($"{plan.FullName}.WriteTo corrupted a default value.");
+        if (!plan.UsesManagedStructRepresentation)
+        {
+            var bytes = new byte[plan.Snapshot.Size];
+            ((IUnrealStructValue)Activator.CreateInstance(actual)!).WriteTo(bytes);
+            if (bytes.Any(value => value != 0))
+                throw new InvalidDataException($"{plan.FullName}.WriteTo corrupted a default value.");
+        }
     }
 
     private static void ValidateClass(PlannedType plan, Type expected, Type actual)
@@ -115,10 +140,23 @@ internal static class FullSurfaceValidator
         {
             CompareProperty(expected, actual, property.MemberName);
             CompareProperty(expectedProperties, actualProperties, property.MemberName);
+            var expectedDescriptor =
+                expectedProperties.GetProperty(property.MemberName)!.GetValue(null)!;
+            var actualDescriptor =
+                actualProperties.GetProperty(property.MemberName)!.GetValue(null)!;
             CompareDescriptorValue(
-                expectedProperties.GetProperty(property.MemberName)!.GetValue(null)!,
-                actualProperties.GetProperty(property.MemberName)!.GetValue(null)!,
+                expectedDescriptor,
+                actualDescriptor,
                 ["OwnerPath", "Name", "Offset", "Size"]);
+            var expectedSignature = expectedDescriptor.GetType()
+                .GetProperty("DelegateSignature")!.GetValue(expectedDescriptor) as UnrealFunction;
+            var actualSignature = actualDescriptor.GetType()
+                .GetProperty("DelegateSignature")!.GetValue(actualDescriptor) as UnrealFunction;
+            if ((expectedSignature is null) != (actualSignature is null))
+                throw new InvalidDataException(
+                    $"{plan.FullName}.{property.MemberName} has a different delegate signature.");
+            if (expectedSignature is not null)
+                CompareFunctionDescriptor(expectedSignature, actualSignature!);
         }
 
         var expectedFunctions = expected.GetNestedType("Functions", BindingFlags.Public)
@@ -293,7 +331,8 @@ internal static class FullSurfaceValidator
             !expected.GetParameters().Select(parameter => parameter.Name)
                 .SequenceEqual(actual.GetParameters().Select(parameter => parameter.Name)))
             throw new InvalidDataException(
-                $"{actualOwner.FullName}.{function.MemberName} differs from the reference SDK.");
+                $"{actualOwner.FullName}.{function.MemberName} differs from the reference SDK. " +
+                $"Expected {DescribeSignature(expected)}; actual {DescribeSignature(actual)}.");
     }
 
     private static MethodInfo RequireDeclaredMethod(Type owner, string name)
@@ -309,6 +348,11 @@ internal static class FullSurfaceValidator
 
     private static IEnumerable<string?> ParameterTypes(MethodInfo method) =>
         method.GetParameters().Select(parameter => TypeIdentity(parameter.ParameterType));
+
+    private static string DescribeSignature(MethodInfo method) =>
+        $"{TypeIdentity(method.ReturnType)} {method.Name}(" +
+        string.Join(", ", method.GetParameters().Select(parameter =>
+            $"{TypeIdentity(parameter.ParameterType)} {parameter.Name}")) + ")";
 
     private static void CompareConstant(Type expected, Type actual, string name)
     {
@@ -339,6 +383,13 @@ internal static class FullSurfaceValidator
     private static string? TypeIdentity(Type? type)
     {
         if (type is null) return null;
+        if (type.IsByRef) return TypeIdentity(type.GetElementType()) + "&";
+        if (type.IsPointer) return TypeIdentity(type.GetElementType()) + "*";
+        if (type.IsArray)
+        {
+            var commas = new string(',', type.GetArrayRank() - 1);
+            return TypeIdentity(type.GetElementType()) + $"[{commas}]";
+        }
         if (!type.IsGenericType) return type.FullName ?? type.Name;
         return type.GetGenericTypeDefinition().FullName + "[" +
                string.Join(",", type.GetGenericArguments().Select(TypeIdentity)) + "]";

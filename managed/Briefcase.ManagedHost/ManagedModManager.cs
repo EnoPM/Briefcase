@@ -4,12 +4,12 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using Briefcase.ModApi;
 #if !BRIEFCASE_HEADLESS
-using ImGuiNET;
+using Briefcase.ClientModApi;
 #endif
 
 namespace Briefcase.ManagedHost;
 
-internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
+internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposable
 {
     private static readonly TimeSpan ReloadDelay = TimeSpan.FromMilliseconds(600);
     private readonly ModContext _context;
@@ -42,19 +42,35 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         _gameThread = gameThread;
     }
 
-    public void Start()
+    public void Start(Action<double, string>? progress = null)
     {
         Directory.CreateDirectory(_modsDirectory);
         Directory.CreateDirectory(_cacheDirectory);
         var paths = Directory.EnumerateFiles(_modsDirectory, "*.dll")
             .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        foreach (var path in paths)
+        for (var index = 0; index < paths.Length; index++)
         {
+            var path = paths[index];
+            progress?.Invoke(
+                0.55 * (index + 1) / Math.Max(1, paths.Length),
+                $"Inspecting {Path.GetFileName(path)}...");
             RegisterInstalled(path);
             ProbeInstalled(path);
+            if (progress is not null) Thread.Yield();
         }
-        LoadEnabledInDependencyOrder();
+        progress?.Invoke(0.55, "Resolving mod dependencies...");
+        var loadedCount = 0;
+        LoadEnabledInDependencyOrder(path =>
+        {
+            progress?.Invoke(
+                0.55 + (0.45 * ++loadedCount / Math.Max(1, paths.Length)),
+                $"Loading {Path.GetFileName(path)}...");
+            if (progress is not null) Thread.Yield();
+        });
+        progress?.Invoke(1, paths.Length == 0
+            ? "No external mods are installed."
+            : $"Processed {paths.Length} installed mod file(s).");
 
         _watcher = new FileSystemWatcher(_modsDirectory, "*.dll")
         {
@@ -279,6 +295,8 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                 ConfigurationRegistry.ModScope? configuration = null;
                 BriefcaseMod? instance = null;
                 IGameThreadScope? gameThread = null;
+                IUnrealAssetScope? assets = null;
+                IUnrealEventScope? events = null;
                 var modLoaded = false;
                 try
                 {
@@ -301,15 +319,21 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
 
                     configuration = _configuration.RegisterMod(info);
                     gameThread = _gameThread.CreateScope(info.Id);
-                    var modContext = _context
-                        .WithConfiguration(configuration)
-                        .WithGameThread(gameThread);
+                    assets = new UnrealAssetScope(_context.Unreal, info.Id, _context.Warning);
+                    events = new UnrealEventScope(
+                        _context.Unreal, _context.UnrealNative, _context.PatchingNative,
+                        new GameThreadApi(gameThread), info.Id, _context.Error);
+                    var modContext = configuration.AttachTo(_context)
+                        .WithGameThread(gameThread)
+                        .WithAssets(assets)
+                        .WithEvents(events);
                     patches = PatchDiscovery.Discover(assembly);
                     instance.Load(modContext);
                     modLoaded = true;
                     patchRuntime = PatchRuntime.Attach(modContext, patches, info);
                     _loaded[sourcePath] = new LoadedMod(
-                        loadContext, instance, info, patches, patchRuntime, configuration, gameThread);
+                        loadContext, instance, info, patches, patchRuntime,
+                        configuration, gameThread, assets, events);
                     var installed = GetOrAddInstalled(sourcePath);
                     installed.Info = info;
                     installed.LastError = null;
@@ -321,7 +345,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                 }
                 catch
                 {
-                    gameThread?.Dispose();
+                    events?.Dispose();
                     patchRuntime?.Dispose();
                     patches?.Dispose();
                     if (modLoaded)
@@ -332,6 +356,8 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                             _context.Error($"Rollback unload failed: {unloadException.Message}");
                         }
                     }
+                    assets?.Dispose();
+                    gameThread?.Dispose();
                     configuration?.Dispose();
                     loadContext.Unload();
                     throw;
@@ -489,7 +515,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
     // Kahn-style loading: every pass loads only nodes whose dependencies are
     // already active. A pass with no ready node is a cycle, and unrelated mods
     // have already loaded by that point.
-    private void LoadEnabledInDependencyOrder()
+    private void LoadEnabledInDependencyOrder(Action<string>? loading = null)
     {
         InstalledMod[] installed;
         lock (_gate) installed = _installed.Values.ToArray();
@@ -539,6 +565,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
                 .ToArray();
             foreach (var item in ready)
             {
+                loading?.Invoke(item.SourcePath);
                 Reload(item.SourcePath, force: true);
                 pending.Remove(item);
                 changed = true;
@@ -742,7 +769,7 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         {
             // Remove every MethodInfo reference before asking CoreCLR to unload
             // the collectible assembly that declared those patch methods.
-            loaded.GameThread.Dispose();
+            loaded.Events.Dispose();
             loaded.PatchRuntime.Dispose();
             loaded.Patches.Dispose();
             loaded.Instance.Unload();
@@ -753,6 +780,8 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         }
         finally
         {
+            loaded.Assets.Dispose();
+            loaded.GameThread.Dispose();
             // Entries and panels may hold delegates declared by the mod. Always
             // remove them before unloading its collectible AssemblyLoadContext.
             loaded.Configuration.Dispose();
@@ -815,7 +844,9 @@ internal sealed class ManagedModManager : IFrameworkModControl, IDisposable
         PatchSet Patches,
         PatchRuntime PatchRuntime,
         ConfigurationRegistry.ModScope Configuration,
-        IGameThreadScope GameThread);
+        IGameThreadScope GameThread,
+        IUnrealAssetScope Assets,
+        IUnrealEventScope Events);
     private sealed record UnloadTicket(WeakReference Reference, ModInfo Info);
 
     private sealed class InstalledMod(string sourcePath)
@@ -832,7 +863,7 @@ internal sealed class ManagedModLoadContext : AssemblyLoadContext
     private readonly Assembly? _generatedSdk;
     private static readonly Assembly ModSdk = typeof(BriefcaseMod).Assembly;
 #if !BRIEFCASE_HEADLESS
-    private static readonly Assembly ImGuiNet = typeof(ImGui).Assembly;
+    private static readonly Assembly ClientModApi = typeof(ClientUiApi).Assembly;
 #endif
 
     public ManagedModLoadContext(string mainAssemblyPath, Assembly? generatedSdk)
@@ -850,8 +881,8 @@ internal sealed class ManagedModLoadContext : AssemblyLoadContext
         if (AssemblyName.ReferenceMatchesDefinition(assemblyName, ModSdk.GetName()))
             return ModSdk;
 #if !BRIEFCASE_HEADLESS
-        if (AssemblyName.ReferenceMatchesDefinition(assemblyName, ImGuiNet.GetName()))
-            return ImGuiNet;
+        if (AssemblyName.ReferenceMatchesDefinition(assemblyName, ClientModApi.GetName()))
+            return ClientModApi;
 #endif
         if (_generatedSdk is not null &&
             AssemblyName.ReferenceMatchesDefinition(assemblyName, _generatedSdk.GetName()))

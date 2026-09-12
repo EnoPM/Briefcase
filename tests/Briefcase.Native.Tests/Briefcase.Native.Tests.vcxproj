@@ -39,7 +39,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.UnrealRuntime\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.Unreal.Discovery\src;$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.Unreal.Metadata\src;$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.Unreal.Reflection\src;$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.Unreal.Marshalling\src;$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.Unreal.Invocation\src;$(MSBuildProjectDirectory)\..\..\runtime\Briefcase.Unreal.Patching\src;$(MSBuildProjectDirectory)\..\..\sdk\BriefcaseModApi\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -49,17 +49,27 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="NativeTests.cpp" />
-    <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\BinarySnapshotWriter.cpp" />
-    <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\PeImageView.cpp" />
-    <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\RuntimeSymbolResolver.cpp" />
-    <ClCompile Include="..\..\runtime\Briefcase.UnrealRuntime\src\SignatureScanner.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\BinarySnapshotWriter.h" />
-    <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\PeImageView.h" />
-    <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\RuntimeProfile.h" />
-    <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\RuntimeSymbolResolver.h" />
-    <ClInclude Include="..\..\runtime\Briefcase.UnrealRuntime\src\SignatureScanner.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\runtime\Briefcase.Unreal.Discovery\Briefcase.Unreal.Discovery.vcxproj">
+      <Project>{D8E30167-CE75-4B8D-8A32-D65C50F83A6C}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\runtime\Briefcase.Unreal.Patching\Briefcase.Unreal.Patching.vcxproj">
+      <Project>{C7E53B64-52BA-4A57-9CF5-BCB524E71F24}</Project>
+    </ProjectReference>    <ProjectReference Include="..\..\runtime\Briefcase.Unreal.Metadata\Briefcase.Unreal.Metadata.vcxproj">
+      <Project>{4534B8F8-4268-4A66-B8D4-58D7930655D2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\runtime\Briefcase.Unreal.Reflection\Briefcase.Unreal.Reflection.vcxproj">
+      <Project>{7FA7625C-9AA8-481F-81A2-48029620D885}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\runtime\Briefcase.Unreal.Marshalling\Briefcase.Unreal.Marshalling.vcxproj">
+      <Project>{8822B7D6-C43F-4EFF-B7D4-34C9119A917A}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\runtime\Briefcase.Unreal.Invocation\Briefcase.Unreal.Invocation.vcxproj">
+      <Project>{B5D93441-91CF-4F7B-9E2D-18C41C51EADB}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

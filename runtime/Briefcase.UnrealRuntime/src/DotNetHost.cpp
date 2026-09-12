@@ -131,7 +131,15 @@ void runDotNetHost(HMODULE frameworkModule) {
         // initialize_for_runtime_config accepts framework-dependent component
         // configs. The bundled runtime therefore uses the standard dotnet
         // host/fxr + shared/Microsoft.NETCore.App directory layout.
-        const auto hostPath = root / L"version.dll";
+        std::array<wchar_t, 32768> hostPathBuffer{};
+        const DWORD hostPathLength = GetModuleFileNameW(
+            frameworkModule, hostPathBuffer.data(),
+            static_cast<DWORD>(hostPathBuffer.size()));
+        if (!hostPathLength || hostPathLength >= hostPathBuffer.size()) {
+            log(L"managed host: could not resolve the native loader path");
+            return;
+        }
+        const std::filesystem::path hostPath{hostPathBuffer.data()};
         const hostfxr_initialize_parameters parameters{
             sizeof(hostfxr_initialize_parameters), hostPath.c_str(), hostFxr.DotNetRoot.c_str()};
         const auto initializeStatus = initialize(runtimeConfig.c_str(), &parameters, &context);

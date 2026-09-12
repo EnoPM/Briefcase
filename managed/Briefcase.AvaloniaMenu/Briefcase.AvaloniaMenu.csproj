@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>Briefcase.AvaloniaMenu</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Briefcase.AvaloniaUi\Briefcase.AvaloniaUi.csproj" />
+    <ProjectReference Include="..\Briefcase.ManagedHost\Briefcase.ManagedHost.csproj" />
+    <ProjectReference Include="..\Briefcase.ClientModApi\Briefcase.ClientModApi.csproj" />
+    <ProjectReference Include="..\Briefcase.ModApi\Briefcase.ModApi.csproj" />
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+  </ItemGroup>
+</Project>
