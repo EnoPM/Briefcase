@@ -123,9 +123,11 @@ try {
     New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($snapshot)) -Force | Out-Null
     $snapshotContents=[IO.File]::ReadAllText($snapshotSource)
     [IO.File]::WriteAllText($snapshot,$snapshotContents,[Text.UTF8Encoding]::new($false))
-    $sdkEmitter=Join-Path $root "managed\Briefcase.SdkEmitter\bin\$Configuration\net10.0\Briefcase.SdkEmitter.dll"
+    $sdkEmitterProject=Join-Path $root 'managed\Briefcase.SdkEmitter\Briefcase.SdkEmitter.csproj'
+    Write-Host "Generating the client SDK | $Configuration"
     $result=Invoke-ModNative -FilePath 'dotnet' -WorkingDirectory $root -Arguments @(
-        $sdkEmitter,'production',$snapshot,$buildCore)
+        'run','--project',$sdkEmitterProject,'-c',$Configuration,'--no-launch-profile','--',
+        'production',$snapshot,$buildCore)
     if($result -ne 0){ exit $result }
     $generatedSdkProps=Join-Path $buildCore 'Sdk\Generated\Client\Current.props'
     if(-not (Test-Path -LiteralPath $generatedSdkProps)) {
