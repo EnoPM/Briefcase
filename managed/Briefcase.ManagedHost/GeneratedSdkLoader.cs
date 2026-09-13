@@ -22,18 +22,29 @@ internal static class GeneratedSdkLoader
         }
 
         var buildKey = $"{build.PeTimestamp:X8}-{build.ImageSize:X8}";
-        var candidates = new[]
-        {
-            Candidate.For(coreDirectory, "Client", buildKey),
-            Candidate.For(coreDirectory, "Server", buildKey)
-        };
-
-        var available = candidates.Where(candidate => File.Exists(candidate.SnapshotPath)).ToArray();
-        if (available.Length != 1)
+        // The native metadata probe and the managed host start concurrently once
+        // the login screen is available. On a fresh installation there is no
+        // persisted snapshot yet, so give the native probe time to publish its
+        // atomically-written file instead of disabling every typed mod for this run.
+        var available = WaitForAvailable(
+            () => new[]
+            {
+                Candidate.For(coreDirectory, "Client", buildKey),
+                Candidate.For(coreDirectory, "Server", buildKey)
+            }.Where(candidate => File.Exists(candidate.SnapshotPath)).ToArray(),
+            maxRetries: 300,
+            retry: attempt =>
+            {
+                progress?.Invoke(
+                    0.05 + (Math.Min(attempt, 300) / 300d * 0.12),
+                    "Waiting for the native metadata snapshot...");
+                Thread.Sleep(100);
+            });
+        if (available.Count != 1)
         {
             context.Warning(
                 $"Generated SDK: expected one Client or Server snapshot for build {buildKey}; " +
-                $"found {available.Length}. " +
+                $"found {available.Count}. " +
                 "Mods that do not use generated game types can still load.");
             return null;
         }
@@ -96,6 +107,29 @@ internal static class GeneratedSdkLoader
                 $"{generation.SkippedFunctionCount} functions skipped");
         progress?.Invoke(1, "Generated SDK is ready.");
         return loaded;
+    }
+
+    /// <summary>
+    /// Polls a resource produced concurrently by the native runtime. The retry
+    /// action is injected so the policy remains deterministic and fast in tests.
+    /// A non-empty result is returned immediately, including an ambiguous result
+    /// which the caller must diagnose rather than silently choosing one entry.
+    /// </summary>
+    internal static IReadOnlyList<T> WaitForAvailable<T>(
+        Func<IReadOnlyList<T>> discover,
+        int maxRetries,
+        Action<int> retry)
+    {
+        ArgumentNullException.ThrowIfNull(discover);
+        ArgumentNullException.ThrowIfNull(retry);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxRetries);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            var available = discover();
+            if (available.Count != 0 || attempt >= maxRetries) return available;
+            retry(attempt + 1);
+        }
     }
 
     private static bool TryValidateCachedPublication(
