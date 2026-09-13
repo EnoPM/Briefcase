@@ -3,14 +3,36 @@ using System.Text.Json;
 
 namespace Briefcase.ManagedHost;
 
+internal sealed record MarketplaceModStatus(
+    string Id,
+    string Name,
+    string Author,
+    string Description,
+    string Repository,
+    string? Homepage,
+    IReadOnlyList<string> Dependencies,
+    bool Installed);
+
+internal sealed record MarketplaceInstallProgress(
+    double Progress,
+    string Stage,
+    string Detail);
+
 /// <summary>
 /// Keeps the Avalonia configuration host independent from the mod loader's
 /// implementation while still allowing the framework tab to issue lifecycle
-/// commands.
+/// and curated marketplace commands.
 /// </summary>
 internal interface IFrameworkModControl : IModManagementBackend
 {
     string ModsDirectory { get; }
+    Task<MarketplaceModStatus[]> GetMarketplaceAsync(
+        bool forceRefresh,
+        CancellationToken cancellationToken = default);
+    Task InstallMarketplaceModAsync(
+        string id,
+        Action<MarketplaceInstallProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

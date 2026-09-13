@@ -193,7 +193,7 @@ try {
     # Server mods are built and distributed independently from Briefcase Core.
     [IO.File]::WriteAllText(
         (Join-Path $framework 'loader.json'),
-        "{`n  `"schemaVersion`": 1,`n  `"automaticUpdates`": true,`n  `"updateRestartMode`": `"auto`",`n  `"sdkSnapshotFormat`": `"binary`",`n  `"sdkSnapshotRefresh`": `"missing`"`n}`n",
+        "{`n  `"schemaVersion`": 1,`n  `"automaticUpdates`": true,`n  `"automaticModUpdates`": true,`n  `"updateRestartMode`": `"auto`",`n  `"sdkSnapshotFormat`": `"binary`",`n  `"sdkSnapshotRefresh`": `"missing`"`n}`n",
         [Text.UTF8Encoding]::new($false))
 
     Organize-BriefcaseFrameworkPackage $framework

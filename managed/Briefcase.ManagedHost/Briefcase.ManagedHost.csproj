@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Briefcase.ModApi\Briefcase.ModApi.csproj" />
     <ProjectReference Include="..\Briefcase.Updater\Briefcase.Updater.csproj" />
+    <ProjectReference Include="..\Briefcase.ModPackages\Briefcase.ModPackages.csproj" />
     <ProjectReference Include="..\Briefcase.ClientModApi\Briefcase.ClientModApi.csproj"
                       Condition="'$(BriefcaseHeadless)' != 'true'" />
     <ProjectReference Include="..\Briefcase.Rendering\Briefcase.Rendering.csproj"

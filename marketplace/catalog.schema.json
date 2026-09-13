@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://enopm.github.io/Briefcase/schemas/marketplace-catalog.schema.json",
+  "title": "Briefcase marketplace catalogue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mods"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "mods": {
+      "type": "array",
+      "maxItems": 2048,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "author", "description", "repository", "asset", "target", "dependencies"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{1,126}[A-Za-z0-9]$" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "author": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "description": { "type": "string", "maxLength": 1000 },
+          "repository": { "type": "string", "pattern": "^[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+$" },
+          "asset": { "type": "string", "pattern": "^[^/\\\\]+\\.zip$" },
+          "target": { "enum": ["client", "server", "both"] },
+          "homepage": { "type": ["string", "null"], "format": "uri" },
+          "dependencies": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

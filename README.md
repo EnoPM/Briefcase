@@ -55,17 +55,20 @@ is ready, press **F1** to open the configuration menu.
 
 ### Install a client mod
 
-Close the game and follow the instructions supplied by the mod author. A
-typical mod is copied into:
+Open the menu with **F1**, choose **Mods**, then open **Marketplace** to browse
+and install free client mods. Marketplace packages and their missing
+dependencies are downloaded from the mod author's GitHub releases.
+
+For a manual installation, extract the mod so it owns one directory containing
+its manifest and assemblies:
 
 ```text
-DeceiveInc\Binaries\Win64\Briefcase\Mods
+DeceiveInc\Binaries\Win64\Briefcase\Mods\mod-id\briefcase.mod.json
 ```
 
-Start the game again and press **F1**. The mod appears in **Mods** when
-Briefcase has loaded it successfully. Some mods may require a compatible
-community server or other mods; their download page should list those
-requirements.
+Start the game again and press **F1**. The mod appears under **Installed** when
+Briefcase has loaded it successfully. Mods linked to a GitHub repository update
+automatically before they load.
 
 ## Install Briefcase on a dedicated server
 
@@ -92,15 +95,15 @@ terminal to stop the server.
 
 ### Install a server mod
 
-Stop the server and follow the instructions supplied by the mod author. Server
-mods are normally copied into:
+Stop the server and extract each server mod into its own directory:
 
 ```text
-DeceiveInc\Binaries\Win64\Briefcase\Mods
+DeceiveInc\Binaries\Win64\Briefcase\Mods\mod-id\briefcase.mod.json
 ```
 
-Start the server again with `StartBriefcaseServer.bat`. Server-side mods do not
-create an F1 menu on the server.
+Start the server again with `StartBriefcaseServer.bat`. Linked GitHub releases
+are checked before the server mod loads. Server-side mods do not create an F1
+menu on the server.
 
 ## Automatic updates
 

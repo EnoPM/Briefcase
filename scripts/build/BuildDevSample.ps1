@@ -18,8 +18,22 @@ try {
         -CommandLineHint '-GameWin64' `
         -Description 'client Win64'
     $gameMods=Join-Path $game 'Briefcase\Mods'
-    New-Item -ItemType Directory -Path $gameMods -Force | Out-Null
-    Copy-Item -LiteralPath $source -Destination (Join-Path $gameMods 'Briefcase.HotReloadSample.dll') -Force
+    $package=Join-Path $gameMods 'briefcase.hot-reload-sample'
+    New-Item -ItemType Directory -Path $package -Force | Out-Null
+    Copy-Item -LiteralPath $source -Destination (Join-Path $package 'Briefcase.HotReloadSample.dll') -Force
+    $manifest=@'
+{
+  "schemaVersion": 1,
+  "entryAssembly": "Briefcase.HotReloadSample.dll",
+  "id": "briefcase.hot-reload-sample",
+  "version": "1.0.0-dev",
+  "dependencies": ["briefcase.hello-managed"]
+}
+'@
+    [IO.File]::WriteAllText(
+        (Join-Path $package 'briefcase.mod.json'),
+        $manifest + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
     Write-Host '[OK] C# development mod rebuilt and copied. A running game will reload it after the debounce delay.'
     exit 0
 } catch { Write-Host "[ERROR] $($_.Exception.Message)"; exit 1 }

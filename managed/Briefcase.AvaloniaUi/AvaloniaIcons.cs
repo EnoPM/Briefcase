@@ -51,6 +51,7 @@ internal static class AvaloniaIcons
         UiIcon.Disconnect => "M4 3 L21 20 L19.6 21.4 L15.8 17.6 C15.2 18 14.6 18.3 14 18.5 L14 23 L10 23 L10 18.5 C7.2 17.7 5 15.1 5 12 L5 9.8 L2.6 7.4 Z M8 3 L10 3 L10 7 L11.2 7 L16.9 12.7 C17 12.3 17 11.9 17 11 L17 8 L19 8 L19 11 C19 12.2 18.7 13.4 18.2 14.4 L14.8 11 L5 11 L5 8 L8 8 Z M14 3 L16 3 L16 7 L14 7 Z",
         UiIcon.Close => "M4 5 L5 4 L12 11 L19 4 L20 5 L13 12 L20 19 L19 20 L12 13 L5 20 L4 19 L11 12 Z",
         UiIcon.ChevronRight => "M8 4 L16 12 L8 20 L10 22 L20 12 L10 2 Z",
+        UiIcon.ChevronLeft => "M16 4 L8 12 L16 20 L14 22 L4 12 L14 2 Z",
         _ => "M4 4 L20 4 L20 20 L4 20 Z"
     };
 
@@ -67,6 +68,8 @@ internal static class AvaloniaIcons
         UiIcon.Download => "v",
         UiIcon.Upload => "^",
         UiIcon.Close => "X",
+        UiIcon.ChevronLeft => "<",
+        UiIcon.ChevronRight => ">",
         UiIcon.Server => "SRV",
         UiIcon.Client => "PC",
         UiIcon.Mods => "MOD",

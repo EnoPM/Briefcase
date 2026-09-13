@@ -170,13 +170,14 @@ public sealed class BriefcaseUpdaterTests
     }
 
     [Theory]
-    [InlineData("{}", true, "auto")]
-    [InlineData("{\"automaticUpdates\":false,\"updateRestartMode\":\"executable\"}", false, "executable")]
-    [InlineData("{\"automaticUpdates\":true,\"updateRestartMode\":\"steam\"}", true, "steam")]
+    [InlineData("{}", true, "auto", true)]
+    [InlineData("{\"automaticUpdates\":false,\"updateRestartMode\":\"executable\",\"automaticModUpdates\":false}", false, "executable", false)]
+    [InlineData("{\"automaticUpdates\":true,\"updateRestartMode\":\"steam\",\"automaticModUpdates\":true}", true, "steam", true)]
     public void Update_settings_are_read_from_loader_json(
         string json,
         bool enabled,
-        string restartMode)
+        string restartMode,
+        bool automaticModUpdates)
     {
         using var directory = new TemporaryDirectory();
         var path = Path.Combine(directory.Path, "loader.json");
@@ -187,6 +188,7 @@ public sealed class BriefcaseUpdaterTests
 
         Assert.Equal(enabled, settings.Enabled);
         Assert.Equal(restartMode, settings.RestartMode);
+        Assert.Equal(automaticModUpdates, settings.AutomaticModUpdates);
         Assert.Empty(warnings);
     }
 

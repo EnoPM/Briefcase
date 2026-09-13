@@ -204,10 +204,13 @@ try {
     $dotNetDistribution=Join-Path $coreDistribution 'DotNet'
     $updaterDistribution=Join-Path $coreDistribution 'Updater'
     $modsDistribution=Join-Path $frameworkDistribution 'Mods'
-    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$avaloniaDistribution,$builtInsDistribution,$updaterDistribution,$modsDistribution -Force | Out-Null
+    $marketplaceDistribution=Join-Path $coreDistribution 'Marketplace'
+    New-Item -ItemType Directory -Path $coreDistribution,$nativeDistribution,$avaloniaDistribution,$builtInsDistribution,$updaterDistribution,$modsDistribution,$marketplaceDistribution -Force | Out-Null
 
     Copy-Item -LiteralPath (Join-Path $root 'VERSION') `
         -Destination (Join-Path $frameworkDistribution 'VERSION') -Force
+    Copy-Item -LiteralPath (Join-Path $root 'marketplace\catalog.json') `
+        -Destination (Join-Path $marketplaceDistribution 'catalog.json') -Force
 
     Copy-Item -LiteralPath (Join-Path $root "loader\Briefcase.VersionProxy\bin\$Configuration\version.dll") `
         -Destination (Join-Path $distribution 'version.dll') -Force
@@ -227,6 +230,8 @@ try {
         'Briefcase.ManagedHost.pdb',
         'Briefcase.Updater.dll',
         'Briefcase.Updater.pdb',
+        'Briefcase.ModPackages.dll',
+        'Briefcase.ModPackages.pdb',
         'Briefcase.ModApi.dll',
         'Briefcase.ModApi.pdb',
         'Briefcase.ClientModApi.dll',
@@ -294,6 +299,7 @@ try {
 {
   "schemaVersion": 1,
   "automaticUpdates": true,
+  "automaticModUpdates": true,
   "updateRestartMode": "auto",
   "sdkSnapshotFormat": "binary",
   "sdkSnapshotRefresh": "missing",

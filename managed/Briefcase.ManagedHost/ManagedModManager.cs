@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using Briefcase.ModApi;
+using Briefcase.ModPackages;
 #if !BRIEFCASE_HEADLESS
 using Briefcase.ClientModApi;
 #endif
@@ -18,9 +19,14 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
     private readonly Assembly? _generatedSdk;
     private readonly ConfigurationRegistry _configuration;
     private readonly GameThreadService _gameThread;
+    private readonly bool _isServer;
+    private readonly bool _automaticModUpdates;
+    private readonly string _modStagingDirectory;
+    private readonly string _marketplaceCachePath;
     private readonly Dictionary<string, LoadedMod> _loaded = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, InstalledMod> _installed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Timer> _pending = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _updateErrors = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private FileSystemWatcher? _watcher;
 
@@ -32,7 +38,9 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
         string cacheDirectory,
         Assembly? generatedSdk,
         ConfigurationRegistry configuration,
-        GameThreadService gameThread)
+        GameThreadService gameThread,
+        bool isServer,
+        bool automaticModUpdates)
     {
         _context = context;
         _modsDirectory = modsDirectory;
@@ -40,51 +48,90 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
         _generatedSdk = generatedSdk;
         _configuration = configuration;
         _gameThread = gameThread;
+        _isServer = isServer;
+        _automaticModUpdates = automaticModUpdates;
+        _modStagingDirectory = Path.Combine(Path.GetTempPath(), "Briefcase", "ModPackages");
+        _marketplaceCachePath = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(_cacheDirectory))!,
+            "Marketplace",
+            "catalog.json");
     }
 
     public void Start(Action<double, string>? progress = null)
     {
         Directory.CreateDirectory(_modsDirectory);
         Directory.CreateDirectory(_cacheDirectory);
-        var paths = Directory.EnumerateFiles(_modsDirectory, "*.dll")
-            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        for (var index = 0; index < paths.Length; index++)
+        ModPackageDiscovery.MigrateLegacyMods(_modsDirectory, _context.Info);
+        var packages = ModPackageDiscovery.Discover(_modsDirectory, _context.Warning);
+        if (_automaticModUpdates)
         {
-            var path = paths[index];
+            progress?.Invoke(0.02, "Checking mod updates...");
+            using var updater = new ModUpdateService();
+            var updateResults = updater.UpdateInstalledAsync(
+                    packages,
+                    _modsDirectory,
+                    _modStagingDirectory,
+                    update => progress?.Invoke(
+                        0.02 + (0.18 * update.Progress),
+                        $"{update.Stage}: {update.Detail}"),
+                    _context.Info)
+                .GetAwaiter()
+                .GetResult();
+            foreach (var result in updateResults)
+            {
+                if (result.Error is null)
+                    _updateErrors.Remove(result.Id);
+                else
+                {
+                    _updateErrors[result.Id] = result.Error;
+                    _context.Warning($"Could not update mod {result.Id}: {result.Error}");
+                }
+            }
+            if (updateResults.Any(result => result.Updated))
+                packages = ModPackageDiscovery.Discover(_modsDirectory, _context.Warning);
+        }
+        else
+        {
+            _context.Info("Automatic mod updates are disabled in loader.json.");
+        }
+
+        var paths = packages.Select(package => package.EntryAssemblyPath).ToArray();
+        for (var index = 0; index < packages.Count; index++)
+        {
+            var package = packages[index];
             progress?.Invoke(
-                0.55 * (index + 1) / Math.Max(1, paths.Length),
-                $"Inspecting {Path.GetFileName(path)}...");
-            RegisterInstalled(path);
-            ProbeInstalled(path);
+                0.20 + (0.40 * (index + 1) / Math.Max(1, packages.Count)),
+                $"Inspecting {Path.GetFileName(package.EntryAssemblyPath)}...");
+            RegisterInstalled(package.EntryAssemblyPath, package);
+            ProbeInstalled(package.EntryAssemblyPath);
             if (progress is not null) Thread.Yield();
         }
-        progress?.Invoke(0.55, "Resolving mod dependencies...");
+        progress?.Invoke(0.60, "Resolving mod dependencies...");
         var loadedCount = 0;
         LoadEnabledInDependencyOrder(path =>
         {
             progress?.Invoke(
-                0.55 + (0.45 * ++loadedCount / Math.Max(1, paths.Length)),
+                0.60 + (0.40 * ++loadedCount / Math.Max(1, paths.Length)),
                 $"Loading {Path.GetFileName(path)}...");
             if (progress is not null) Thread.Yield();
         });
         progress?.Invoke(1, paths.Length == 0
             ? "No external mods are installed."
-            : $"Processed {paths.Length} installed mod file(s).");
+            : $"Processed {paths.Length} installed mod package(s).");
 
-        _watcher = new FileSystemWatcher(_modsDirectory, "*.dll")
+        _watcher = new FileSystemWatcher(_modsDirectory)
         {
-            IncludeSubdirectories = false,
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
+                           NotifyFilters.LastWrite | NotifyFilters.Size
         };
-        _watcher.Changed += OnChanged;
-        _watcher.Created += OnChanged;
-        _watcher.Renamed += OnRenamed;
-        _watcher.Deleted += OnDeleted;
+        _watcher.Changed += OnPackageChanged;
+        _watcher.Created += OnPackageChanged;
+        _watcher.Renamed += OnPackageChanged;
+        _watcher.Deleted += OnPackageChanged;
         _watcher.EnableRaisingEvents = true;
         _context.Info($"Managed mod directory: {_modsDirectory}");
     }
-
     public ManagedModConfigurationEntry[] GetConfiguration(string fileName)
     {
         lock (_gate)
@@ -210,6 +257,7 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
                            throw new InvalidOperationException(
                                "The BriefcaseMod class could not be constructed.");
             ValidateInfo(instance.Info);
+            ValidatePackageInfo(GetPackageManifest(sourcePath), instance.Info);
             lock (_gate)
             {
                 var installed = GetOrAddInstalled(sourcePath);
@@ -241,42 +289,87 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
             throw new InvalidOperationException($"Mod '{info.Id}' cannot depend on itself.");
     }
 
-    private void OnChanged(object sender, FileSystemEventArgs eventArgs) => Schedule(eventArgs.FullPath);
-
-    private void OnRenamed(object sender, RenamedEventArgs eventArgs)
+    private ModPackageManifest? GetPackageManifest(string sourcePath)
     {
-        Remove(eventArgs.OldFullPath);
-        lock (_gate) _installed.Remove(NormalizePath(eventArgs.OldFullPath));
-        RegisterInstalled(eventArgs.FullPath);
-        Schedule(eventArgs.FullPath);
+        lock (_gate)
+            return GetOrAddInstalled(NormalizePath(sourcePath)).Package?.Manifest;
     }
 
-    private void OnDeleted(object sender, FileSystemEventArgs eventArgs)
+    private static void ValidatePackageInfo(ModPackageManifest? manifest, ModInfo info)
     {
-        Remove(eventArgs.FullPath);
-        lock (_gate) _installed.Remove(NormalizePath(eventArgs.FullPath));
+        if (manifest is null) return;
+        if (manifest.Id is not null && !string.Equals(
+                manifest.Id, info.Id, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                $"The package manifest id '{manifest.Id}' does not match ModInfo id '{info.Id}'.");
+        if (manifest.Version is not null && !string.Equals(
+                manifest.Version, info.Version, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                $"The package manifest version '{manifest.Version}' does not match ModInfo version '{info.Version}'.");
+        if (manifest.Dependencies.Count > 0 &&
+            !manifest.Dependencies.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                .SetEquals(info.Dependencies))
+            throw new InvalidDataException(
+                "The package manifest dependencies do not match ModInfo dependencies.");
+    }
+    private void OnPackageChanged(object sender, FileSystemEventArgs eventArgs)
+    {
+        var changed = NormalizePath(eventArgs.FullPath);
+        string? entryAssembly;
+        lock (_gate)
+            entryAssembly = _installed.Values.FirstOrDefault(installed =>
+                changed.StartsWith(
+                    Path.TrimEndingDirectorySeparator(
+                        installed.Package?.DirectoryPath ??
+                        Path.GetDirectoryName(installed.SourcePath)!) +
+                    Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))?.SourcePath;
+        if (entryAssembly is not null && File.Exists(entryAssembly) &&
+            !string.Equals(Path.GetFileName(changed), ModPackageManifest.FileName,
+                StringComparison.OrdinalIgnoreCase))
+            Schedule(entryAssembly);
+        else
+            ScheduleRefresh();
     }
 
-    // Builds often replace a file through several writes. Debouncing prevents us
-    // from trying to load a half-written PE image for every watcher notification.
+    private void ScheduleRefresh()
+    {
+        const string key = "$package-refresh";
+        lock (_gate)
+        {
+            if (_pending.Remove(key, out var previous)) previous.Dispose();
+            _pending[key] = new Timer(_ =>
+            {
+                lock (_gate)
+                {
+                    if (_pending.Remove(key, out var timer)) timer.Dispose();
+                }
+                try { ((IModManagementBackend)this).Refresh(); }
+                catch (Exception exception)
+                {
+                    _context.Error($"Could not refresh mod packages: {exception}");
+                }
+            }, null, ReloadDelay, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    // Builds often replace several files in one package. Debouncing reloads its
+    // entry assembly only after the writes have settled.
     private void Schedule(string path)
     {
         lock (_gate)
         {
-            if (_pending.Remove(path, out var previous))
-                previous.Dispose();
+            if (_pending.Remove(path, out var previous)) previous.Dispose();
             _pending[path] = new Timer(_ =>
             {
                 lock (_gate)
                 {
-                    if (_pending.Remove(path, out var timer))
-                        timer.Dispose();
+                    if (_pending.Remove(path, out var timer)) timer.Dispose();
                 }
                 Reload(path);
             }, null, ReloadDelay, Timeout.InfiniteTimeSpan);
         }
     }
-
     private void Reload(
         string sourcePath,
         bool force = false,
@@ -338,6 +431,7 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
                                throw new InvalidOperationException("The BriefcaseMod class could not be constructed.");
                     var info = instance.Info;
                     ValidateInfo(info);
+                    ValidatePackageInfo(GetPackageManifest(sourcePath), info);
                     EnsureUniqueIdLocked(sourcePath, info.Id);
                     EnsureDependenciesLoadedLocked(sourcePath, info);
                     if ((info.RequiredCapabilities & ~_context.Capabilities) != 0)
@@ -398,6 +492,41 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
         }
     }
 
+    Task<MarketplaceModStatus[]> IFrameworkModControl.GetMarketplaceAsync(
+        bool forceRefresh,
+        CancellationToken cancellationToken) =>
+        new ModMarketplaceController(
+            _modsDirectory,
+            _modStagingDirectory,
+            _marketplaceCachePath,
+            _isServer,
+            SnapshotInstalledIds,
+            () => ((IModManagementBackend)this).Refresh(),
+            _context.Info)
+        .GetMarketplaceAsync(forceRefresh, cancellationToken);
+
+    Task IFrameworkModControl.InstallMarketplaceModAsync(
+        string id,
+        Action<MarketplaceInstallProgress>? progress,
+        CancellationToken cancellationToken) =>
+        new ModMarketplaceController(
+            _modsDirectory,
+            _modStagingDirectory,
+            _marketplaceCachePath,
+            _isServer,
+            SnapshotInstalledIds,
+            () => ((IModManagementBackend)this).Refresh(),
+            _context.Info)
+        .InstallAsync(id, progress, cancellationToken);
+
+    private HashSet<string> SnapshotInstalledIds()
+    {
+        lock (_gate)
+            return _installed.Values
+                .Where(installed => installed.Info is not null)
+                .Select(installed => installed.Info!.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
     private string CreateShadowCopy(string sourcePath)
     {
         var generation = Path.Combine(
@@ -439,6 +568,7 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
     ManagedModStatus[] IModManagementBackend.SnapshotInstalledMods()
     {
         (string Path, string FileName, ModInfo? Info, bool Loaded, string? Error,
+            ModPackageDescriptor? Package, string? UpdateError,
             string[] ActiveDependents)[] snapshot;
         lock (_gate)
         {
@@ -449,6 +579,11 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
                     Info: installed.Info,
                     Loaded: _loaded.ContainsKey(installed.SourcePath),
                     Error: installed.LastError,
+                    Package: installed.Package,
+                    UpdateError: installed.Info is not null &&
+                                 _updateErrors.TryGetValue(installed.Info.Id, out var updateError)
+                        ? updateError
+                        : null,
                     ActiveDependents: installed.Info is null
                         ? []
                         : GetActiveDependentsLocked(installed.Info.Id)))
@@ -468,7 +603,12 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
             {
                 Id = item.Info?.Id ?? "",
                 Dependencies = item.Info?.Dependencies.ToArray() ?? [],
-                ActiveDependents = item.ActiveDependents
+                ActiveDependents = item.ActiveDependents,
+                PackageDirectory = item.Package is null
+                    ? ""
+                    : Path.GetFileName(item.Package.DirectoryPath),
+                UpdateRepository = item.Package?.Manifest.Updates?.Repository,
+                UpdateError = item.UpdateError
             })
             .ToArray();
     }
@@ -516,9 +656,9 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
     void IModManagementBackend.Refresh()
     {
         Directory.CreateDirectory(_modsDirectory);
-        var paths = Directory.EnumerateFiles(_modsDirectory, "*.dll")
-            .Select(NormalizePath)
-            .ToArray();
+        ModPackageDiscovery.MigrateLegacyMods(_modsDirectory, _context.Info);
+        var packages = ModPackageDiscovery.Discover(_modsDirectory, _context.Warning);
+        var paths = packages.Select(package => NormalizePath(package.EntryAssemblyPath)).ToArray();
         var present = new HashSet<string>(paths, StringComparer.OrdinalIgnoreCase);
 
         string[] removed;
@@ -530,14 +670,13 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
             lock (_gate) _installed.Remove(path);
         }
 
-        foreach (var path in paths)
+        foreach (var package in packages)
         {
-            RegisterInstalled(path);
-            ProbeInstalled(path);
+            RegisterInstalled(package.EntryAssemblyPath, package);
+            ProbeInstalled(package.EntryAssemblyPath);
         }
         LoadEnabledInDependencyOrder();
     }
-
     // Kahn-style loading: every pass loads only nodes whose dependencies are
     // already active. A pass with no ready node is a cycle, and unrelated mods
     // have already loaded by that point.
@@ -738,10 +877,16 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    private void RegisterInstalled(string sourcePath)
+    private void RegisterInstalled(
+        string sourcePath,
+        ModPackageDescriptor? package = null)
     {
         sourcePath = NormalizePath(sourcePath);
-        lock (_gate) GetOrAddInstalled(sourcePath);
+        lock (_gate)
+        {
+            var installed = GetOrAddInstalled(sourcePath);
+            if (package is not null) installed.Package = package;
+        }
     }
 
     private InstalledMod GetOrAddInstalled(string sourcePath)
@@ -769,7 +914,23 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
             !fileName.Equals(Path.GetFileName(fileName), StringComparison.Ordinal) ||
             !Path.GetExtension(fileName).Equals(".dll", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("A managed mod DLL file name is required.");
-        return EnsureModsPath(Path.Combine(_modsDirectory, fileName));
+        lock (_gate)
+        {
+            var matches = _installed.Values
+                .Where(installed => string.Equals(
+                    Path.GetFileName(installed.SourcePath), fileName,
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(installed => installed.SourcePath)
+                .ToArray();
+            return matches.Length switch
+            {
+                1 => matches[0],
+                0 => throw new InvalidOperationException(
+                    $"The managed mod '{fileName}' is not installed."),
+                _ => throw new InvalidOperationException(
+                    $"More than one installed mod uses the file name '{fileName}'.")
+            };
+        }
     }
 
     private static string NormalizePath(string path) => Path.GetFullPath(path);
@@ -879,6 +1040,7 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
     {
         public string SourcePath { get; } = sourcePath;
         public ModInfo? Info { get; set; }
+        public ModPackageDescriptor? Package { get; set; }
         public string? LastError { get; set; }
     }
 }

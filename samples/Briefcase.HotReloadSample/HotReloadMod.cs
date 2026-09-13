@@ -6,7 +6,7 @@ namespace Briefcase.HotReloadSample;
 public sealed class HotReloadMod : BriefcaseMod
 {
     // Change this string while the game is running, rebuild the project and copy
-    // the DLL into Briefcase/Mods. The log should show Unloaded then Loaded.
+    // the DLL in its Briefcase/Mods package. The log should show Unloaded then Loaded.
     private const string BuildMarker = "hot reload validated";
 
     public override ModInfo Info { get; } = new(

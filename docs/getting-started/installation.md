@@ -24,15 +24,15 @@ The `Win64` folder must now contain both `version.dll` and a `Briefcase`
 folder. Briefcase shows its loading progress during startup. Press **F1** after
 the game is ready to open its configuration menu.
 
-Install client mod files in:
+Install client mods from **F1 > Mods > Marketplace**, or extract a manual
+package into its own directory:
 
 ```text
-DeceiveInc\Binaries\Win64\Briefcase\Mods
+DeceiveInc\Binaries\Win64\Briefcase\Mods\mod-id\briefcase.mod.json
 ```
 
-Follow the instructions supplied with each mod because it may have additional
-dependencies or require a compatible community server.
-
+The manifest identifies the entry assembly and optional GitHub update source.
+Briefcase migrates older DLLs placed directly inside `Mods` when it starts.
 ## Dedicated server
 
 1. Stop the dedicated server.
@@ -44,12 +44,13 @@ The script starts the Shipping server in a terminal and uses the existing game
 and query ports from `TripwireServer.ini`. Press **Ctrl+C** in the terminal to
 stop it.
 
-Install server mod files in:
+Install every server mod in its own package directory:
 
 ```text
-DeceiveInc\Binaries\Win64\Briefcase\Mods
+DeceiveInc\Binaries\Win64\Briefcase\Mods\mod-id\briefcase.mod.json
 ```
 
+GitHub-linked server mods are updated before their assemblies load.
 The server runtime is headless. It does not contain Avalonia, an overlay, input
 handling, or an F1 menu.
 

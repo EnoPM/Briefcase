@@ -111,7 +111,7 @@ The managed mod manager creates a configuration scope before calling a mod's
 starts. Disposing that scope during hot reload removes entries and custom panels
 before the collectible assembly is released.
 
-The Mods page displays the installed DLL catalogue and controls persistent
+The Mods page displays the installed package catalogue and controls persistent
 enablement plus immediate load, reload, and unload operations. Disabled filenames
 are retained in `settings.json`, so the loader can skip them before executing any
 mod code on the next startup.
@@ -167,9 +167,10 @@ collectible contexts.
 
 ## Mod lifecycle
 
-Each DLL in `Briefcase/Mods` is shadow-copied to `Briefcase/Core/Cache` and
-loaded in its own collectible `AssemblyLoadContext`. A rebuild can therefore
-replace the source DLL while the game is running. The manager calls
+Each direct child of `Briefcase/Mods` is a package directory containing a
+`briefcase.mod.json` manifest. Its declared entry assembly is shadow-copied to
+`Briefcase/Core/Cache` and loaded in its own collectible `AssemblyLoadContext`.
+A rebuild can therefore replace the source DLL while the game is running. The manager calls
 `BriefcaseMod.Unload()` before releasing a context.
 
 A mod must unregister callbacks, stop timers, and release framework references

@@ -4,26 +4,30 @@ F1 is reserved by Briefcase. It opens one framework-owned Avalonia configuration
 window. Its stable navigation contains **Home**, **Servers**, and **Mods**.
 Briefcase controls that navigation so mods cannot add top-level tabs.
 
-The **Mods** page lists every DLL installed in
-`Briefcase/Mods`, renders simple settings declared with `Configuration.Bind`,
-and exposes each mod's persistent Enabled state plus the current session's Load,
-Reload, and Unload actions. Disabling a mod unloads it immediately and prevents
-automatic loading at the next game start. A manual Unload keeps the Enabled
-preference, while a manual Load can run a disabled mod for the current session.
+The **Mods** page separates installed packages from the free **Marketplace**.
+Each package lives below `Briefcase/Mods` in its own directory with a
+`briefcase.mod.json` manifest. Briefcase migrates legacy DLLs that are still
+placed directly in `Mods`.
+
+The **Installed** view renders simple settings declared with
+`Configuration.Bind` and exposes each mod's persistent Enabled state plus the
+current session's Load, Reload, and Unload actions. Disabling a mod unloads it
+immediately and prevents automatic loading at the next game start. A manual
+Unload keeps the Enabled preference, while a manual Load can run a disabled mod
+for the current session.
 
 A configurable mod has a **Configure** action on its card. Its generated settings
 and any registered complex panel open as a detail view inside **Mods**, with a
-button to return to the catalogue. Small mods therefore need no UI code.
+button to return to the installed list. Small mods therefore need no UI code.
 
 Dependency state is part of this library. A dependency cannot be disabled,
 unloaded, or reloaded while an enabled dependent uses it. The disabled control's
 tooltip lists the mods that must be disabled first.
 
-The same page can open the Mods directory or refresh it manually. The directory
-watcher discovers a newly copied DLL and hot reloads a replaced DLL when that
-mod is enabled or currently loaded. A remote catalogue and download/update UI
-can be added to this page without changing the mod configuration API.
-
+The **Marketplace** reads its curated list from the Briefcase GitHub repository
+and installs packages from each mod's own GitHub releases. Missing catalogue
+dependencies are installed first. See [Mod packages and marketplace](ModPackages.md)
+for manifests, release assets, validation, and automatic updates.
 ## Typed settings
 
 Call `ModContext.Configuration.Bind` during `Load`. The returned `ConfigEntry<T>`
