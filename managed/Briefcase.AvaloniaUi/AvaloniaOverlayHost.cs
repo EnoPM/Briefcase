@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
@@ -19,8 +20,8 @@ using Briefcase.ModApi;
 namespace Briefcase.AvaloniaUi;
 
 /// <summary>
-/// Owns Briefcase's client overlay on a dedicated STA thread. The lightweight
-/// startup view and the configuration menu have separate visual lifetimes.
+/// Owns Briefcase's Avalonia startup and configuration windows on a dedicated
+/// STA thread. Passive in-game drawings are handled by the native renderer.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
@@ -45,12 +46,19 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
     private OverlayFrameSnapshot _pendingOverlay = OverlayFrameSnapshot.Empty;
     private Thread? _thread;
     private Window? _window;
+    private Window? _passiveWindow;
     private IClassicDesktopStyleApplicationLifetime? _lifetime;
     private nint _windowHandle;
+    private nint _passiveWindowHandle;
+    private Win32Native.WindowProcedure? _passiveWindowProcedure;
+    private nint _passiveWindowProcedurePointer;
+    private nint _passiveOriginalWindowProcedure;
+
     private int _started;
     private int _ready;
     private int _visible;
     private int _requestedVisible;
+    private int _suspended;
     private int _failed;
     private int _disposing;
     private DispatcherTimer? _boundsTimer;
@@ -69,6 +77,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
     private int _clearLoadingAfterClose;
     private int _openMenuAfterClose;
     private int _overlayUpdateQueued;
+    private int _passiveVisible;
     private long _transitionStarted;
     private double _transitionFrom;
     private double _transitionTo;
@@ -107,6 +116,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
     public bool IsVisible => Volatile.Read(ref _visible) != 0;
     internal bool IsStartupVisible => Volatile.Read(ref _loadingVisible) != 0;
     internal bool IsMenuCreated => Volatile.Read(ref _menuCreated) != 0;
+    internal bool IsPassiveOverlayVisible => Volatile.Read(ref _passiveVisible) != 0;
     public bool HasFailed => Volatile.Read(ref _failed) != 0;
     public bool IsForeground =>
         _windowHandle != 0 &&
@@ -139,11 +149,17 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         });
     }
 
+    public void SetSuspended(bool suspended)
+    {
+        Volatile.Write(ref _suspended, suspended ? 1 : 0);
+        if (!IsReady) return;
+        Dispatcher.UIThread.Post(() => ApplySuspension(suspended));
+    }
+
     public void SubmitOverlay(OverlayFrameSnapshot frame)
     {
-        lock (_overlayGate) _pendingOverlay = frame;
-        if (!IsReady || Interlocked.Exchange(ref _overlayUpdateQueued, 1) != 0) return;
-        Dispatcher.UIThread.Post(ApplyPendingOverlay);
+        // Passive drawings use the native swap-chain renderer.
+        _ = frame;
     }
 
     private void ApplyPendingOverlay()
@@ -155,27 +171,25 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             Volatile.Write(ref _overlayUpdateQueued, 0);
         }
         var drawing = _overlayDrawing;
-        var window = _window;
-        if (drawing is null || window is null) return;
+        var passiveWindow = _passiveWindow;
+        if (drawing is null || passiveWindow is null) return;
         drawing.Update(frame);
+
+        // Passive drawings never share the HWND used by the interactive menu.
+        // This invariant prevents an ESP or aim-radius frame from changing the
+        // menu's activation, focus, hit-testing, or keyboard ownership.
+        if (Volatile.Read(ref _suspended) != 0 ||
+            Volatile.Read(ref _visible) != 0 ||
+            Volatile.Read(ref _loadingVisible) != 0)
+        {
+            HidePassiveOverlay();
+            return;
+        }
+
         if (drawing.HasContent)
-        {
-            if (!window.IsVisible)
-            {
-                window.Show();
-                AttachToGame(window);
-            }
-            ConfigureInteraction(false);
-            CoverGameClient(window);
-            _boundsTimer?.Start();
-        }
-        else if (Volatile.Read(ref _visible) == 0 &&
-                 Volatile.Read(ref _loadingVisible) == 0 &&
-                 _transitionProgress <= 0)
-        {
-            _boundsTimer?.Stop();
-            window.Hide();
-        }
+            ShowPassiveOverlay(passiveWindow);
+        else
+            HidePassiveOverlay();
     }
 
     private void ApplyVisibility(bool visible)
@@ -184,6 +198,8 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         if (window is null) return;
         if (visible)
         {
+            if (Volatile.Read(ref _suspended) != 0) return;
+            HidePassiveOverlay();
             // Reopening during a close cancels deferred destruction. The menu tree
             // is always complete before the opening animation can render a frame.
             Interlocked.Exchange(ref _destroyMenuAfterClose, 0);
@@ -205,9 +221,34 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         }
 
         Volatile.Write(ref _visible, 0);
+        // Give input back immediately. The closing animation may continue as a
+        // click-through visual, but a stalled Avalonia timer can no longer
+        // leave the game blocked behind an interactive transparent window.
+        ReleaseInteractionToGame();
         if (_recreateMenuOnClose)
             Interlocked.Exchange(ref _destroyMenuAfterClose, 1);
         BeginTransition(0);
+    }
+
+    private void ApplySuspension(bool suspended)
+    {
+        var window = _window;
+        if (window is null) return;
+        if (suspended)
+        {
+            ConfigureInteraction(false);
+            _boundsTimer?.Stop();
+            if (window.IsVisible) window.Hide();
+            HidePassiveOverlay();
+            return;
+        }
+
+        if (Volatile.Read(ref _requestedVisible) != 0)
+        {
+            ApplyVisibility(true);
+            return;
+        }
+        ApplyPendingOverlay();
     }
 
     public void Dispose()
@@ -223,13 +264,17 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             {
                 DestroyMenuContent();
                 DestroyLoadingContent();
+                RestorePassiveWindowProcedure();
+                _passiveWindow?.Close();
                 _window?.Close();
                 _lifetime?.Shutdown();
             });
         }
         if (_thread is { IsAlive: true } && Thread.CurrentThread != _thread)
             _thread.Join(TimeSpan.FromSeconds(3));
+        _thread = null;
         _window = null;
+        _passiveWindow = null;
         _boundsTimer = null;
         _transitionTimer = null;
         _backdrop = null;
@@ -238,6 +283,8 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         _animatedScale = null;
         _lifetime = null;
         _windowHandle = 0;
+        _passiveWindowHandle = 0;
+        Volatile.Write(ref _passiveVisible, 0);
         Volatile.Write(ref _ready, 0);
     }
 
@@ -260,7 +307,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         }
 
         Volatile.Write(ref _ready, 1);
-        _info("Avalonia overlay: ready (software rendering)");
+        _info("Avalonia menu surface: ready (software rendering)");
         if (_startupProgress is { } startup)
         {
             startup.Changed += OnStartupProgressChanged;
@@ -295,10 +342,28 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         }
         finally
         {
+            RecoverInputAfterUiExit();
             Interlocked.CompareExchange(ref s_initializing, null, this);
             Volatile.Write(ref _started, 0);
             Volatile.Write(ref _ready, 0);
             Volatile.Write(ref _visible, 0);
+        }
+    }
+
+    private void RecoverInputAfterUiExit()
+    {
+        Volatile.Write(ref _requestedVisible, 0);
+        Volatile.Write(ref _visible, 0);
+        ReleaseInteractionToGame();
+        var handle = _windowHandle;
+        if (Win32Native.IsWindow(handle))
+            Win32Native.ShowWindow(handle, Win32Native.SwHide);
+        HidePassiveOverlay();
+        try { _visibilityChanged(false); }
+        catch
+        {
+            // The UI is already stopping. Input recovery must not be prevented
+            // by a failing visibility observer.
         }
     }
 
@@ -315,11 +380,10 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             Opacity = 0,
             Children = { _surface }
         };
-        _overlayDrawing = new AvaloniaOverlayDrawingView();
         var root = new Grid
         {
             Background = Brushes.Transparent,
-            Children = { _overlayDrawing, _backdrop }
+            Children = { _backdrop }
         };
 
         var window = new Window
@@ -358,13 +422,40 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         _boundsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _boundsTimer.Tick += (_, _) =>
         {
-            if (window.IsVisible) CoverGameClient(window);
+            if (_window?.IsVisible == true) CoverGameClient(_window);
+            if (_passiveWindow?.IsVisible == true) CoverGameClient(_passiveWindow);
         };
         _transitionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _transitionTimer.Tick += (_, _) => AdvanceTransition();
         return window;
     }
 
+    private Window CreatePassiveOverlayWindow()
+    {
+        _overlayDrawing = new AvaloniaOverlayDrawingView();
+        var window = new Window
+        {
+            Title = "Briefcase Overlay",
+            Width = MenuWidth,
+            Height = MenuHeight,
+            Background = Brushes.Transparent,
+            Content = _overlayDrawing,
+            CanResize = false,
+            Focusable = false,
+            IsHitTestVisible = false,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+            WindowDecorations = WindowDecorations.None,
+            TransparencyLevelHint = [WindowTransparencyLevel.Transparent]
+        };
+        window.Opened += (_, _) =>
+        {
+            PreparePassiveOverlayWindow(window);
+            CoverGameClient(window);
+        };
+        return window;
+    }
     private void CloseFromUser()
     {
         if (Volatile.Read(ref _loadingVisible) != 0)
@@ -379,6 +470,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             Volatile.Read(ref _visible) == 0)
             return;
 
+        _info("Avalonia menu: close requested by the UI.");
         ApplyVisibility(false);
         _visibilityChanged(false);
     }
@@ -431,12 +523,8 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         SetTransitionProgress(target);
         if (target > 0) return;
 
-        ConfigureInteraction(false);
-        if (_overlayDrawing?.HasContent != true)
-        {
-            _boundsTimer?.Stop();
-            _window?.Hide();
-        }
+        ReleaseInteractionToGame();
+        _window?.Hide();
         if (Interlocked.Exchange(ref _clearLoadingAfterClose, 0) != 0)
             DestroyLoadingContent();
         if (Interlocked.Exchange(ref _destroyMenuAfterClose, 0) != 0)
@@ -447,7 +535,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
             ApplyVisibility(true);
             return;
         }
-        if (Win32Native.IsWindow(_gameWindow)) Win32Native.SetForegroundWindow(_gameWindow);
+        ApplyPendingOverlay();
     }
 
     private void OnStartupProgressChanged(FrameworkStartupSnapshot snapshot)
@@ -502,6 +590,7 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
     {
         var window = _window;
         if (window is null) return;
+        HidePassiveOverlay();
         var wasLoading = Interlocked.Exchange(ref _loadingVisible, 1) != 0;
         if (window.IsVisible) return;
         SetTransitionProgress(wasLoading ? _transitionProgress : 0);
@@ -636,6 +725,103 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         _info("Avalonia menu: released after close");
     }
 
+    private void ShowPassiveOverlay(Window window)
+    {
+        PreparePassiveOverlayWindow(window);
+        CoverGameClient(window);
+        if (!window.IsVisible)
+        {
+            window.Show();
+            PreparePassiveOverlayWindow(window);
+            CoverGameClient(window);
+        }
+        Volatile.Write(ref _passiveVisible, 1);
+        _boundsTimer?.Start();
+    }
+
+    private void HidePassiveOverlay()
+    {
+        Volatile.Write(ref _passiveVisible, 0);
+        if (_passiveWindow?.IsVisible == true)
+            _passiveWindow.Hide();
+        if (_window?.IsVisible != true)
+            _boundsTimer?.Stop();
+    }
+
+    private void PreparePassiveOverlayWindow(Window window)
+    {
+        var handle = window.TryGetPlatformHandle()?.Handle ?? 0;
+        if (handle == 0) return;
+        _passiveWindowHandle = handle;
+        Win32Native.SetWindowLongPtr(handle, Win32Native.GwlHwndParent, _gameWindow);
+
+        var style = (long)Win32Native.GetWindowLongPtr(handle, Win32Native.GwlExStyle);
+        style |= Win32Native.WsExTransparent |
+                 Win32Native.WsExNoActivate |
+                 Win32Native.WsExToolWindow;
+        Win32Native.SetWindowLongPtr(handle, Win32Native.GwlExStyle, (nint)style);
+
+        if (_passiveOriginalWindowProcedure == 0)
+        {
+            _passiveWindowProcedure = PassiveWindowProcedure;
+            _passiveWindowProcedurePointer =
+                Marshal.GetFunctionPointerForDelegate(_passiveWindowProcedure);
+            _passiveOriginalWindowProcedure = Win32Native.SetWindowLongPtr(
+                handle,
+                Win32Native.GwlWndProc,
+                _passiveWindowProcedurePointer);
+            if (_passiveOriginalWindowProcedure == 0)
+            {
+                _passiveWindowProcedure = null;
+                _passiveWindowProcedurePointer = 0;
+                _error("Passive overlay: window hit-test guard could not be installed.");
+            }
+        }
+
+        Win32Native.SetWindowPos(
+            handle,
+            Win32Native.HwndTop,
+            0,
+            0,
+            0,
+            0,
+            Win32Native.SwpNoMove |
+            Win32Native.SwpNoSize |
+            Win32Native.SwpNoActivate |
+            Win32Native.SwpFrameChanged);
+    }
+
+    private nint PassiveWindowProcedure(
+        nint window,
+        uint message,
+        nuint word,
+        nint value)
+    {
+        if (message == Win32Native.WmNcHitTest)
+            return Win32Native.HtTransparent;
+        if (message == Win32Native.WmMouseActivate)
+            return Win32Native.MaNoActivate;
+
+        var original = Volatile.Read(ref _passiveOriginalWindowProcedure);
+        return original != 0
+            ? Win32Native.CallWindowProcW(original, window, message, word, value)
+            : Win32Native.DefWindowProcW(window, message, word, value);
+    }
+
+    private void RestorePassiveWindowProcedure()
+    {
+        var handle = _passiveWindowHandle;
+        var original = _passiveOriginalWindowProcedure;
+        var replacement = _passiveWindowProcedurePointer;
+        if (Win32Native.IsWindow(handle) && original != 0 && replacement != 0 &&
+            Win32Native.GetWindowLongPtr(handle, Win32Native.GwlWndProc) == replacement)
+        {
+            Win32Native.SetWindowLongPtr(handle, Win32Native.GwlWndProc, original);
+        }
+        _passiveOriginalWindowProcedure = 0;
+        _passiveWindowProcedurePointer = 0;
+        _passiveWindowProcedure = null;
+    }
     private void AttachToGame(Window window)
     {
         var handle = window.TryGetPlatformHandle()?.Handle ?? 0;
@@ -666,6 +852,60 @@ internal sealed class AvaloniaOverlayHost : IRetainedMenuHost
         if (Math.Abs(window.Height - height) >= 0.5) window.Height = height;
         if (window.Position.X != origin.X || window.Position.Y != origin.Y)
             window.Position = new PixelPoint(origin.X, origin.Y);
+    }
+
+    private void ReleaseInteractionToGame()
+    {
+        var overlay = _windowHandle;
+        if (Win32Native.IsWindow(overlay) && Win32Native.GetCapture() == overlay)
+            Win32Native.ReleaseCapture();
+        ConfigureInteraction(false);
+        RestoreGameWindowFocus(overlay);
+    }
+
+    private void RestoreGameWindowFocus(nint overlay)
+    {
+        if (!Win32Native.IsWindow(_gameWindow)) return;
+
+        // Avalonia and Unreal own different Windows input queues. Temporarily
+        // joining them allows SetFocus to target Unreal reliably, including
+        // while Practice is destroying one pawn and possessing another.
+        var currentThread = Win32Native.GetCurrentThreadId();
+        var gameThread = Win32Native.GetWindowThreadProcessId(_gameWindow, out _);
+        var attached = gameThread != 0 && gameThread != currentThread &&
+                       Win32Native.AttachThreadInput(currentThread, gameThread, true);
+        try
+        {
+            Win32Native.SetForegroundWindow(_gameWindow);
+            Win32Native.SetActiveWindow(_gameWindow);
+            Win32Native.SetFocus(_gameWindow);
+        }
+        finally
+        {
+            if (attached)
+                Win32Native.AttachThreadInput(currentThread, gameThread, false);
+        }
+
+        var foreground = Win32Native.GetAncestor(
+            Win32Native.GetForegroundWindow(), Win32Native.GaRoot);
+        if (foreground == _gameWindow) return;
+
+        _info("Avalonia overlay: using hidden-window focus fallback.");
+        // A visible foreground overlay with WS_EX_NOACTIVATE can otherwise
+        // keep the last Unreal movement axis latched. Hiding it makes Windows
+        // activate its owner, while the non-interactive ESP surface may be
+        // shown again on the next render frame.
+        if (Win32Native.IsWindow(overlay))
+            Win32Native.ShowWindow(overlay, Win32Native.SwHide);
+        Win32Native.SetForegroundWindow(_gameWindow);
+        Win32Native.SetActiveWindow(_gameWindow);
+        Win32Native.SetFocus(_gameWindow);
+        var finalForeground = Win32Native.GetAncestor(
+            Win32Native.GetForegroundWindow(), Win32Native.GaRoot);
+        if (finalForeground != _gameWindow)
+            _error(
+                "Avalonia overlay: game focus restoration failed " +
+                $"(foreground=0x{(nuint)finalForeground:X}).");
     }
 
     private void ConfigureInteraction(bool interactive)

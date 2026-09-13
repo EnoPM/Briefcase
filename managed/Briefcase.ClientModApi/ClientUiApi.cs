@@ -29,10 +29,33 @@ public readonly struct ClientUiApi
     /// still runs in the game client; it is never loaded by the server.
     /// </summary>
     public IDisposable RegisterServerPanel(string name, UiComponent content)
+        => RegisterServerPanel(name, content, toolbar: null, footer: null);
+
+    /// <summary>
+    /// Adds a server panel and a compact toolbar rendered beside the framework's
+    /// back button. This is useful for connection state and refresh actions that
+    /// must remain visible regardless of the selected panel tab.
+    /// </summary>
+    public IDisposable RegisterServerPanel(
+        string name,
+        UiComponent content,
+        UiComponent? toolbar)
+        => RegisterServerPanel(name, content, toolbar, footer: null);
+
+    /// <summary>
+    /// Adds a server panel with framework-owned fixed header and footer areas.
+    /// The footer remains outside the scrolling content and is intended for
+    /// explicit Apply/Cancel actions over locally staged changes.
+    /// </summary>
+    public IDisposable RegisterServerPanel(
+        string name,
+        UiComponent content,
+        UiComponent? toolbar,
+        UiComponent? footer)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(content);
-        return Scope().RegisterServerPanel(name.Trim(), content);
+        return Scope().RegisterServerPanel(name.Trim(), content, toolbar, footer);
     }
 
     private IClientUiScope Scope() => _scope ?? throw new InvalidOperationException(
@@ -54,5 +77,9 @@ public static class ClientModContextExtensions
 internal interface IClientUiScope
 {
     IDisposable RegisterPanel(UiComponent content);
-    IDisposable RegisterServerPanel(string name, UiComponent content);
+    IDisposable RegisterServerPanel(
+        string name,
+        UiComponent content,
+        UiComponent? toolbar,
+        UiComponent? footer);
 }

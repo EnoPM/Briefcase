@@ -32,6 +32,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         UiSection section => BuildSection(section),
         UiCard card => BuildCard(card),
         UiExpander expander => BuildExpander(expander),
+        UiTabs tabs => BuildTabs(tabs),
         UiStatus status => BuildStatus(status),
         UiText text => BuildText(text),
         UiIconView icon => BuildIcon(icon),
@@ -76,7 +77,9 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         var card = BriefcaseControls.Card(
             section.Title,
             null,
-            children.Select(child => child.Control));
+            children.Select(child => child.Control),
+            showAccent: !section.StyleClasses.Contains(
+                UiClasses.FlatCard, StringComparer.Ordinal));
         return new RenderedComponent(card, () =>
         {
             foreach (var child in children) child.Refresh();
@@ -89,7 +92,11 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         var control = BriefcaseControls.Card(
             card.Title,
             null,
-            children.Select(child => child.Control));
+            children.Select(child => child.Control),
+            showAccent: !card.StyleClasses.Contains(
+                            UiClasses.FlatCard, StringComparer.Ordinal) &&
+                        !card.StyleClasses.Contains(
+                            UiClasses.ActionBar, StringComparer.Ordinal));
         return new RenderedComponent(
             control,
             () =>
@@ -120,6 +127,65 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
             () => DisposeAll(children));
     }
 
+    private RenderedComponent BuildTabs(UiTabs tabs)
+    {
+        var pages = tabs.Items.Select(item =>
+        {
+            var rendered = Build(item.Content);
+            var tab = new TabItem
+            {
+                Header = item.Label,
+                Content = new Border
+                {
+                    Padding = new Thickness(0, 16, 0, 0),
+                    Child = rendered.Control
+                },
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Stretch
+            };
+            tab.Classes.Add(UiClasses.Tab);
+            return new TabPage(item, tab, rendered);
+        }).ToArray();
+        var control = new TabControl
+        {
+            ItemsSource = pages.Select(page => page.Control).ToArray(),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        control.Classes.Add(UiClasses.Tabs);
+        var updating = false;
+        control.SelectionChanged += (_, eventArgs) =>
+        {
+            // SelectionChanged is routed. A ComboBox inside the selected page
+            // therefore reaches this handler too. Only the TabControl's own
+            // selection may switch pages or invalidate a mod UI.
+            if (!ReferenceEquals(eventArgs.Source, control) ||
+                updating || control.SelectedItem is not TabItem selected)
+                return;
+            var page = pages.FirstOrDefault(candidate =>
+                ReferenceEquals(candidate.Control, selected));
+            if (page is null) return;
+            Invoke(() => tabs.Select(page.Model.Id));
+            // Rebuilding a data-heavy page during TabControl's own selection
+            // transaction can force re-entrant measure/layout work. Defer the
+            // first refresh until Avalonia has completed the tab switch.
+            Dispatcher.UIThread.Post(page.Rendered.Refresh, DispatcherPriority.Background);
+        };
+        return new RenderedComponent(control, () =>
+        {
+            var selectedIndex = Array.FindIndex(pages, page => string.Equals(
+                page.Model.Id, tabs.SelectedId, StringComparison.Ordinal));
+            if (selectedIndex < 0) selectedIndex = 0;
+            if (control.SelectedIndex != selectedIndex)
+            {
+                updating = true;
+                try { control.SelectedIndex = selectedIndex; }
+                finally { updating = false; }
+            }
+            pages[selectedIndex].Rendered.Refresh();
+        }, reportError, () => DisposeAll(pages.Select(page => page.Rendered)));
+    }
+
     private RenderedComponent BuildStatus(UiStatus status)
     {
         var text = new TextBlock();
@@ -127,6 +193,7 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
             new Border
             {
                 HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
                 Child = text
             },
             () => text.Text = status.Value(),
@@ -368,6 +435,11 @@ internal sealed class AvaloniaComponentRenderer(Action<Exception> reportError)
         if (value <= (double)decimal.MinValue) return decimal.MinValue;
         return (decimal)value;
     }
+
+    private sealed record TabPage(
+        UiTab Model,
+        TabItem Control,
+        RenderedComponent Rendered);
 }
 
 internal sealed class RenderedComponent : IDisposable

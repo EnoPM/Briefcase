@@ -15,6 +15,7 @@ namespace ServerAdminControl.Client;
 /// </summary>
 public sealed partial class ServerAdminControlClientMod : BriefcaseMod
 {
+    private const int BalancePageSize = 40;
     private static readonly (string Value, string Label)[] Regions =
     [
         ("", "Auto-detect (closest)"),
@@ -50,6 +51,9 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
     private string _filter = "";
     private string _protocolStatus = "The server protocol has not been queried yet.";
     private string _selectedCategory = "";
+    private int _balancePage;
+    private int _apiConnectionState;
+    private long _apiConnectionRevision;
     private long _serverRevision = -1;
     private long _nextProfileRequest;
     private int _requestInProgress;
@@ -59,15 +63,17 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
     private int _receivedGameProfile;
     private int _refreshWorkspaceAfterLoad;
     private ServerModEnvelope[] _serverMods = [];
-    private readonly Dictionary<string, int> _serverModIntegerDrafts =
-        new(StringComparer.Ordinal);
-    private readonly Dictionary<string, float> _serverModFloatDrafts =
-        new(StringComparer.Ordinal);
-    private readonly Dictionary<string, double> _serverModDoubleDrafts =
-        new(StringComparer.Ordinal);
+    private string? _selectedServerModFileName;
+    private string? _serverModDraftFileName;
+    private IReadOnlyDictionary<string, JsonElement> _serverModDraftValues =
+        new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, JsonElement> _serverModOriginalValues =
+        new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+    private int _serverModDraftDirty;
     private ServerPlayerEnvelope[] _serverPlayers = [];
     private ModHandshakeClientSnapshot[] _handshakeClients = [];
     private ServerConfigurationEnvelope? _serverConfiguration;
+    private ServerConfigurationEnvelope? _savedServerConfiguration;
     private ServerPage _selectedServerPage;
     private int _serverConfigurationDirty;
     private bool _confirmRestart;
@@ -116,7 +122,11 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
             ApplyServerWorkspace,
             replaySelection: true);
         CommunityBalanceState.Reset();
-        _panel = context.Ui().RegisterServerPanel("Administration", BuildComponentPanel());
+        _panel = context.Ui().RegisterServerPanel(
+            "Administration",
+            BuildComponentPanel(),
+            BuildConnectionToolbar(),
+            BuildServerChangesFooter());
         // Network work starts from the first patched tick, after Load has
         // returned and every hook is attached. This keeps initialization and
         // hot reload deterministic even when the profile is large.
@@ -141,7 +151,10 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
         _networkLifetime = null;
         _panel?.Dispose();
         _panel = null;
+        SetApiConnectionState(ServerApiConnectionState.Disconnected);
         CommunityBalanceState.Reset();
+        ClearServerModDraft();
+        ClearServerConfigurationDraft();
     }
 
     private void ApplyServerWorkspace(ServerWorkspaceEvent notification)
@@ -149,14 +162,30 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
         var profile = notification.Profile;
         if (profile is null) return;
 
+        var connectionChanged = false;
         if (_endpoint is not null && !string.Equals(
                 _endpoint.Value,
                 profile.AdministrationEndpoint,
                 StringComparison.OrdinalIgnoreCase))
+        {
             _endpoint.Value = profile.AdministrationEndpoint;
+            connectionChanged = true;
+        }
         if (_administrationSecret is not null &&
             _administrationSecret.Value != profile.AdministrationPassword)
+        {
             _administrationSecret.Value = profile.AdministrationPassword;
+            connectionChanged = true;
+        }
+        if (connectionChanged)
+        {
+            ClearServerModDraft();
+            ClearServerConfigurationDraft();
+            CommunityBalanceState.Reset();
+            Volatile.Write(ref _serverMods, []);
+            Interlocked.Increment(ref _componentUiRevision);
+            SetApiConnectionState(ServerApiConnectionState.Disconnected);
+        }
 
         _handshake?.Refresh();
         if (!notification.OpenAdministration) return;
@@ -286,25 +315,42 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
             requestGameProfile: false);
     }
 
-    private void SendModSetting(
-        string fileName,
-        string section,
-        string key,
-        JsonElement value)
+    private void ApplyServerModDraft()
     {
+        var fileName = _serverModDraftFileName;
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            Volatile.Read(ref _serverModDraftDirty) == 0)
+            return;
+        var draft = Volatile.Read(ref _serverModDraftValues);
+        var original = Volatile.Read(ref _serverModOriginalValues);
+        var changes = draft
+            .Where(item => !original.TryGetValue(item.Key, out var previous) ||
+                           !JsonElement.DeepEquals(previous, item.Value))
+            .Select(item =>
+            {
+                var separator = item.Key.IndexOf('\n');
+                return new ServerModConfigurationChange(
+                    item.Key[..separator],
+                    item.Key[(separator + 1)..],
+                    item.Value);
+            })
+            .ToArray();
+        if (changes.Length == 0)
+        {
+            Interlocked.Exchange(ref _serverModDraftDirty, 0);
+            return;
+        }
+
         StartRequest(
             new ServerAdminRequest(
                 ServerAdminProtocol.Version,
                 Guid.NewGuid().ToString("N"),
-                ServerAdminOperations.SetModConfiguration,
+                ServerAdminOperations.SetModConfigurationBatch,
                 ModFileName: fileName,
-                ModSettingSection: section,
-                ModSettingKey: key,
-                ModSettingValue: value),
+                ModConfigurationChanges: changes),
             publishProfile: false,
             requestGameProfile: false);
     }
-
     private void RequestGameProfile()
     {
         Interlocked.Exchange(ref _receivedGameProfile, 0);
@@ -330,7 +376,7 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
                 _serverRevision < 0 ? null : _serverRevision,
                 json,
                 snapshot.Hash),
-            publishProfile: false,
+            publishProfile: true,
             requestGameProfile: false);
     }
 
@@ -343,21 +389,28 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
         var lifetime = _networkLifetime;
         var endpoint = _endpoint?.Value;
         var administrationSecret = _administrationSecret?.Value;
-        if (lifetime is null || string.IsNullOrWhiteSpace(endpoint) ||
-            Interlocked.CompareExchange(ref _networkBusy, 1, 0) != 0)
+        if (lifetime is null || string.IsNullOrWhiteSpace(endpoint))
+        {
+            SetApiConnectionState(ServerApiConnectionState.Disconnected);
             return;
+        }
+        if (Interlocked.CompareExchange(ref _networkBusy, 1, 0) != 0) return;
 
         if (string.IsNullOrEmpty(administrationSecret))
         {
             Interlocked.Exchange(ref _networkBusy, 0);
+            SetApiConnectionState(ServerApiConnectionState.Disconnected);
             Volatile.Write(ref _protocolStatus,
-                "Enter the administration password in the Server page.");
+                "Edit the saved server and enter its administration password.");
             return;
         }
 
+        if (!ApiConnected())
+            SetApiConnectionState(ServerApiConnectionState.Connecting);
         Volatile.Write(ref _protocolStatus, $"Sending {request.Operation} to {endpoint}...");
         _networkTask = Task.Run(async () =>
         {
+            var connected = false;
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -365,8 +418,12 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
                 var response = await ServerAdminClient.SendAsync(
                     endpoint, administrationSecret, request, timeout.Token);
                 _serverRevision = response.Revision;
+                ServerModEnvelope[]? receivedMods = null;
                 if (response.Mods is not null)
-                    Volatile.Write(ref _serverMods, response.Mods.ToArray());
+                {
+                    receivedMods = response.Mods.ToArray();
+                    Volatile.Write(ref _serverMods, receivedMods);
+                }
                 if (response.Players is not null)
                     Volatile.Write(ref _serverPlayers, response.Players.ToArray());
                 if (response.HandshakeClients is not null)
@@ -374,11 +431,25 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
                         ref _handshakeClients, response.HandshakeClients.ToArray());
                 if (!response.Success)
                 {
+                    SetApiConnectionState(ServerApiConnectionState.Disconnected);
                     Volatile.Write(ref _protocolStatus, response.Error ?? response.Status);
                     _context.Warning(
                         $"Server administration protocol rejected {request.Operation}: " +
                         $"{response.Error ?? response.Status}");
                     return;
+                }
+
+                connected = true;
+                SetApiConnectionState(ServerApiConnectionState.Connected);
+                if (receivedMods is not null &&
+                    !string.IsNullOrWhiteSpace(_serverModDraftFileName) &&
+                    (request.Operation == ServerAdminOperations.SetModConfigurationBatch ||
+                     Volatile.Read(ref _serverModDraftDirty) == 0))
+                {
+                    var current = receivedMods.FirstOrDefault(mod => mod.FileName.Equals(
+                        _serverModDraftFileName,
+                        StringComparison.OrdinalIgnoreCase));
+                    if (current is not null) ResetServerModDraft(current);
                 }
 
                 if (publishProfile && response.Profile is not null)
@@ -394,7 +465,9 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
                 }
                 if (publishConfiguration && response.ServerConfiguration is not null)
                 {
-                    Volatile.Write(ref _serverConfiguration, response.ServerConfiguration);
+                    var configuration = response.ServerConfiguration;
+                    Volatile.Write(ref _serverConfiguration, configuration);
+                    Volatile.Write(ref _savedServerConfiguration, configuration);
                     Interlocked.Exchange(ref _serverConfigurationDirty, 0);
                 }
                 if (requestGameProfile)
@@ -409,11 +482,14 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
             }
             catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
             {
+                SetApiConnectionState(ServerApiConnectionState.Disconnected);
                 Volatile.Write(ref _protocolStatus, "The server protocol request timed out.");
             }
             catch (OperationCanceledException) { }
             catch (Exception exception)
             {
+                if (!connected)
+                    SetApiConnectionState(ServerApiConnectionState.Disconnected);
                 Volatile.Write(ref _protocolStatus,
                     $"Server protocol unavailable: {exception.Message}");
                 _context.Warning(
@@ -422,6 +498,16 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
             }
             finally { Interlocked.Exchange(ref _networkBusy, 0); }
         }, lifetime.Token);
+    }
+
+    private bool ApiConnected() => Volatile.Read(ref _apiConnectionState) ==
+                                   (int)ServerApiConnectionState.Connected;
+
+    private void SetApiConnectionState(ServerApiConnectionState state)
+    {
+        if (Interlocked.Exchange(ref _apiConnectionState, (int)state) == (int)state)
+            return;
+        Interlocked.Increment(ref _apiConnectionRevision);
     }
 
     private bool CategoryMatchesFilter(BalanceCategory category)
@@ -454,6 +540,13 @@ public sealed partial class ServerAdminControlClientMod : BriefcaseMod
         Balancing,
         Mods,
         Compatibility
+    }
+
+    private enum ServerApiConnectionState
+    {
+        Disconnected,
+        Connecting,
+        Connected
     }
 
     /// <summary>

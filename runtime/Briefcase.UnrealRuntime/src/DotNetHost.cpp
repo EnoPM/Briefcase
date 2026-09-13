@@ -93,7 +93,9 @@ namespace briefcase {
 void runDotNetHost(HMODULE frameworkModule) {
     try {
         const auto root = moduleDirectory(frameworkModule);
-        const auto coreDirectory = root / L"Briefcase" / L"Core";
+        const auto frameworkDirectory = root / L"Briefcase";
+        const auto coreDirectory = frameworkDirectory / L"Core";
+        loadOptionalRenderingHost(frameworkDirectory);
         const auto dotNetDirectory = coreDirectory / L"DotNet";
         const auto runtimeConfig = coreDirectory / L"Briefcase.ManagedHost.runtimeconfig.json";
         const auto managedAssembly = coreDirectory / L"Briefcase.ManagedHost.dll";

@@ -17,33 +17,130 @@ public sealed partial class ServerAdminControlClientMod
 
     private UiComponent BuildComponentPanel() => Ui.Column(
         Ui.Text("BRIEFCASE SERVER", UiTextTone.Accent, wrap: false),
-        Ui.Text(() => Volatile.Read(ref _protocolStatus)),
-        Ui.Row(
-            NavigationButton("Server", ServerPage.Server),
-            NavigationButton("Players", ServerPage.Players),
-            NavigationButton("Balancing", ServerPage.Balancing),
-            NavigationButton("Mods", ServerPage.Mods),
-            NavigationButton("Compatibility", ServerPage.Compatibility)),
-        BuildServerConfigurationComponents()
-            .VisibleWhen(() => _selectedServerPage == ServerPage.Server),
-        BuildPlayersComponents()
-            .VisibleWhen(() => _selectedServerPage == ServerPage.Players),
-        BuildBalancingComponents()
-            .VisibleWhen(() => _selectedServerPage == ServerPage.Balancing),
-        BuildServerModsComponents()
-            .VisibleWhen(() => _selectedServerPage == ServerPage.Mods),
-        BuildCompatibilityComponents()
-            .VisibleWhen(() => _selectedServerPage == ServerPage.Compatibility));
+        Ui.Section("Server API unavailable",
+                Ui.Text(() => Volatile.Read(ref _protocolStatus)),
+                Ui.Text(
+                    "Check the administration address and password, then refresh the connection.",
+                    UiTextTone.Muted))
+            .VisibleWhen(() => !ApiConnected()),
+        Ui.Tabs(
+            () => _selectedServerPage.ToString(),
+            selected =>
+            {
+                if (!Enum.TryParse<ServerPage>(selected, out var page)) return;
+                _selectedServerPage = page;
+                Interlocked.Increment(ref _componentUiRevision);
+            },
+            Ui.Tab(nameof(ServerPage.Server), "Server",
+                BuildServerConfigurationComponents()),
+            Ui.Tab(nameof(ServerPage.Players), "Players",
+                BuildPlayersComponents()),
+            Ui.Tab(nameof(ServerPage.Balancing), "Balancing",
+                BuildBalancingComponents()),
+            Ui.Tab(nameof(ServerPage.Mods), "Mods",
+                BuildServerModsComponents()),
+            Ui.Tab(nameof(ServerPage.Compatibility), "Compatibility",
+                BuildCompatibilityComponents()))
+            .VisibleWhen(ApiConnected));
 
-    private UiComponent NavigationButton(string label, ServerPage page) =>
-        Ui.Button(
-                () => _selectedServerPage == page ? $"• {label}" : label,
-                () =>
-                {
-                    _selectedServerPage = page;
-                    Interlocked.Increment(ref _componentUiRevision);
-                })
-            .EnabledWhen(() => _selectedServerPage != page);
+    /// <summary>
+    /// Keeps server edits local until the administrator explicitly applies
+    /// them. The footer lives outside the scrolling page so it remains visible
+    /// while editing long server, balancing, or mod forms.
+    /// </summary>
+    private UiComponent BuildServerChangesFooter() =>
+        Ui.Card(
+                Ui.Row(
+                    Ui.Text(PendingServerChangesLabel),
+                    Ui.Button("Cancel", CancelPendingServerChanges),
+                    Ui.Button("Apply changes", UiIcon.Save, ApplyPendingServerChanges)
+                        .WithClass(UiClasses.Primary)
+                        .EnabledWhen(CanApplyPendingServerChanges)))
+            .WithClass(UiClasses.ActionBar)
+            .VisibleWhen(HasPendingServerChanges);
+
+    private bool HasPendingServerChanges() => _selectedServerPage switch
+    {
+        ServerPage.Server => Volatile.Read(ref _serverConfigurationDirty) != 0,
+        ServerPage.Balancing => CommunityBalanceState.Snapshot?.Editor.ModifiedCount > 0,
+        ServerPage.Mods => !string.IsNullOrWhiteSpace(_selectedServerModFileName) &&
+                           Volatile.Read(ref _serverModDraftDirty) != 0,
+        _ => false
+    };
+
+    private string PendingServerChangesLabel() => _selectedServerPage switch
+    {
+        ServerPage.Server => "The server configuration has unapplied changes.",
+        ServerPage.Balancing =>
+            $"{CommunityBalanceState.Snapshot?.Editor.ModifiedCount ?? 0} balancing setting(s) have unapplied changes.",
+        ServerPage.Mods => "This server mod has unapplied configuration changes.",
+        _ => "There are unapplied server changes."
+    };
+
+    private bool CanApplyPendingServerChanges() => !NetworkBusy() &&
+        HasPendingServerChanges() &&
+        (_selectedServerPage != ServerPage.Balancing ||
+         CommunityBalanceState.Snapshot?.Editor.IsValid == true);
+
+    private void ApplyPendingServerChanges()
+    {
+        switch (_selectedServerPage)
+        {
+            case ServerPage.Server when CurrentConfiguration() is { } configuration:
+                SaveServerConfiguration(configuration);
+                break;
+            case ServerPage.Balancing when CommunityBalanceState.Snapshot is { } snapshot:
+                StageChanges(snapshot);
+                break;
+            case ServerPage.Mods:
+                ApplyServerModDraft();
+                break;
+        }
+    }
+
+    private void CancelPendingServerChanges()
+    {
+        switch (_selectedServerPage)
+        {
+            case ServerPage.Server:
+                CancelServerConfigurationDraft();
+                break;
+            case ServerPage.Balancing:
+                CommunityBalanceState.Snapshot?.Editor.ResetAll();
+                Interlocked.Exchange(ref _dirty, 0);
+                break;
+            case ServerPage.Mods:
+                CancelServerModDraft();
+                break;
+        }
+    }
+
+    private UiComponent BuildConnectionToolbar() => Ui.Row(
+        Ui.Dynamic(
+            () =>
+            [
+                Ui.Status(ConnectionLabel(), ConnectionTone())
+                    .WithTooltip(() => Volatile.Read(ref _protocolStatus))
+            ],
+            () => Volatile.Read(ref _apiConnectionRevision)),
+        Ui.Button("Refresh connection", UiIcon.Refresh, RefreshFromProtocol)
+            .EnabledWhen(() => !NetworkBusy()));
+
+    private string ConnectionLabel() =>
+        (ServerApiConnectionState)Volatile.Read(ref _apiConnectionState) switch
+        {
+            ServerApiConnectionState.Connected => "API connected",
+            ServerApiConnectionState.Connecting => "Connecting to API...",
+            _ => "API disconnected"
+        };
+
+    private UiStatusTone ConnectionTone() =>
+        (ServerApiConnectionState)Volatile.Read(ref _apiConnectionState) switch
+        {
+            ServerApiConnectionState.Connected => UiStatusTone.Success,
+            ServerApiConnectionState.Connecting => UiStatusTone.Information,
+            _ => UiStatusTone.Warning
+        };
 
     private UiComponent BuildServerConfigurationComponents()
     {
@@ -69,17 +166,31 @@ public sealed partial class ServerAdminControlClientMod
                     value =>
                     {
                         if (_endpoint is not null) _endpoint.Value = value;
+                        SetApiConnectionState(ServerApiConnectionState.Disconnected);
                         _handshake?.Refresh();
-                    }, maximumLength: 256),
+                    }, maximumLength: 256,
+                    commitMode: UiCommitMode.OnCommit),
                 Ui.TextField("Administration password",
                         () => _administrationSecret?.Value ?? "",
-                        value => { if (_administrationSecret is not null) _administrationSecret.Value = value; },
-                        secret: true, maximumLength: 128)
+                        value =>
+                        {
+                            if (_administrationSecret is not null)
+                                _administrationSecret.Value = value;
+                            SetApiConnectionState(ServerApiConnectionState.Disconnected);
+                        },
+                        secret: true, maximumLength: 128,
+                        commitMode: UiCommitMode.OnCommit)
                     .VisibleWhen(() => !_showAuthenticationSecret),
                 Ui.TextField("Administration password",
                         () => _administrationSecret?.Value ?? "",
-                        value => { if (_administrationSecret is not null) _administrationSecret.Value = value; },
-                        maximumLength: 128)
+                        value =>
+                        {
+                            if (_administrationSecret is not null)
+                                _administrationSecret.Value = value;
+                            SetApiConnectionState(ServerApiConnectionState.Disconnected);
+                        },
+                        maximumLength: 128,
+                        commitMode: UiCommitMode.OnCommit)
                     .VisibleWhen(() => _showAuthenticationSecret),
                 Ui.Toggle("Show administration password",
                     () => _showAuthenticationSecret,
@@ -190,7 +301,7 @@ public sealed partial class ServerAdminControlClientMod
                             configuration with { BotsAmount = value }),
                         0, 8)),
                 BuildHeatComponents(),
-                BuildConfigurationActions(),
+                BuildServerProcessActions(),
                 Ui.Section("Runtime",
                     Ui.Text(() => $"PID: {CurrentConfiguration()?.ProcessId}"),
                     Ui.Text(() => $"Executable: {CurrentConfiguration()?.ExecutablePath}"),
@@ -222,19 +333,11 @@ public sealed partial class ServerAdminControlClientMod
         FloatConfiguration("Decay rate", configuration => configuration.HeatDecayRate,
             (configuration, value) => configuration with { HeatDecayRate = value }, 0, 10));
 
-    private UiComponent BuildConfigurationActions() => Ui.Section("Apply",
+    private UiComponent BuildServerProcessActions() => Ui.Section("Server process",
         Ui.Row(
-            Ui.Button("Save configuration", () =>
-            {
-                if (CurrentConfiguration() is { } configuration)
-                    SaveServerConfiguration(configuration);
-            }).EnabledWhen(() =>
-                !NetworkBusy() && Volatile.Read(ref _serverConfigurationDirty) != 0),
             Ui.Button("Restart server", () => _confirmRestart = true)
                 .EnabledWhen(() =>
                     !NetworkBusy() && Volatile.Read(ref _serverConfigurationDirty) == 0)),
-        Ui.Text("The configuration has unsaved changes.", UiTextTone.Warning)
-            .VisibleWhen(() => Volatile.Read(ref _serverConfigurationDirty) != 0),
         Ui.Column(
             Ui.Text(
                 "The dedicated server will disconnect every player and restart.",
@@ -336,22 +439,7 @@ public sealed partial class ServerAdminControlClientMod
             Ui.Row(
                 Ui.Button("Request game values", RequestGameProfile),
                 Ui.Button("Reload server profile", RefreshFromProtocol)
-                    .EnabledWhen(() => !NetworkBusy()),
-                Ui.Button("Save changes", () =>
-                {
-                    if (CommunityBalanceState.Snapshot is { } snapshot) StageChanges(snapshot);
-                }).EnabledWhen(() =>
-                {
-                    var snapshot = CommunityBalanceState.Snapshot;
-                    return !NetworkBusy() && snapshot is not null &&
-                           snapshot.Editor.ModifiedCount > 0 && snapshot.Editor.IsValid;
-                }),
-                Ui.Button("Reset all", () =>
-                {
-                    CommunityBalanceState.Snapshot?.Editor.ResetAll();
-                    Interlocked.Exchange(ref _dirty, 0);
-                }).VisibleWhen(() =>
-                    CommunityBalanceState.Snapshot?.Editor.ModifiedCount > 0)),
+                    .EnabledWhen(() => !NetworkBusy())),
             Ui.Text(
                 "Changes are saved to CommunityBalanceProfile.json. Restart the server before players join to apply them.",
                 UiTextTone.Muted),
@@ -360,9 +448,11 @@ public sealed partial class ServerAdminControlClientMod
                 value =>
                 {
                     _filter = value;
+                    _balancePage = 0;
                     Interlocked.Increment(ref _componentUiRevision);
                 }, maximumLength: 256,
-                hint: "Search categories, settings or descriptions..."),
+                hint: "Search categories, settings or descriptions...",
+                commitMode: UiCommitMode.OnCommit),
             Ui.Dynamic(BuildBalanceEditorComponents, BalanceUiRevision)));
 
     private IReadOnlyList<UiComponent> BuildBalanceEditorComponents()
@@ -410,6 +500,7 @@ public sealed partial class ServerAdminControlClientMod
             value =>
             {
                 _selectedCategory = value;
+                _balancePage = 0;
                 Interlocked.Increment(ref _componentUiRevision);
             },
             categories.Select(category => category.Name),
@@ -426,7 +517,7 @@ public sealed partial class ServerAdminControlClientMod
 
     private UiComponent BuildBalanceCategory(BalanceCategory category)
     {
-        var sections = new List<UiComponent>();
+        var visible = new List<(string Section, BalanceSetting Setting)>();
         foreach (var section in category.Sections)
         {
             var showWholeSection = string.IsNullOrWhiteSpace(_filter) ||
@@ -435,11 +526,48 @@ public sealed partial class ServerAdminControlClientMod
             var settings = showWholeSection
                 ? section.Settings.ToArray()
                 : section.Settings.Where(SettingMatchesFilter).ToArray();
-            if (settings.Length == 0) continue;
-            sections.Add(Ui.Section($"{section.Name} ({settings.Length})",
-                settings.Select(BuildBalanceSetting).ToArray()));
+            visible.AddRange(settings.Select(setting => (section.Name, setting)));
         }
-        return Ui.Column(sections.ToArray());
+        if (visible.Count == 0)
+            return Ui.Text("No setting matches this search.", UiTextTone.Muted);
+
+        var pageCount = (visible.Count + BalancePageSize - 1) / BalancePageSize;
+        _balancePage = Math.Clamp(_balancePage, 0, pageCount - 1);
+        var first = _balancePage * BalancePageSize;
+        var page = visible.Skip(first).Take(BalancePageSize).ToArray();
+        var content = new List<UiComponent>
+        {
+            Ui.Text(
+                $"Showing {first + 1}-{first + page.Length} of {visible.Count} settings",
+                UiTextTone.Muted)
+        };
+        if (pageCount > 1)
+        {
+            content.Add(Ui.Row(
+                Ui.Button("Previous", () => ChangeBalancePage(-1))
+                    .EnabledWhen(() => _balancePage > 0),
+                Ui.Text($"Page {_balancePage + 1} of {pageCount}", UiTextTone.Muted),
+                Ui.Button("Next", () => ChangeBalancePage(1))
+                    .EnabledWhen(() => _balancePage + 1 < pageCount)));
+        }
+        var sections = page.GroupBy(entry => entry.Section).ToArray();
+        for (var index = 0; index < sections.Length; index++)
+        {
+            var section = sections[index];
+            content.Add(Ui.Text(
+                $"{section.Key} ({section.Count()} on this page)",
+                UiTextTone.Accent));
+            content.AddRange(section.Select(entry =>
+                BuildBalanceSetting(entry.Setting)));
+            if (index + 1 < sections.Length) content.Add(Ui.Separator());
+        }
+        return Ui.Column(content.ToArray());
+    }
+
+    private void ChangeBalancePage(int offset)
+    {
+        _balancePage = Math.Max(0, _balancePage + offset);
+        Interlocked.Increment(ref _componentUiRevision);
     }
 
     private UiComponent BuildBalanceSetting(BalanceSetting setting)
@@ -477,7 +605,8 @@ public sealed partial class ServerAdminControlClientMod
                 {
                     setting.SetDraft(value);
                     Interlocked.Exchange(ref _dirty, 1);
-                }, maximumLength: 16_384)
+                }, maximumLength: 16_384,
+                commitMode: UiCommitMode.OnCommit)
         };
         editor.EnabledWhen(() => setting.IsEditable);
         return Ui.Column(
@@ -500,107 +629,222 @@ public sealed partial class ServerAdminControlClientMod
                Volatile.Read(ref _componentUiRevision);
     }
 
-    private UiComponent BuildServerModsComponents() => Ui.Section(
-        "Server mods",
-        Ui.Text("Manage DLLs already installed in the server's Briefcase/Mods directory.",
-            UiTextTone.Muted),
-        Ui.Button("Refresh server mods", () => RequestServerMods(refreshDirectory: true))
-            .EnabledWhen(() => !NetworkBusy()),
-        Ui.Dynamic(BuildServerModRows, () =>
-            RuntimeHelpers.GetHashCode(Volatile.Read(ref _serverMods))));
+    private UiComponent BuildServerModsComponents() => Ui.Dynamic(
+        BuildServerModsPage,
+        ServerModsUiRevision);
 
-    private IReadOnlyList<UiComponent> BuildServerModRows()
+    private IReadOnlyList<UiComponent> BuildServerModsPage()
     {
-        var mods = Volatile.Read(ref _serverMods);
+        var mods = Volatile.Read(ref _serverMods)
+            .OrderBy(mod => mod.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(mod => mod.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (!string.IsNullOrWhiteSpace(_selectedServerModFileName))
+        {
+            var selected = mods.FirstOrDefault(mod => mod.FileName.Equals(
+                _selectedServerModFileName,
+                StringComparison.OrdinalIgnoreCase));
+            if (selected is not null)
+                return BuildServerModConfigurationPage(selected);
+            _selectedServerModFileName = null;
+        }
+
+        var result = new List<UiComponent>
+        {
+            Ui.Section("Server mod library",
+                Ui.Text(
+                    "Enable, load, reload, and unload the managed mods installed on this server.",
+                    UiTextTone.Muted),
+                Ui.Button("Refresh server mods", UiIcon.Refresh,
+                        () => RequestServerMods(refreshDirectory: true))
+                    .EnabledWhen(() => !NetworkBusy()))
+        };
         if (mods.Length == 0)
-            return [Ui.Text(NetworkBusy()
+        {
+            result.Add(Ui.Text(NetworkBusy()
                 ? "Requesting the server mod list..."
-                : "No server mods were returned.", UiTextTone.Muted)];
-        return mods.Select(BuildServerMod).ToArray();
+                : "No server mods were returned.", UiTextTone.Muted));
+            return result;
+        }
+
+        result.AddRange(mods.Select(BuildServerModCard));
+        return result;
     }
 
-    private UiComponent BuildServerMod(ServerModEnvelope mod)
+    private UiComponent BuildServerModCard(ServerModEnvelope mod)
     {
         var children = new List<UiComponent>
         {
-            Ui.Toggle("Enabled", () => mod.Enabled, enabled =>
-                    SendModCommand(ServerAdminOperations.SetModEnabled, mod.FileName, enabled))
-                .EnabledWhen(() => !NetworkBusy() && mod.CanManage && (!mod.Enabled || mod.CanStop))
-                .WithTooltip(() => mod.StopBlockReason),
+            BuildServerModStatus(mod),
+            Ui.Text(string.IsNullOrWhiteSpace(mod.Version)
+                ? mod.FileName
+                : $"{mod.FileName}  ·  {mod.Version}", UiTextTone.Muted),
+            BuildServerModEnabledToggle(mod),
+            BuildServerModActions(mod, includeConfigure: true)
+        };
+        if (HasPendingServerModDraft(mod))
+            children.Add(Ui.Status("Unsaved settings", UiStatusTone.Warning));
+        AddServerModDetails(children, mod);
+        return Ui.Card(mod.DisplayName, children.ToArray());
+    }
+
+    private IReadOnlyList<UiComponent> BuildServerModConfigurationPage(
+        ServerModEnvelope mod)
+    {
+        EnsureServerModDraft(mod);
+        var result = new List<UiComponent>
+        {
+            Ui.Button("Back to server mods", () =>
+            {
+                _selectedServerModFileName = null;
+                Interlocked.Increment(ref _componentUiRevision);
+            }),
             Ui.Text(mod.DisplayName, UiTextTone.Accent),
             Ui.Text(string.IsNullOrWhiteSpace(mod.Version)
                 ? mod.FileName
-                : $"{mod.FileName} | {mod.Version}", UiTextTone.Muted),
-            Ui.Text(mod.LastError is null ? (mod.Loaded ? "Loaded" : "Unloaded") : $"Error: {mod.LastError}",
-                mod.LastError is null ? (mod.Loaded ? UiTextTone.Accent : UiTextTone.Muted) : UiTextTone.Warning),
-            Ui.Row(
-                Ui.Button("Reload", () =>
-                        SendModCommand(ServerAdminOperations.ReloadMod, mod.FileName))
-                    .VisibleWhen(() => mod.Loaded)
-                    .EnabledWhen(() => !NetworkBusy() && mod.CanStop)
-                    .WithTooltip(() => mod.StopBlockReason),
-                Ui.Button("Unload", () =>
-                        SendModCommand(ServerAdminOperations.UnloadMod, mod.FileName))
-                    .VisibleWhen(() => mod.Loaded)
-                    .EnabledWhen(() => !NetworkBusy() && mod.CanStop)
-                    .WithTooltip(() => mod.StopBlockReason),
-                Ui.Button("Load", () =>
-                        SendModCommand(ServerAdminOperations.LoadMod, mod.FileName))
-                    .VisibleWhen(() => !mod.Loaded)
-                    .EnabledWhen(() => !NetworkBusy() && mod.CanManage)),
-            Ui.Text(mod.ManagementNote ?? "", UiTextTone.Muted)
-                .VisibleWhen(() => !string.IsNullOrWhiteSpace(mod.ManagementNote)),
-            Ui.Text($"Requires: {string.Join(", ", mod.Dependencies)}", UiTextTone.Muted)
-                .VisibleWhen(() => mod.Dependencies.Count > 0),
-            Ui.Text(mod.Description, UiTextTone.Muted)
-                .VisibleWhen(() => !string.IsNullOrWhiteSpace(mod.Description))
+                : $"{mod.FileName}  ·  {mod.Version}", UiTextTone.Muted),
+            Ui.Section("Mod status",
+                BuildServerModStatus(mod),
+                BuildServerModEnabledToggle(mod),
+                BuildServerModActions(mod, includeConfigure: false))
         };
-        if (mod.Configuration.Count > 0)
+        if (!string.IsNullOrWhiteSpace(mod.Description))
+            result.Add(Ui.Text(mod.Description, UiTextTone.Muted));
+        if (mod.Configuration.Count == 0)
         {
-            children.Add(Ui.Text("Configuration", UiTextTone.Accent));
-            foreach (var section in mod.Configuration.GroupBy(
-                         entry => entry.Section, StringComparer.OrdinalIgnoreCase))
-            {
-                children.Add(Ui.Section(section.Key,
-                    section.Select(entry => BuildServerModSetting(mod, entry)).ToArray()));
-            }
+            result.Add(Ui.Section("Configuration",
+                Ui.Text("This server mod does not expose configurable settings.",
+                    UiTextTone.Muted)));
+            return result;
         }
-        return Ui.Section(mod.DisplayName, children.ToArray());
+
+        foreach (var section in mod.Configuration.GroupBy(
+                     entry => entry.Section,
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            result.Add(Ui.Section(section.Key,
+                section.Select(entry => BuildServerModSetting(mod, entry)).ToArray()));
+        }
+        return result;
     }
 
+    private UiComponent BuildServerModStatus(ServerModEnvelope mod) =>
+        mod.LastError is not null
+            ? Ui.Status("Error", UiStatusTone.Error)
+                .WithTooltip(mod.LastError)
+            : mod.Loaded
+                ? Ui.Status("Loaded", UiStatusTone.Success)
+                : Ui.Status("Unloaded", UiStatusTone.Neutral);
+
+    private UiComponent BuildServerModEnabledToggle(ServerModEnvelope mod) =>
+        Ui.Toggle("Enabled", () => mod.Enabled, enabled =>
+                SendModCommand(
+                    ServerAdminOperations.SetModEnabled,
+                    mod.FileName,
+                    enabled))
+            .EnabledWhen(() =>
+                !NetworkBusy() &&
+                !HasPendingServerModDraft(mod) &&
+                mod.CanManage &&
+                (!mod.Enabled || mod.CanStop))
+            .WithTooltip(() => ServerModActionBlockReason(mod));
+
+    private UiComponent BuildServerModActions(
+        ServerModEnvelope mod,
+        bool includeConfigure)
+    {
+        return Ui.Row(
+            Ui.Button("Configure", UiIcon.Settings, () =>
+                {
+                    EnsureServerModDraft(mod);
+                    _selectedServerModFileName = mod.FileName;
+                    Interlocked.Increment(ref _componentUiRevision);
+                })
+                .VisibleWhen(() => includeConfigure && mod.Configuration.Count > 0)
+                .EnabledWhen(() => CanOpenServerModConfiguration(mod))
+                .WithTooltip(() => CanOpenServerModConfiguration(mod)
+                    ? null
+                    : "Apply or cancel the pending changes for the other server mod first."),
+            Ui.Button("Reload", UiIcon.Reload, () =>
+                    SendModCommand(ServerAdminOperations.ReloadMod, mod.FileName))
+                .VisibleWhen(() => mod.Loaded)
+                .EnabledWhen(() =>
+                    !NetworkBusy() && !HasPendingServerModDraft(mod) && mod.CanStop)
+                .WithTooltip(() => ServerModActionBlockReason(mod)),
+            Ui.Button("Unload", UiIcon.Power, () =>
+                    SendModCommand(ServerAdminOperations.UnloadMod, mod.FileName))
+                .VisibleWhen(() => mod.Loaded)
+                .EnabledWhen(() =>
+                    !NetworkBusy() && !HasPendingServerModDraft(mod) && mod.CanStop)
+                .WithTooltip(() => ServerModActionBlockReason(mod)),
+            Ui.Button("Load", UiIcon.Play, () =>
+                    SendModCommand(ServerAdminOperations.LoadMod, mod.FileName))
+                .VisibleWhen(() => !mod.Loaded)
+                .EnabledWhen(() =>
+                    !NetworkBusy() && !HasPendingServerModDraft(mod) && mod.CanManage)
+                .WithTooltip(() => ServerModActionBlockReason(mod)));
+    }
+
+    private static void AddServerModDetails(
+        ICollection<UiComponent> children,
+        ServerModEnvelope mod)
+    {
+        if (!string.IsNullOrWhiteSpace(mod.LastError))
+            children.Add(Ui.Text(mod.LastError, UiTextTone.Error));
+        if (!string.IsNullOrWhiteSpace(mod.ManagementNote))
+            children.Add(Ui.Text(mod.ManagementNote, UiTextTone.Muted));
+        if (mod.Dependencies.Count > 0)
+            children.Add(Ui.Text(
+                $"Requires: {string.Join(", ", mod.Dependencies)}",
+                UiTextTone.Muted));
+        if (!string.IsNullOrWhiteSpace(mod.Description))
+            children.Add(Ui.Text(mod.Description, UiTextTone.Muted));
+    }
+
+    private long ServerModsUiRevision() =>
+        RuntimeHelpers.GetHashCode(Volatile.Read(ref _serverMods)) * 397L +
+        Volatile.Read(ref _componentUiRevision);
     private UiComponent BuildServerModSetting(
         ServerModEnvelope mod,
         ServerModConfigurationEntry entry)
     {
-        void Submit(JsonElement value) =>
-            SendModSetting(mod.FileName, entry.Section, entry.Key, value);
+        JsonElement Draft() => GetServerModDraftValue(entry);
+        void Stage(JsonElement value) => SetServerModDraftValue(entry, value);
 
         UiComponent editor = entry.ValueType switch
         {
-            "bool" => Ui.Toggle(entry.Key, entry.Value.GetBoolean,
-                value => Submit(JsonSerializer.SerializeToElement(value))),
-            "int" => Ui.Number(entry.Key, entry.Value.GetInt32,
-                value => Submit(JsonSerializer.SerializeToElement(value)),
+            "bool" => Ui.Toggle(entry.Key,
+                () => Draft().GetBoolean(),
+                value => Stage(JsonSerializer.SerializeToElement(value))),
+            "int" => Ui.Number(entry.Key,
+                () => Draft().GetInt32(),
+                value => Stage(JsonSerializer.SerializeToElement(value)),
                 entry.Minimum?.GetInt32() ?? int.MinValue,
                 entry.Maximum?.GetInt32() ?? int.MaxValue,
-                1, "0", UiCommitMode.OnCommit),
-            "float" => Ui.Number(entry.Key, entry.Value.GetSingle,
-                value => Submit(JsonSerializer.SerializeToElement(value)),
+                // A server-mod callback updates only the local draft. Recording
+                // each spinner step immediately prevents the visual refresh from
+                // restoring the server value before the control loses focus.
+                1, "0", UiCommitMode.Immediate),
+            "float" => Ui.Number(entry.Key,
+                () => Draft().GetSingle(),
+                value => Stage(JsonSerializer.SerializeToElement(value)),
                 entry.Minimum?.GetSingle() ?? -1e12f,
                 entry.Maximum?.GetSingle() ?? 1e12f,
-                0.1f, "0.###", UiCommitMode.OnCommit),
-            "double" => Ui.Number(entry.Key, entry.Value.GetDouble,
-                value => Submit(JsonSerializer.SerializeToElement(value)),
+                0.1f, "0.###", UiCommitMode.Immediate),
+            "double" => Ui.Number(entry.Key,
+                () => Draft().GetDouble(),
+                value => Stage(JsonSerializer.SerializeToElement(value)),
                 entry.Minimum?.GetDouble() ?? -1e12,
                 entry.Maximum?.GetDouble() ?? 1e12,
-                0.1, "0.######", UiCommitMode.OnCommit),
+                0.1, "0.######", UiCommitMode.Immediate),
             "string" => Ui.TextField(entry.Key,
-                () => entry.Value.GetString() ?? "",
-                value => Submit(JsonSerializer.SerializeToElement(value)),
-                maximumLength: 4096, commitMode: UiCommitMode.OnCommit),
+                () => Draft().GetString() ?? "",
+                value => Stage(JsonSerializer.SerializeToElement(value)),
+                maximumLength: 4096,
+                commitMode: UiCommitMode.OnCommit),
             "enum" => Ui.Choice(entry.Key,
-                () => entry.Value.GetString() ?? "",
-                value => Submit(JsonSerializer.SerializeToElement(value)),
+                () => Draft().GetString() ?? "",
+                value => Stage(JsonSerializer.SerializeToElement(value)),
                 entry.Choices),
             _ => Ui.Text($"{entry.Key}: unsupported type", UiTextTone.Warning)
         };
@@ -611,6 +855,100 @@ public sealed partial class ServerAdminControlClientMod
                 .VisibleWhen(() => !string.IsNullOrWhiteSpace(entry.Description)));
     }
 
+    private void EnsureServerModDraft(ServerModEnvelope mod)
+    {
+        if (string.Equals(
+                _serverModDraftFileName,
+                mod.FileName,
+                StringComparison.OrdinalIgnoreCase))
+            return;
+        if (Volatile.Read(ref _serverModDraftDirty) != 0) return;
+        ResetServerModDraft(mod);
+    }
+
+    private void ResetServerModDraft(ServerModEnvelope mod)
+    {
+        var values = mod.Configuration.ToDictionary(
+            entry => ServerModSettingId(entry.Section, entry.Key),
+            entry => entry.Value.Clone(),
+            StringComparer.OrdinalIgnoreCase);
+        _serverModDraftFileName = mod.FileName;
+        Volatile.Write(ref _serverModOriginalValues, values);
+        Volatile.Write(
+            ref _serverModDraftValues,
+            new Dictionary<string, JsonElement>(values, StringComparer.OrdinalIgnoreCase));
+        Interlocked.Exchange(ref _serverModDraftDirty, 0);
+    }
+
+    private void ClearServerModDraft()
+    {
+        _selectedServerModFileName = null;
+        _serverModDraftFileName = null;
+        Volatile.Write(
+            ref _serverModOriginalValues,
+            new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase));
+        Volatile.Write(
+            ref _serverModDraftValues,
+            new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase));
+        Interlocked.Exchange(ref _serverModDraftDirty, 0);
+    }
+
+    private void CancelServerModDraft()
+    {
+        var original = Volatile.Read(ref _serverModOriginalValues);
+        Volatile.Write(
+            ref _serverModDraftValues,
+            new Dictionary<string, JsonElement>(original, StringComparer.OrdinalIgnoreCase));
+        Interlocked.Exchange(ref _serverModDraftDirty, 0);
+    }
+
+    private JsonElement GetServerModDraftValue(ServerModConfigurationEntry entry)
+    {
+        var draft = Volatile.Read(ref _serverModDraftValues);
+        return draft.TryGetValue(ServerModSettingId(entry.Section, entry.Key), out var value)
+            ? value
+            : entry.Value;
+    }
+
+    private void SetServerModDraftValue(
+        ServerModConfigurationEntry entry,
+        JsonElement value)
+    {
+        var updated = new Dictionary<string, JsonElement>(
+            Volatile.Read(ref _serverModDraftValues),
+            StringComparer.OrdinalIgnoreCase)
+        {
+            [ServerModSettingId(entry.Section, entry.Key)] = value.Clone()
+        };
+        Volatile.Write(ref _serverModDraftValues, updated);
+        var original = Volatile.Read(ref _serverModOriginalValues);
+        var dirty = updated.Any(item =>
+            !original.TryGetValue(item.Key, out var previous) ||
+            !JsonElement.DeepEquals(previous, item.Value));
+        Interlocked.Exchange(ref _serverModDraftDirty, dirty ? 1 : 0);
+    }
+
+    private bool HasPendingServerModDraft(ServerModEnvelope mod) =>
+        Volatile.Read(ref _serverModDraftDirty) != 0 &&
+        string.Equals(
+            _serverModDraftFileName,
+            mod.FileName,
+            StringComparison.OrdinalIgnoreCase);
+
+    private bool CanOpenServerModConfiguration(ServerModEnvelope mod) =>
+        Volatile.Read(ref _serverModDraftDirty) == 0 ||
+        string.Equals(
+            _serverModDraftFileName,
+            mod.FileName,
+            StringComparison.OrdinalIgnoreCase);
+
+    private string? ServerModActionBlockReason(ServerModEnvelope mod) =>
+        HasPendingServerModDraft(mod)
+            ? "Apply or cancel this mod's pending configuration changes first."
+            : mod.StopBlockReason;
+
+    private static string ServerModSettingId(string section, string key) =>
+        section + "\n" + key;
     private UiComponent BuildCompatibilityComponents() => Ui.Section(
         "Mod compatibility",
         Ui.Text(
@@ -682,6 +1020,23 @@ public sealed partial class ServerAdminControlClientMod
 
     private ServerConfigurationEnvelope? CurrentConfiguration() =>
         Volatile.Read(ref _serverConfiguration);
+
+    private void CancelServerConfigurationDraft()
+    {
+        var saved = Volatile.Read(ref _savedServerConfiguration);
+        if (saved is not null) Volatile.Write(ref _serverConfiguration, saved);
+        Interlocked.Exchange(ref _serverConfigurationDirty, 0);
+        _confirmRestart = false;
+        Interlocked.Increment(ref _componentUiRevision);
+    }
+
+    private void ClearServerConfigurationDraft()
+    {
+        Volatile.Write(ref _serverConfiguration, null);
+        Volatile.Write(ref _savedServerConfiguration, null);
+        Interlocked.Exchange(ref _serverConfigurationDirty, 0);
+        _confirmRestart = false;
+    }
 
     private void EditConfiguration(
         Func<ServerConfigurationEnvelope, ServerConfigurationEnvelope> edit)

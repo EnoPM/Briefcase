@@ -5,9 +5,32 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Briefcase.AvaloniaUi;
 using Briefcase.ClientModApi;
+using Briefcase.ModApi;
 using Briefcase.Rendering;
 
+if (args.Contains("--construction-only", StringComparer.Ordinal))
+    return ValidateControlConstruction();
 return Run();
+
+static int ValidateControlConstruction()
+{
+    try
+    {
+        var row = BriefcaseControls.SettingRow(
+            "Example setting",
+            "Construction must not depend on unsupported GridLength syntax.",
+            new CheckBox { IsChecked = true });
+        if (row.Child is not Grid layout || layout.ColumnDefinitions.Count != 2)
+            return 10;
+        Console.WriteLine("Avalonia reusable-control construction passed.");
+        return 0;
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"Avalonia reusable-control construction failed: {exception}");
+        return 11;
+    }
+}
 
 [SupportedOSPlatform("windows")]
 static int Run()
@@ -41,16 +64,25 @@ static int Run()
     Thread.Sleep(250);
     if (host.IsMenuCreated || created != 0) return Report(messages, 4);
 
+    // Passive mod drawings are intentionally absent from this Avalonia
+    // lifecycle test. They are rendered inside the game's D3D11 swap chain.
+
     for (var opening = 1; opening <= 2; opening++)
     {
         host.SetVisible(true);
-        SpinWait.SpinUntil(() => host.IsVisible && host.IsMenuCreated, TimeSpan.FromSeconds(3));
-        if (!host.IsVisible || created != opening) return Report(messages, 5);
+        SpinWait.SpinUntil(
+            () => host.IsVisible && host.IsMenuCreated,
+            TimeSpan.FromSeconds(3));
+        if (!host.IsVisible || created != opening)
+            return Report(messages, 5);
         Thread.Sleep(250);
         host.SetVisible(false);
-        SpinWait.SpinUntil(() => !host.IsVisible && !host.IsMenuCreated, TimeSpan.FromSeconds(3));
+        SpinWait.SpinUntil(
+            () => !host.IsVisible && !host.IsMenuCreated,
+            TimeSpan.FromSeconds(3));
         Thread.Sleep(200);
-        if (disposed != opening) return Report(messages, 6);
+        if (disposed != opening)
+            return Report(messages, 6);
     }
 
     foreach (var message in messages) Console.WriteLine(message);
@@ -78,7 +110,11 @@ static Control BuildContent(ref int created, Action disposed)
         {
             icons,
             new TextBlock { Text = "Retained-mode Briefcase controls", FontSize = 22 },
-            new CheckBox { Content = "Example Boolean setting", IsChecked = true },
+            BriefcaseControls.SettingRow(
+                "Example Boolean setting",
+                "Built on Avalonia's UI thread during the lifecycle smoke test.",
+                new CheckBox { IsChecked = true }),
+            BuildTabs(),
             new NumericUpDown { Value = 12, Minimum = 1, Maximum = 24, Increment = 1 },
             new ComboBox
             {
@@ -88,6 +124,33 @@ static Control BuildContent(ref int created, Action disposed)
             }
         }
     };
+}
+
+static Control BuildTabs()
+{
+    static TabItem Item(string title, Control content)
+    {
+        var item = new TabItem { Header = title, Content = content };
+        item.Classes.Add("briefcase-tab");
+        return item;
+    }
+
+    var tabs = new TabControl
+    {
+        Height = 150,
+        ItemsSource = new[]
+        {
+            Item("Home", new TextBlock { Text = "Home content" }),
+            Item("Servers", BriefcaseControls.Card(
+                "Saved server",
+                "Flat list item validation",
+                Array.Empty<Control>(),
+                showAccent: false)),
+            Item("Mods", new TextBlock { Text = "Mods content" })
+        }
+    };
+    tabs.Classes.Add("briefcase-tabs");
+    return tabs;
 }
 
 [DllImport("user32.dll")]

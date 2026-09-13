@@ -65,6 +65,8 @@ internal sealed class ServerAdminServer
                 ServerAdminOperations.UnloadMod => RunModAction(
                     request, "unloaded", _mods.Unload),
                 ServerAdminOperations.SetModConfiguration => SetModConfiguration(request),
+                ServerAdminOperations.SetModConfigurationBatch =>
+                    SetModConfigurationBatch(request),
                 ServerAdminOperations.GetServerConfiguration => Success(
                     request, "Server configuration returned."),
                 ServerAdminOperations.UpdateServerConfiguration =>
@@ -159,6 +161,23 @@ internal sealed class ServerAdminServer
         _info($"Server mod setting {fileName}/" +
               $"{request.ModSettingSection}/{request.ModSettingKey} was updated remotely.");
         return Success(request, "Server mod setting saved.");
+    }
+
+    private ServerAdminResponse SetModConfigurationBatch(ServerAdminRequest request)
+    {
+        var fileName = ValidateModFileName(request);
+        var changes = request.ModConfigurationChanges;
+        if (changes is null || changes.Count is <= 0 or > 512)
+            return Failure(request,
+                "ModConfigurationChanges must contain between 1 and 512 values.");
+        _mods.SetConfiguration(
+            fileName,
+            changes.Select(change => new ManagedModConfigurationChange(
+                change.Section,
+                change.Key,
+                change.Value)).ToArray());
+        _info($"{changes.Count} server mod setting(s) were updated for {fileName}.");
+        return Success(request, $"{changes.Count} server mod setting(s) saved.");
     }
 
     private ServerAdminResponse UpdateServerConfiguration(ServerAdminRequest request)

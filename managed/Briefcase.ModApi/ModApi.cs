@@ -97,6 +97,7 @@ public readonly unsafe struct ModContext
     internal NativeUnrealApi* UnrealNative => IsValid ? _api->Unreal : null;
     internal NativePatchingApi* PatchingNative => IsValid ? _api->Patching : null;
     internal NativeGameThreadApi* GameThreadNative => IsValid ? _api->GameThread : null;
+    internal NativeRenderingApi* RenderingNative => IsValid ? _api->Rendering : null;
 
     public bool IsValid => _api != null && _api->ApiVersion == BriefcaseAbi.HostApiVersion &&
                            _api->Core != null && _api->Core->Log != null;

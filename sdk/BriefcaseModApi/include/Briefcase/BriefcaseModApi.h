@@ -19,6 +19,9 @@
 #define BRIEFCASE_INPUT_API_VERSION 1u
 #define BRIEFCASE_PATCHING_API_VERSION 7u
 #define BRIEFCASE_GAME_THREAD_API_VERSION 1u
+#define BRIEFCASE_RENDERING_API_VERSION 1u
+#define BRIEFCASE_OVERLAY_MAX_COMMANDS 4096u
+#define BRIEFCASE_OVERLAY_MAX_TEXT_BYTES (1024u * 1024u)
 #define BRIEFCASE_MOD_ID_CAPACITY 64u
 #define BRIEFCASE_MOD_NAME_CAPACITY 96u
 #define BRIEFCASE_MOD_AUTHOR_CAPACITY 64u
@@ -516,13 +519,91 @@ struct BriefcaseGameThreadApi {
     void* Reserved[8];
 };
 
+
+enum BriefcaseRenderingResult : uint32_t {
+    BRIEFCASE_RENDERING_OK = 0,
+    BRIEFCASE_RENDERING_INVALID_ARGUMENT = 1,
+    BRIEFCASE_RENDERING_NOT_READY = 2,
+    BRIEFCASE_RENDERING_UNSUPPORTED = 3
+};
+
+enum BriefcaseRenderingStatus : uint32_t {
+    BRIEFCASE_RENDERING_UNAVAILABLE = 0,
+    BRIEFCASE_RENDERING_STARTING = 1,
+    BRIEFCASE_RENDERING_READY = 2,
+    BRIEFCASE_RENDERING_FAILED = 3
+};
+
+enum BriefcaseOverlayCommandKind : uint32_t {
+    BRIEFCASE_OVERLAY_CIRCLE = 0,
+    BRIEFCASE_OVERLAY_LINE = 1,
+    BRIEFCASE_OVERLAY_FILLED_RECTANGLE = 2,
+    BRIEFCASE_OVERLAY_TEXT = 3
+};
+
+enum BriefcaseOverlayCommandFlags : uint32_t {
+    BRIEFCASE_OVERLAY_FILLED = 1u << 0
+};
+
+// A pointer-free description of one primitive. TextOffset/TextLength refer to
+// the UTF-8 blob in the containing frame and are copied during SubmitFrame.
+struct BriefcaseOverlayCommand {
+    uint32_t StructSize;
+    uint32_t Kind;
+    float X1;
+    float Y1;
+    float X2;
+    float Y2;
+    float Radius;
+    float Thickness;
+    float Rounding;
+    uint32_t Color;
+    uint32_t TextOffset;
+    uint32_t TextLength;
+    uint32_t Flags;
+    int32_t Segments;
+    uint32_t Reserved0;
+    uint64_t Reserved[2];
+};
+
+// Managed code owns these pointers only for the duration of SubmitFrame. The
+// native renderer validates and copies the complete snapshot before returning.
+struct BriefcaseOverlayFrame {
+    uint32_t StructSize;
+    uint32_t Version;
+    uint32_t Width;
+    uint32_t Height;
+    uint32_t CommandCount;
+    uint32_t TextBytes;
+    const BriefcaseOverlayCommand* Commands;
+    const char* Utf8Text;
+    uint64_t FrameNumber;
+    uint64_t Reserved[3];
+};
+
+typedef BriefcaseBool(BRIEFCASE_MOD_CALL* BriefcaseStartRenderingFn)(void* context);
+typedef BriefcaseRenderingResult(BRIEFCASE_MOD_CALL* BriefcaseSubmitOverlayFrameFn)(
+    void* context, const BriefcaseOverlayFrame* frame);
+typedef BriefcaseRenderingStatus(BRIEFCASE_MOD_CALL* BriefcaseGetRenderingStatusFn)(
+    void* context, uint32_t* nativeError);
+
+struct BriefcaseRenderingApi {
+    uint32_t StructSize;
+    uint32_t ApiVersion;
+    void* Context;
+    BriefcaseStartRenderingFn Start;
+    BriefcaseSubmitOverlayFrameFn SubmitFrame;
+    BriefcaseGetRenderingStatusFn GetStatus;
+    void* Reserved[8];
+};
+
 struct BriefcaseHostApi {
     uint32_t StructSize;
     uint32_t ApiVersion;
     uint64_t Capabilities;
     const BriefcaseCoreApi* Core;
     const BriefcaseUnrealApi* Unreal;
-    const void* ReservedRendering;
+    const BriefcaseRenderingApi* Rendering;
     const BriefcaseInputApi* Input;
     const BriefcasePatchingApi* Patching;
     // GameThread consumes the first v1 reserved slot.
@@ -538,6 +619,9 @@ static_assert(sizeof(BriefcaseValueInput) == 40);
 static_assert(sizeof(BriefcaseUnrealApi) == 280);
 static_assert(sizeof(BriefcasePatchingApi) == 104);
 static_assert(sizeof(BriefcaseGameThreadApi) == 112);
+static_assert(sizeof(BriefcaseOverlayCommand) == 80);
+static_assert(sizeof(BriefcaseOverlayFrame) == 72);
+static_assert(sizeof(BriefcaseRenderingApi) == 104);
 static_assert(sizeof(BriefcaseHostApi) == 112);
 #endif
 

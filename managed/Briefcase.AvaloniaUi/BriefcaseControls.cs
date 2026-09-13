@@ -15,7 +15,8 @@ internal static class BriefcaseControls
     public static Border Card(
         string? title,
         string? description,
-        IEnumerable<Control> children)
+        IEnumerable<Control> children,
+        bool showAccent = true)
     {
         var content = new StackPanel { Spacing = 10 };
         if (!string.IsNullOrWhiteSpace(title))
@@ -41,29 +42,39 @@ internal static class BriefcaseControls
         }
         foreach (var child in children) content.Children.Add(child);
 
+        var contentHost = new Border
+        {
+            Padding = showAccent
+                ? new Thickness(16, 14)
+                : new Thickness(4, 12),
+            Child = content
+        };
+        var card = new Border();
+        card.Classes.Add("briefcase-card");
+        if (!showAccent)
+        {
+            card.Classes.Add("briefcase-flat-card");
+            card.Child = contentHost;
+            return card;
+        }
+
         var accent = new Border
         {
             Width = 4,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         accent.Classes.Add("briefcase-card-accent");
-        var contentHost = new Border
-        {
-            Padding = new Thickness(16, 14),
-            Child = content
-        };
         Grid.SetColumn(contentHost, 1);
         var layout = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("4,*"),
             Children = { accent, contentHost }
         };
-        var card = new Border { Child = layout };
-        card.Classes.Add("briefcase-card");
+        card.Child = layout;
         return card;
     }
 
-    public static Grid SettingRow(
+    public static Border SettingRow(
         string title,
         string? description,
         Control editor)
@@ -95,7 +106,7 @@ internal static class BriefcaseControls
         {
             MinWidth = 210,
             MaxWidth = 330,
-            Margin = new Thickness(24, 0, 0, 0),
+            Margin = new Thickness(20, 0, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             Child = editor
@@ -103,12 +114,16 @@ internal static class BriefcaseControls
         Grid.SetColumn(editorHost, 1);
         var row = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("*,minmax(210,330)"),
+            // Avalonia's GridLength parser supports Auto, pixels, and star
+            // sizing. CSS-style minmax() is not valid here; the editor host
+            // already carries the desired minimum and maximum widths.
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
             MinHeight = 46,
             Children = { information, editorHost }
         };
-        row.Classes.Add("briefcase-setting-row");
-        return row;
+        var container = new Border { Child = row };
+        container.Classes.Add("briefcase-setting-row");
+        return container;
     }
 
     public static StackPanel PageHeader(string title, string subtitle)

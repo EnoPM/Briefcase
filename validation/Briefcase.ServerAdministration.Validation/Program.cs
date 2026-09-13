@@ -131,9 +131,17 @@ try
         "at least one map");
 
     var restart = ServerConfigurationService.CreateRestartScript(
-        1234, root, executable, 50123);
+        1234, root, executable, 50123, 50124);
     Assert(restart.Contains("PID eq 1234"), "Restart helper does not wait for the old PID.");
+    Assert(restart.Contains("timeout /t 3"),
+        "Restart helper does not allow the old sockets to close.");
+    Assert(restart.Contains("-unattended"),
+        "Restart helper does not preserve the headless launch mode.");
     Assert(restart.Contains("-Port=50123"), "Restart helper does not use the saved game port.");
+    Assert(restart.Contains("-QueryPort=50124"),
+        "Restart helper does not use the saved query port.");
+    Assert(restart.Contains("restart-server-last.log"),
+        "Restart helper does not leave a persistent diagnostic log.");
     Assert(restart.Contains(executable), "Restart helper does not use the server executable.");
 
     var handshake = new ModHandshakeClientHello(

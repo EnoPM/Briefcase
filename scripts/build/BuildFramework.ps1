@@ -39,6 +39,12 @@ try {
     $install=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
     if ($install.Count -ne 1) { throw 'MSVC v143 x64 build tools are required.' }
     $msbuild=Join-Path $install[0] 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+    $renderingProject=Join-Path $root 'runtime\Briefcase.Native.Rendering\Briefcase.Native.Rendering.vcxproj'
+    Write-Host "Building Briefcase.Native.Rendering.dll | $Configuration | x64"
+    $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
+        $renderingProject,"/p:Configuration=$Configuration",'/p:Platform=x64','/m','/nologo','/verbosity:minimal','/nr:false')
+    if($result -ne 0){ exit $result }
+
     $runtimeProject=Join-Path $root 'runtime\Briefcase.UnrealRuntime\Briefcase.UnrealRuntime.vcxproj'
     Write-Host "Building Briefcase.UnrealRuntime.dll | $Configuration | x64"
     $result=Invoke-ModNative -FilePath $msbuild -WorkingDirectory $root -Arguments @(
@@ -207,6 +213,8 @@ try {
         -Destination (Join-Path $distribution 'version.dll') -Force
     Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.UnrealRuntime\bin\$Configuration\Briefcase.UnrealRuntime.dll") `
         -Destination (Join-Path $nativeDistribution 'Briefcase.UnrealRuntime.dll') -Force
+    Copy-Item -LiteralPath (Join-Path $root "runtime\Briefcase.Native.Rendering\bin\$Configuration\Briefcase.Native.Rendering.dll") `
+        -Destination (Join-Path $nativeDistribution 'Briefcase.Native.Rendering.dll') -Force
     Copy-Item -LiteralPath (Join-Path $updateInstallerPublish 'Briefcase.UpdateInstaller.exe') `
         -Destination (Join-Path $updaterDistribution 'Briefcase.UpdateInstaller.exe') -Force
 
@@ -308,6 +316,10 @@ try {
     # License beside the other third-party runtime assets in every client build.
     Copy-Item -LiteralPath (Join-Path $root 'third_party\inter\OFL.txt') `
         -Destination (Join-Path $coreDistribution 'ThirdPartyLibraries\Inter.OFL.txt') -Force
+    Copy-Item -LiteralPath (Join-Path $root 'third_party\imgui-1.91.9b\LICENSE.txt') `
+        -Destination (Join-Path $coreDistribution 'ThirdPartyLibraries\DearImGui.LICENSE.txt') -Force
+    Copy-Item -LiteralPath (Join-Path $root 'third_party\minhook-1.3.4\LICENSE.txt') `
+        -Destination (Join-Path $coreDistribution 'ThirdPartyLibraries\MinHook.LICENSE.txt') -Force
 
     Write-Host "[OK] Briefcase package: $distribution"
     Write-Host "[OK] Bundled .NET ${runtimeVersion}: $dotNetDistribution"

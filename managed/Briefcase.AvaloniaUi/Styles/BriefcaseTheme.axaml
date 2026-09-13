@@ -81,6 +81,47 @@
     <Setter Property="Margin" Value="0,4" />
   </Style>
 
+  <Style Selector="TabControl.briefcase-tabs">
+    <Setter Property="Background" Value="#E619141F" />
+  </Style>
+
+  <Style Selector="TabItem.briefcase-tab">
+    <Setter Property="Background" Value="#E6151019" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0,0,0,2" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Foreground" Value="#B4A9B8" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="MinHeight" Value="50" />
+    <Setter Property="Padding" Value="20,10" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}"
+                Padding="{TemplateBinding Padding}">
+          <ContentPresenter Content="{TemplateBinding Header}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="TabItem.briefcase-tab:pointerover">
+    <Setter Property="Background" Value="#A32E2037" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
+  </Style>
+
+  <Style Selector="TabItem.briefcase-tab:selected">
+    <Setter Property="Background" Value="#B32E2037" />
+    <Setter Property="BorderBrush" Value="#A45BE0" />
+    <Setter Property="Foreground" Value="#F6F1F8" />
+  </Style>
+
   <Style Selector="Border.briefcase-card">
     <Setter Property="Background" Value="#EB241A2B" />
     <Setter Property="BorderBrush" Value="#72493455" />
@@ -98,7 +139,24 @@
     <Setter Property="Background" Value="#A45BE0" />
   </Style>
 
-  <Style Selector="Grid.briefcase-setting-row">
+  <Style Selector="Border.briefcase-card.briefcase-flat-card">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="#4A493455" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+
+  <Style Selector="Border.briefcase-card.briefcase-flat-card:pointerover">
+    <Setter Property="Background" Value="#462E2037" />
+    <Setter Property="BorderBrush" Value="#72493455" />
+  </Style>
+
+  <Style Selector="Border.briefcase-setting-row">
+    <Setter Property="Background" Value="#52151019" />
+    <Setter Property="BorderBrush" Value="#4A493455" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="12,8" />
     <Setter Property="Margin" Value="0,3" />
   </Style>
 
@@ -116,6 +174,12 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="9,3" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Border.briefcase-status TextBlock">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextAlignment" Value="Center" />
   </Style>
 
   <Style Selector="Border.briefcase-status-information">

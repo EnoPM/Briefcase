@@ -8,6 +8,9 @@ public static class BriefcaseAbi
     public const uint InputApiVersion = 1;
     public const uint PatchingApiVersion = 7;
     public const uint GameThreadApiVersion = 1;
+    public const uint RenderingApiVersion = 1;
+    public const uint OverlayMaximumCommands = 4096;
+    public const uint OverlayMaximumTextBytes = 1024 * 1024;
     public const uint UnrealApiVersion = 16;
     public const ulong CoreCapability = 1UL << 0;
     public const ulong UnrealReflectionCapability = 1UL << 1;
@@ -177,6 +180,86 @@ public unsafe struct NativeCoreApi
     public fixed ulong Reserved[8];
 }
 
+
+public enum NativeRenderingResult : uint
+{
+    Ok,
+    InvalidArgument,
+    NotReady,
+    Unsupported
+}
+
+public enum NativeRenderingStatus : uint
+{
+    Unavailable,
+    Starting,
+    Ready,
+    Failed
+}
+
+public enum NativeOverlayCommandKind : uint
+{
+    Circle,
+    Line,
+    FilledRectangle,
+    Text
+}
+
+[Flags]
+public enum NativeOverlayCommandFlags : uint
+{
+    None = 0,
+    Filled = 1
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeOverlayCommand
+{
+    public uint StructSize;
+    public NativeOverlayCommandKind Kind;
+    public float X1;
+    public float Y1;
+    public float X2;
+    public float Y2;
+    public float Radius;
+    public float Thickness;
+    public float Rounding;
+    public uint Color;
+    public uint TextOffset;
+    public uint TextLength;
+    public NativeOverlayCommandFlags Flags;
+    public int Segments;
+    public uint Reserved0;
+    public fixed ulong Reserved[2];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeOverlayFrame
+{
+    public uint StructSize;
+    public uint Version;
+    public uint Width;
+    public uint Height;
+    public uint CommandCount;
+    public uint TextBytes;
+    public NativeOverlayCommand* Commands;
+    public byte* Utf8Text;
+    public ulong FrameNumber;
+    public fixed ulong Reserved[3];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeRenderingApi
+{
+    public uint StructSize;
+    public uint ApiVersion;
+    public void* Context;
+    public delegate* unmanaged[Cdecl]<void*, uint> Start;
+    public delegate* unmanaged[Cdecl]<void*, NativeOverlayFrame*, NativeRenderingResult> SubmitFrame;
+    public delegate* unmanaged[Cdecl]<void*, uint*, NativeRenderingStatus> GetStatus;
+    public fixed ulong Reserved[8];
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct NativeHostApi
 {
@@ -185,7 +268,7 @@ public unsafe struct NativeHostApi
     public ulong Capabilities;
     public NativeCoreApi* Core;
     public NativeUnrealApi* Unreal;
-    public void* ReservedRendering;
+    public NativeRenderingApi* Rendering;
     public NativeInputApi* Input;
     public NativePatchingApi* Patching;
     public NativeGameThreadApi* GameThread;

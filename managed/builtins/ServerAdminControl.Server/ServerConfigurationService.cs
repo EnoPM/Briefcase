@@ -192,7 +192,11 @@ internal sealed class ServerConfigurationService
         var script = Path.Combine(
             _frameworkDirectory, $"restart-server-{Environment.ProcessId}.bat");
         var scriptText = CreateRestartScript(
-            Environment.ProcessId, _workingDirectory, _executablePath, snapshot.GamePort);
+            Environment.ProcessId,
+            _workingDirectory,
+            _executablePath,
+            snapshot.GamePort,
+            snapshot.QueryPort);
         File.WriteAllText(script, scriptText, new UTF8Encoding(false));
 
         var launcher = new ProcessStartInfo
@@ -378,19 +382,36 @@ internal sealed class ServerConfigurationService
         int processId,
         string workingDirectory,
         string executablePath,
-        int gamePort) => $"""
+        int gamePort,
+        int queryPort)
+    {
+        var imageName = Path.GetFileName(executablePath);
+        return $"""
         @echo off
         setlocal
+        set "restart_log=%~dp0restart-server-last.log"
+        >"%restart_log%" echo [%date% %time%] Waiting for server PID {processId} to exit.
         :wait_for_exit
         tasklist /FI "PID eq {processId}" /FO CSV /NH 2>NUL | findstr /C:"{processId}" >NUL
         if not errorlevel 1 (
           timeout /t 1 /nobreak >NUL
           goto wait_for_exit
         )
-        start "" /D "{workingDirectory}" "{executablePath}" -Port={gamePort}
+        >>"%restart_log%" echo [%date% %time%] Previous process exited; waiting for sockets to close.
+        timeout /t 3 /nobreak >NUL
+        >>"%restart_log%" echo [%date% %time%] Starting {imageName} on ports {gamePort}/{queryPort}.
+        start "" /D "{workingDirectory}" "{executablePath}" -unattended -NoSplash -stdout -FullStdOutLogOutput -Port={gamePort} -QueryPort={queryPort}
+        if errorlevel 1 >>"%restart_log%" echo [%date% %time%] start failed with error %errorlevel%.
+        timeout /t 5 /nobreak >NUL
+        tasklist /FI "IMAGENAME eq {imageName}" /FO CSV /NH 2>NUL | find /I "{imageName}" >NUL
+        if errorlevel 1 (
+          >>"%restart_log%" echo [%date% %time%] The relaunched server did not remain active.
+        ) else (
+          >>"%restart_log%" echo [%date% %time%] The relaunched server is running.
+        )
         del "%~f0"
         """;
-
+    }
     private static DefaultPaths GetDefaultPaths()
     {
         var executable = Environment.ProcessPath ??

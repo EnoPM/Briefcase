@@ -18,6 +18,9 @@ public sealed class GameThreadServiceTests
         Assert.Equal(40, Marshal.SizeOf<NativeValueInput>());
         Assert.Equal(280, Marshal.SizeOf<NativeUnrealApi>());
         Assert.Equal(104, Marshal.SizeOf<NativePatchingApi>());
+        Assert.Equal(80, Marshal.SizeOf<NativeOverlayCommand>());
+        Assert.Equal(72, Marshal.SizeOf<NativeOverlayFrame>());
+        Assert.Equal(104, Marshal.SizeOf<NativeRenderingApi>());
     }
 
     [Fact]

@@ -184,14 +184,16 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
         if (servers.Length == 0)
             return [Ui.Text("No server is saved yet.", UiTextTone.Muted)];
 
-        return servers.Select(server => (UiComponent)Ui.Card(
-                server.Name,
-                Ui.Text(server.Endpoint, UiTextTone.Muted, wrap: false),
-                Ui.Row(
-                    Ui.Button("Edit", UiIcon.Settings, () => BeginEdit(server.Id)),
-                    Ui.Button("Join", UiIcon.Play, () => ConnectSavedServer(server.Id)),
-                    Ui.Button("Configure", UiIcon.Server,
-                        () => ConfigureSavedServer(server.Id)))))
+        return servers.Select(server =>
+                Ui.Card(
+                        server.Name,
+                        Ui.Text(server.Endpoint, UiTextTone.Muted, wrap: false),
+                        Ui.Row(
+                            Ui.Button("Edit", UiIcon.Settings, () => BeginEdit(server.Id)),
+                            Ui.Button("Join", UiIcon.Play, () => ConnectSavedServer(server.Id)),
+                            Ui.Button("Configure", UiIcon.Server,
+                                () => ConfigureSavedServer(server.Id))))
+                    .WithClass(UiClasses.FlatCard))
             .ToArray();
     }
 

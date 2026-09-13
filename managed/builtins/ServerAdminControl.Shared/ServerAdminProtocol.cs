@@ -11,7 +11,7 @@ namespace ServerAdminControl.Protocol;
 /// </summary>
 public static class ServerAdminProtocol
 {
-    public const uint Version = 7;
+    public const uint Version = 8;
     public const int MaximumFrameBytes = 64 * 1024 * 1024;
     // Briefcase.PlayerCap raises the Solo and Duo game ceilings to the Trio
     // ceiling. Both administration endpoints use this shared limit so the UI
@@ -90,6 +90,7 @@ public static class ServerAdminOperations
     public const string ReloadMod = "reload-mod";
     public const string UnloadMod = "unload-mod";
     public const string SetModConfiguration = "set-mod-configuration";
+    public const string SetModConfigurationBatch = "set-mod-configuration-batch";
     public const string GetServerConfiguration = "get-server-configuration";
     public const string UpdateServerConfiguration = "update-server-configuration";
     public const string RestartServer = "restart-server";
@@ -138,7 +139,13 @@ public sealed record ServerAdminRequest(
     string? KickReason = null,
     string Channel = BriefcaseChannels.Administration,
     string? AuthenticationChallengeId = null,
-    string? AuthenticationProof = null);
+    string? AuthenticationProof = null,
+    IReadOnlyList<ServerModConfigurationChange>? ModConfigurationChanges = null);
+
+public sealed record ServerModConfigurationChange(
+    string Section,
+    string Key,
+    JsonElement Value);
 
 public sealed record ServerAdminResponse(
     uint ProtocolVersion,

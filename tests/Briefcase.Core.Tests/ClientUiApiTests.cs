@@ -110,6 +110,30 @@ public sealed class ClientUiApiTests
     }
 
     [Fact]
+    public void Tab_component_keeps_selection_typed_and_toolkit_neutral()
+    {
+        var selected = "server";
+        var tabs = Ui.Tabs(
+            () => selected,
+            value => selected = value,
+            Ui.Tab("server", "Server", Ui.Text("Configuration")),
+            Ui.Tab("players", "Players", Ui.Text("Connected players")));
+
+        Assert.Equal("server", tabs.SelectedId);
+        Assert.Equal(new[] { "Server", "Players" },
+            tabs.Items.Select(item => item.Label));
+        Assert.Contains(UiClasses.Tabs, tabs.StyleClasses);
+
+        tabs.Select("players");
+        Assert.Equal("players", selected);
+        Assert.Throws<ArgumentException>(() => Ui.Tabs(
+            () => selected,
+            value => selected = value,
+            Ui.Tab("duplicate", "One", Ui.Text("One")),
+            Ui.Tab("duplicate", "Two", Ui.Text("Two"))));
+    }
+
+    [Fact]
     public void Vector_icons_and_commands_remain_toolkit_neutral()
     {
         var allowed = false;
@@ -157,6 +181,36 @@ public sealed class ClientUiApiTests
         }
 
         Assert.Empty(scope.SnapshotUiPanels());
+    }
+
+    [Fact]
+    public void Server_panel_can_expose_a_framework_header_toolbar()
+    {
+        using var directory = new TemporaryDirectory();
+        using var registry = new ConfigurationRegistry(
+            Path.Combine(directory.Path, "settings.json"),
+            _ => { }, _ => { }, _ => { });
+        using var scope = registry.RegisterMod(new ModInfo(
+            "client-ui.server-toolbar", "Server toolbar", "Briefcase", "1.0.0", ""));
+        var api = scope.AttachTo(default).Ui();
+        var content = Ui.Text("Administration");
+        var toolbar = Ui.Row(
+            Ui.Status("API connected", UiStatusTone.Success),
+            Ui.Button("Refresh connection", () => { }));
+        var footer = Ui.Card(
+                Ui.Button("Apply changes", () => { }))
+            .WithClass(UiClasses.ActionBar);
+
+        using (api.RegisterServerPanel("Administration", content, toolbar, footer))
+        {
+            var registration = Assert.Single(scope.SnapshotServerUiPanels());
+            Assert.Equal("Administration", registration.Name);
+            Assert.Same(content, registration.Content);
+            Assert.Same(toolbar, registration.Toolbar);
+            Assert.Same(footer, registration.Footer);
+        }
+
+        Assert.Empty(scope.SnapshotServerUiPanels());
     }
 
     [Fact]

@@ -340,7 +340,11 @@ internal sealed partial class ConfigurationRegistry : IDisposable
             return registration;
         }
 
-        IDisposable IClientUiScope.RegisterServerPanel(string name, UiComponent content)
+        IDisposable IClientUiScope.RegisterServerPanel(
+            string name,
+            UiComponent content,
+            UiComponent? toolbar,
+            UiComponent? footer)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             ArgumentNullException.ThrowIfNull(content);
@@ -348,7 +352,8 @@ internal sealed partial class ConfigurationRegistry : IDisposable
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(IsDisposed, this);
-                registration = new ServerUiPanelRegistration(this, name.Trim(), content);
+                registration = new ServerUiPanelRegistration(
+                    this, name.Trim(), content, toolbar, footer);
                 _serverUiPanels.Add(registration);
             }
             _owner.NotifyUiChanged();
@@ -485,9 +490,13 @@ internal sealed partial class ConfigurationRegistry : IDisposable
         internal sealed class ServerUiPanelRegistration(
             ModScope owner,
             string name,
-            UiComponent content) : ComponentRegistration(owner, content)
+            UiComponent content,
+            UiComponent? toolbar,
+            UiComponent? footer) : ComponentRegistration(owner, content)
         {
             public string Name { get; } = name;
+            public UiComponent? Toolbar { get; } = toolbar;
+            public UiComponent? Footer { get; } = footer;
             public override void Dispose()
             {
                 if (Deactivate()) Owner.Remove(this);

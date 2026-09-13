@@ -17,6 +17,12 @@ public sealed record ManagedModConfigurationEntry(
     JsonElement? Maximum,
     IReadOnlyList<string> Choices);
 
+/// <summary>One validated value in a grouped configuration update.</summary>
+public sealed record ManagedModConfigurationChange(
+    string Section,
+    string Key,
+    JsonElement Value);
+
 /// <summary>
 /// Stable, path-free description of a managed mod installed in Briefcase/Mods.
 /// FileName is the identifier accepted by every lifecycle method.
@@ -76,6 +82,15 @@ public readonly struct ModManagementApi
         JsonElement value) =>
         Backend.SetConfiguration(fileName, section, key, value);
 
+    /// <summary>
+    /// Validates every change before applying the group. This prevents a bad
+    /// trailing value from leaving an otherwise valid edit only partly applied.
+    /// </summary>
+    public void SetConfiguration(
+        string fileName,
+        IReadOnlyList<ManagedModConfigurationChange> changes) =>
+        Backend.SetConfiguration(fileName, changes);
+
     private IModManagementBackend Backend => _backend ??
         throw new InvalidOperationException(
             "Managed mod control is not available in this Briefcase host.");
@@ -94,4 +109,7 @@ internal interface IModManagementBackend
     void Refresh();
     ManagedModConfigurationEntry[] GetConfiguration(string fileName);
     void SetConfiguration(string fileName, string section, string key, JsonElement value);
+    void SetConfiguration(
+        string fileName,
+        IReadOnlyList<ManagedModConfigurationChange> changes);
 }

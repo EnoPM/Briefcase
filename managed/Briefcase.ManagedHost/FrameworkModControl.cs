@@ -36,6 +36,10 @@ internal sealed class DeferredModManagementBackend : IModManagementBackend
     public void SetConfiguration(
         string fileName, string section, string key, JsonElement value) =>
         Target.SetConfiguration(fileName, section, key, value);
+    public void SetConfiguration(
+        string fileName,
+        IReadOnlyList<ManagedModConfigurationChange> changes) =>
+        Target.SetConfiguration(fileName, changes);
 
     private IModManagementBackend Target => _target ??
         throw new InvalidOperationException("The managed mod controller is not ready.");
