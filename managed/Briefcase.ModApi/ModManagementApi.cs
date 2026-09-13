@@ -43,6 +43,9 @@ public sealed record ManagedModStatus(
     public string Id { get; init; } = "";
     public IReadOnlyList<string> Dependencies { get; init; } = [];
     public IReadOnlyList<string> ActiveDependents { get; init; } = [];
+    public string PackageDirectory { get; init; } = "";
+    public string? UpdateRepository { get; init; }
+    public string? UpdateError { get; init; }
     public bool CanStop => ActiveDependents.Count == 0;
     public string? StopBlockReason => CanStop
         ? null

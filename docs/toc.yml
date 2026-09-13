@@ -22,6 +22,8 @@
     href: ClientModUi.md
   - name: Dependencies
     href: ModDependencies.md
+  - name: Packages and marketplace
+    href: ModPackages.md
   - name: Unreal events
     href: UnrealEvents.md
   - name: Unreal object lifecycle

@@ -170,7 +170,9 @@ public static unsafe class EntryPoint
                 Path.Combine(coreDirectory, "Cache"),
                 generatedSdk,
                 _configuration!,
-                _gameThread!);
+                _gameThread!,
+                isServer,
+                updateSettings.AutomaticModUpdates);
             modManagement.Attach(_manager);
             _configuration!.AttachModControl(_manager);
             _manager.Start((progress, detail) =>

@@ -59,7 +59,8 @@ public enum UiIcon
     Plug,
     Disconnect,
     Close,
-    ChevronRight
+    ChevronRight,
+    ChevronLeft
 }
 
 /// <summary>

@@ -694,7 +694,7 @@ public sealed partial class ServerAdminControlClientMod
         EnsureServerModDraft(mod);
         var result = new List<UiComponent>
         {
-            Ui.Button("Back to server mods", () =>
+            Ui.Button("Back to server mods", UiIcon.ChevronLeft, () =>
             {
                 _selectedServerModFileName = null;
                 Interlocked.Increment(ref _componentUiRevision);

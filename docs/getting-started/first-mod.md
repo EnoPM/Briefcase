@@ -88,10 +88,30 @@ Run the following command, replacing the path with your installation:
 dotnet build -c Release -p:BriefcaseRoot="D:\Games\DeceiveInc\DeceiveInc\Binaries\Win64\Briefcase"
 ```
 
-Copy `bin\Release\net10.0\MyFirstMod.dll` into the client's
-`Briefcase\Mods` directory. Do not copy `Briefcase.ModApi.dll` or the generated
-SDK DLL with the mod; Briefcase already owns and shares those assemblies.
+Create a package directory below `Briefcase\Mods`, copy
+`bin\Release\net10.0\MyFirstMod.dll` into it, and add a minimal manifest:
 
+```text
+Briefcase\Mods\my.first-mod\
+├── briefcase.mod.json
+└── MyFirstMod.dll
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "entryAssembly": "MyFirstMod.dll",
+  "id": "my.first-mod",
+  "version": "1.0.0",
+  "dependencies": []
+}
+```
+
+The manifest identity and version must match `ModInfo`. Do not copy
+`Briefcase.ModApi.dll` or the generated SDK DLL with the mod; Briefcase already
+owns and shares those assemblies. Add an `updates` object when the mod has its
+own GitHub releases, as described in
+[Mod packages and marketplace](../ModPackages.md).
 Start the game and open `Briefcase.log`. A successful load contains the two
 messages emitted above. Press **F1**, open **Mods**, and confirm that **My First
 Mod** appears in the installed list.

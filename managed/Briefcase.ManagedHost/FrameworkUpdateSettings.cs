@@ -4,9 +4,10 @@ namespace Briefcase.ManagedHost;
 
 internal readonly record struct FrameworkUpdateSettings(
     bool Enabled,
-    string RestartMode)
+    string RestartMode,
+    bool AutomaticModUpdates)
 {
-    public static FrameworkUpdateSettings Default { get; } = new(true, "auto");
+    public static FrameworkUpdateSettings Default { get; } = new(true, "auto", true);
 }
 
 internal static class FrameworkUpdateSettingsReader
@@ -28,6 +29,14 @@ internal static class FrameworkUpdateSettingsReader
                     warning("automaticUpdates must be true or false; automatic updates remain enabled.");
             }
 
+            var automaticModUpdates = true;
+            if (root.TryGetProperty("automaticModUpdates", out var modUpdatesValue))
+            {
+                if (modUpdatesValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    automaticModUpdates = modUpdatesValue.GetBoolean();
+                else
+                    warning("automaticModUpdates must be true or false; mod updates remain enabled.");
+            }
             var restartMode = "auto";
             if (root.TryGetProperty("updateRestartMode", out var restartValue))
             {
@@ -44,7 +53,7 @@ internal static class FrameworkUpdateSettingsReader
                     warning("updateRestartMode must be a string; using auto.");
                 }
             }
-            return new FrameworkUpdateSettings(enabled, restartMode);
+            return new FrameworkUpdateSettings(enabled, restartMode, automaticModUpdates);
         }
         catch (Exception exception)
         {

@@ -202,7 +202,8 @@ Installation
 
 The archive contains the version.dll proxy and the complete Briefcase runtime,
 including its private .NET runtime. Open the configuration menu with F1.
-Place user mod DLLs in Briefcase\Mods.
+Install client mods from F1 > Mods > Marketplace, or extract each mod package
+into its own directory below Briefcase\Mods.
 "@
     [IO.File]::WriteAllText(
         (Join-Path $clientStage 'README-Briefcase.txt'),
@@ -219,8 +220,9 @@ Installation
 3. Run StartBriefcaseServer.bat from that Win64 directory.
 
 The launcher starts DeceiveIncServer-Win64-Shipping.exe in the current terminal
-without the graphical configuration launcher. Place server mod DLLs in
-Briefcase\Mods.
+without the graphical configuration launcher. Extract each server mod package
+into its own directory below Briefcase\Mods. Every package contains a
+briefcase.mod.json manifest.
 "@
     [IO.File]::WriteAllText(
         (Join-Path $serverStage 'README-Briefcase.txt'),
@@ -234,6 +236,7 @@ Briefcase\Mods.
         Assert-File $stage 'Briefcase\VERSION'
         Assert-File $stage 'Briefcase\Core\Briefcase.ManagedHost.dll'
         Assert-File $stage 'Briefcase\Core\Briefcase.Updater.dll'
+        Assert-File $stage 'Briefcase\Core\Briefcase.ModPackages.dll'
         Assert-File $stage 'Briefcase\Core\Updater\Briefcase.UpdateInstaller.exe'
         Assert-File $stage 'Briefcase\Core\Briefcase.ModApi.dll'
         Assert-File $stage 'Briefcase\Core\Briefcase.SdkSnapshots.dll'
@@ -247,6 +250,7 @@ Briefcase\Mods.
     Assert-CoreLibraryLayout $clientStage $true
     Assert-CoreLibraryLayout $serverStage $false
     Assert-File $clientStage 'Briefcase\Core\Briefcase.ClientModApi.dll'
+    Assert-File $clientStage 'Briefcase\Core\Marketplace\catalog.json'
     Assert-File $clientStage 'Briefcase\Core\Native\Briefcase.Native.Rendering.dll'
     Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaUi.dll'
     Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaMenu.dll'
@@ -270,8 +274,10 @@ Briefcase\Mods.
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
         'Briefcase/Core/Briefcase.Updater.dll',
+        'Briefcase/Core/Briefcase.ModPackages.dll',
         'Briefcase/Core/Updater/Briefcase.UpdateInstaller.exe',
         'Briefcase/Core/Briefcase.ClientModApi.dll',
+        'Briefcase/Core/Marketplace/catalog.json',
         'Briefcase/Core/Native/Briefcase.Native.Rendering.dll',
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaUi.dll',
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaMenu.dll',
@@ -288,6 +294,7 @@ Briefcase\Mods.
         'Briefcase/VERSION',
         'Briefcase/Core/Briefcase.ManagedHost.dll',
         'Briefcase/Core/Briefcase.Updater.dll',
+        'Briefcase/Core/Briefcase.ModPackages.dll',
         'Briefcase/Core/Updater/Briefcase.UpdateInstaller.exe',
         'Briefcase/Core/Briefcase.SdkSnapshots.dll',
         'Briefcase/Core/Native/Briefcase.UnrealRuntime.dll',

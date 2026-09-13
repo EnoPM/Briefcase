@@ -30,7 +30,8 @@ An automatic update replaces only files owned by the Briefcase distribution:
 
 The following data is preserved:
 
-- every DLL in `Briefcase/Mods`;
+- every mod package directory, manifest, assembly, and `Data` directory in
+  `Briefcase/Mods`;
 - `Briefcase/loader.json`;
 - `Briefcase/settings.json` and all mod configuration;
 - `Briefcase/Briefcase.log` and `Briefcase/Briefcase-update.log`;
@@ -48,6 +49,7 @@ of `Briefcase/loader.json`:
 ```json
 {
   "automaticUpdates": true,
+  "automaticModUpdates": true,
   "updateRestartMode": "auto"
 }
 ```
@@ -68,6 +70,17 @@ build for development. Manual installation remains available by extracting a
 new matching archive over the Win64 directory while the game or server is
 stopped.
 
+## Mod updates
+
+External mods opt in independently through the `updates` object in their
+`briefcase.mod.json` manifest. Briefcase checks those stable GitHub releases
+after the framework check and before loading any external assembly. Package
+settings in `Briefcase/settings.json` and files in the package's reserved
+`Data` directory are preserved.
+
+Set `automaticModUpdates` to `false` in `loader.json` to disable every mod
+update check while keeping framework updates enabled. Package format and release
+validation are documented in [Mod packages and marketplace](ModPackages.md).
 ## Failure behavior
 
 A network, GitHub, download, digest, or archive validation failure does not

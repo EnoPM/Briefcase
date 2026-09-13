@@ -119,7 +119,7 @@ public sealed class ServerBrowserClientMod : BriefcaseMod
                 Ui.Button("Add server", UiIcon.Server, BeginAdd))
             .VisibleWhen(() => !_showEditor),
         Ui.Column(
-                Ui.Button("Back to server list", UiIcon.ChevronRight, ReturnToList),
+                Ui.Button("Back to server list", UiIcon.ChevronLeft, ReturnToList),
                 Ui.Section("Server details",
                     Ui.Text(() => string.IsNullOrEmpty(_editingId)
                         ? "Add a server"

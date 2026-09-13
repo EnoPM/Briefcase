@@ -32,6 +32,14 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
     private string _selectedId;
     private string? _selectedModId;
     private string? _selectedServerPanelId;
+    private int _modsTabIndex;
+    private MarketplaceModStatus[] _marketplaceMods = [];
+    private bool _marketplaceLoaded;
+    private bool _marketplaceLoading;
+    private string? _marketplaceMessage;
+    private string? _installingMarketplaceMod;
+    private double _marketplaceProgress;
+    private CancellationTokenSource? _marketplaceCancellation;
     private bool _disposed;
 
     public AvaloniaConfigurationView(ConfigurationRegistry registry)
@@ -342,7 +350,7 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         {
             _selectedServerPanelId = null;
             RefreshAll();
-        });
+        }, UiIcon.ChevronLeft);
         if (panel.Toolbar is null)
         {
             stack.Children.Add(back);
@@ -405,7 +413,41 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         }
 
         var stack = Page("Mods", "Install, configure, update, and control client mods");
+        var installedTab = new TabItem
+        {
+            Header = "Installed",
+            Content = BuildInstalledModsContent()
+        };
+        installedTab.Classes.Add("briefcase-tab");
+        var marketplaceTab = new TabItem
+        {
+            Header = "Marketplace",
+            Content = BuildMarketplaceContent()
+        };
+        marketplaceTab.Classes.Add("briefcase-tab");
+        var tabs = new TabControl
+        {
+            ItemsSource = new[] { installedTab, marketplaceTab },
+            SelectedIndex = _modsTabIndex,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        tabs.Classes.Add("briefcase-tabs");
+        tabs.SelectionChanged += (_, _) =>
+        {
+            if (tabs.SelectedIndex < 0 || tabs.SelectedIndex == _modsTabIndex) return;
+            _modsTabIndex = tabs.SelectedIndex;
+            if (_modsTabIndex == 1) BeginMarketplaceLoad(forceRefresh: false);
+        };
+        stack.Children.Add(tabs);
+        if (_modsTabIndex == 1 && !_marketplaceLoaded && !_marketplaceLoading)
+            Dispatcher.UIThread.Post(() => BeginMarketplaceLoad(forceRefresh: false));
+        return ScrollPage(stack);
+    }
+
+    private Control BuildInstalledModsContent()
+    {
         var control = _registry._modControl;
+        var content = new StackPanel { Spacing = 14 };
         var actions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -424,9 +466,9 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
                 }, UiIcon.Folder)
             }
         };
-        stack.Children.Add(BriefcaseControls.Card(
+        content.Children.Add(BriefcaseControls.Card(
             "Mod library",
-            "Add or update managed mod DLLs in this directory.",
+            "Each mod has its own directory, manifest, assemblies, and persistent Data folder.",
             new Control[]
             {
                 new TextBlock
@@ -437,13 +479,12 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
                 },
                 actions
             }));
-
         if (control is null)
         {
-            stack.Children.Add(MessageCard(
+            content.Children.Add(MessageCard(
                 "Mod controller unavailable",
                 "The managed mod controller is not ready yet."));
-            return ScrollPage(stack);
+            return content;
         }
 
         ModScope[] scopes;
@@ -451,12 +492,11 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         var mods = control.SnapshotInstalledMods();
         if (mods.Length == 0)
         {
-            stack.Children.Add(MessageCard(
+            content.Children.Add(MessageCard(
                 "No mods installed",
-                "Copy a compatible managed mod DLL into the Mods directory, then select Refresh."));
-            return ScrollPage(stack);
+                "Browse the Marketplace or place a mod package in the Mods directory."));
+            return content;
         }
-
         var cards = new ResponsiveCardPanel();
         foreach (var mod in mods)
         {
@@ -464,10 +504,208 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
                 candidate.Info.Id, mod.Id, StringComparison.OrdinalIgnoreCase));
             cards.Children.Add(BuildModCard(control, mod, scope));
         }
-        stack.Children.Add(cards);
-        return ScrollPage(stack);
+        content.Children.Add(cards);
+        return content;
     }
 
+    private Control BuildMarketplaceContent()
+    {
+        var content = new StackPanel { Spacing = 14 };
+        content.Children.Add(BriefcaseControls.Card(
+            "Community marketplace",
+            "Browse free client mods curated in the public Briefcase catalogue.",
+            new Control[]
+            {
+                MakeButton("Refresh catalogue", () =>
+                    BeginMarketplaceLoad(forceRefresh: true), UiIcon.Refresh),
+                new TextBlock
+                {
+                    Text = "Packages are downloaded from each mod's GitHub releases.",
+                    Foreground = BriefcaseTheme.Muted,
+                    TextWrapping = TextWrapping.Wrap
+                }
+            }));
+
+        if (_marketplaceLoading)
+        {
+            content.Children.Add(new ProgressBar
+            {
+                Minimum = 0,
+                Maximum = 1,
+                Value = _marketplaceProgress,
+                IsIndeterminate = _installingMarketplaceMod is null,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = _marketplaceMessage ?? "Loading marketplace...",
+                Foreground = BriefcaseTheme.Muted,
+                TextWrapping = TextWrapping.Wrap
+            });
+        }
+        else if (!string.IsNullOrWhiteSpace(_marketplaceMessage))
+        {
+            content.Children.Add(MessageCard(
+                _marketplaceLoaded ? "Marketplace" : "Marketplace unavailable",
+                _marketplaceMessage));
+        }
+
+        if (_marketplaceLoaded && _marketplaceMods.Length == 0)
+        {
+            content.Children.Add(MessageCard(
+                "No published mods yet",
+                "The marketplace catalogue is online but currently empty."));
+            return content;
+        }
+
+        var cards = new ResponsiveCardPanel();
+        foreach (var mod in _marketplaceMods)
+        {
+            var status = mod.Installed
+                ? StatusBadge("Installed", UiStatusTone.Success)
+                : StatusBadge("Available", UiStatusTone.Neutral);
+            var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            heading.Children.Add(new TextBlock
+            {
+                Text = mod.Name,
+                FontWeight = FontWeight.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            Grid.SetColumn(status, 1);
+            heading.Children.Add(status);
+            var install = MakeButton(
+                mod.Installed ? "Installed" : "Install",
+                () => BeginMarketplaceInstall(mod.Id),
+                mod.Installed ? UiIcon.Check : UiIcon.Download);
+            install.IsEnabled = !mod.Installed && !_marketplaceLoading;
+            var children = new List<Control>
+            {
+                heading,
+                DetailLine("Author", mod.Author),
+                DetailLine("GitHub", mod.Repository),
+                new TextBlock
+                {
+                    Text = mod.Description,
+                    Foreground = BriefcaseTheme.Muted,
+                    TextWrapping = TextWrapping.Wrap
+                },
+                install
+            };
+            if (mod.Dependencies.Count > 0)
+                children.Insert(3, DetailLine("Requires", string.Join(", ", mod.Dependencies)));
+            cards.Children.Add(BriefcaseControls.Card(null, null, children));
+        }
+        content.Children.Add(cards);
+        return content;
+    }
+
+    private void BeginMarketplaceLoad(bool forceRefresh)
+    {
+        if (_marketplaceLoading || _registry._modControl is not { } control) return;
+        _marketplaceCancellation?.Cancel();
+        _marketplaceCancellation?.Dispose();
+        _marketplaceCancellation = new CancellationTokenSource();
+        _marketplaceLoading = true;
+        _marketplaceProgress = 0;
+        _marketplaceMessage = "Loading marketplace catalogue...";
+        RefreshAll();
+        _ = LoadMarketplaceAsync(control, forceRefresh, _marketplaceCancellation.Token);
+    }
+
+    private async Task LoadMarketplaceAsync(
+        IFrameworkModControl control,
+        bool forceRefresh,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var mods = await control.GetMarketplaceAsync(forceRefresh, cancellationToken);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _marketplaceMods = mods;
+                _marketplaceLoaded = true;
+                _marketplaceLoading = false;
+                _marketplaceMessage = null;
+                RefreshAll();
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _marketplaceLoading = false;
+                _marketplaceMessage = exception.Message;
+                RefreshAll();
+            });
+        }
+    }
+
+    private void BeginMarketplaceInstall(string id)
+    {
+        if (_marketplaceLoading || _registry._modControl is not { } control) return;
+        _marketplaceCancellation?.Cancel();
+        _marketplaceCancellation?.Dispose();
+        _marketplaceCancellation = new CancellationTokenSource();
+        _marketplaceLoading = true;
+        _installingMarketplaceMod = id;
+        _marketplaceProgress = 0;
+        _marketplaceMessage = "Preparing mod installation...";
+        RefreshAll();
+        _ = InstallMarketplaceModAsync(control, id, _marketplaceCancellation.Token);
+    }
+
+    private async Task InstallMarketplaceModAsync(
+        IFrameworkModControl control,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var lastRenderedProgress = 0d;
+            await control.InstallMarketplaceModAsync(id, update =>
+            {
+                if (update.Progress < 1 && update.Progress - lastRenderedProgress < 0.04) return;
+                lastRenderedProgress = update.Progress;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!_marketplaceLoading || !string.Equals(
+                            _installingMarketplaceMod, id,
+                            StringComparison.OrdinalIgnoreCase)) return;
+                    _marketplaceProgress = update.Progress;
+                    _marketplaceMessage = $"{update.Stage} — {update.Detail}";
+                    RefreshAll();
+                });
+            }, cancellationToken);
+            var mods = await control.GetMarketplaceAsync(
+                forceRefresh: false, cancellationToken);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!string.Equals(_installingMarketplaceMod, id,
+                        StringComparison.OrdinalIgnoreCase)) return;
+                _marketplaceMods = mods;
+                _marketplaceLoaded = true;
+                _marketplaceLoading = false;
+                _installingMarketplaceMod = null;
+                _marketplaceProgress = 1;
+                _marketplaceMessage = "The mod was installed and loaded successfully.";
+                RefreshAll();
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!string.Equals(_installingMarketplaceMod, id,
+                        StringComparison.OrdinalIgnoreCase)) return;
+                _marketplaceLoading = false;
+                _installingMarketplaceMod = null;
+                _marketplaceMessage = exception.Message;
+                RefreshAll();
+            });
+        }
+    }
     private Control BuildModCard(
         IFrameworkModControl control,
         ManagedModStatus mod,
@@ -515,6 +753,20 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         };
         if (hasDraft)
             children.Add(StatusBadge("Unsaved settings", UiStatusTone.Warning));
+        if (!string.IsNullOrWhiteSpace(mod.PackageDirectory))
+            children.Add(DetailLine("Folder", mod.PackageDirectory));
+        if (!string.IsNullOrWhiteSpace(mod.UpdateRepository))
+            children.Add(DetailLine("Automatic updates", mod.UpdateRepository));
+        if (!string.IsNullOrWhiteSpace(mod.UpdateError))
+        {
+            children.Add(new TextBlock
+            {
+                Text = $"Update check failed: {mod.UpdateError}",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = BriefcaseTheme.Warning,
+                FontSize = 12.5
+            });
+        }
         if (mod.LastError is not null)
         {
             children.Add(new TextBlock
@@ -584,7 +836,8 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
     private Control BuildInstalledModPage(ManagedModStatus status)
     {
         var stack = Page(status.DisplayName, "Installed client mod");
-        stack.Children.Add(MakeButton("Back to mods", ReturnToMods));
+        stack.Children.Add(MakeButton(
+            "Back to mods", ReturnToMods, UiIcon.ChevronLeft));
         if (_registry._modControl is { } control)
             stack.Children.Add(BuildModCard(control, status, null));
         stack.Children.Add(MessageCard(
@@ -607,7 +860,8 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         var stack = Page(
             scope.Info.Name,
             $"{scope.Info.Author}  ·  {scope.Info.Version}  ·  {scope.Info.Id}");
-        stack.Children.Add(MakeButton("Back to mods", ReturnToMods));
+        stack.Children.Add(MakeButton(
+            "Back to mods", ReturnToMods, UiIcon.ChevronLeft));
         if (!string.IsNullOrWhiteSpace(scope.Info.Description))
         {
             stack.Children.Add(new TextBlock
@@ -1002,6 +1256,9 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         _disposed = true;
         _refreshTimer.Stop();
         _serverWorkspaceSubscription.Dispose();
+        _marketplaceCancellation?.Cancel();
+        _marketplaceCancellation?.Dispose();
+        _marketplaceCancellation = null;
         DisposeRenderedComponents();
         _content.Content = null;
         Content = null;

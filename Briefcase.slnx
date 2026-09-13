@@ -3,6 +3,7 @@
 
   <Folder Name="/Core/">
     <Project Path="managed/Briefcase.ModApi/Briefcase.ModApi.csproj" />
+    <Project Path="managed/Briefcase.ModPackages/Briefcase.ModPackages.csproj" />
     <Project Path="managed/Briefcase.Updater/Briefcase.Updater.csproj" />
     <Project Path="managed/Briefcase.ManagedHost/Briefcase.ManagedHost.csproj" />
     <Project Path="managed/Briefcase.SdkEmitter/Briefcase.SdkEmitter.csproj" />
