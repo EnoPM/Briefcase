@@ -35,6 +35,7 @@ internal interface IRetainedMenuHost : IDisposable
     bool IsForeground { get; }
     void Start();
     void SetVisible(bool visible);
+    void SetSuspended(bool suspended);
     void SubmitOverlay(OverlayFrameSnapshot frame);
 }
 
@@ -49,6 +50,7 @@ internal sealed class LazyRetainedMenuHost(
 {
     private IRetainedMenuHost? _host;
     private bool _factoryFailed;
+    private bool _suspended;
 
     public bool UseRetained => factory is not null &&
         !_factoryFailed && _host?.HasFailed != true;
@@ -67,6 +69,7 @@ internal sealed class LazyRetainedMenuHost(
         {
             _host = factory();
             _host.Start();
+            _host.SetSuspended(_suspended);
         }
         catch (Exception exception)
         {
@@ -81,6 +84,12 @@ internal sealed class LazyRetainedMenuHost(
     {
         if (visible) Prepare();
         _host?.SetVisible(visible);
+    }
+
+    public void SetSuspended(bool suspended)
+    {
+        _suspended = suspended;
+        _host?.SetSuspended(suspended);
     }
 
     public void SubmitOverlay(OverlayFrameSnapshot frame) =>

@@ -7,7 +7,7 @@ namespace Briefcase.AvaloniaUi;
 
 /// <summary>
 /// Reflection entry point loaded by Briefcase.Rendering. This assembly owns only
-/// the overlay and startup view; the configuration menu is another lazy module.
+/// the startup/menu window; the configuration content is another lazy module.
 /// </summary>
 public static class AvaloniaUiFactory
 {

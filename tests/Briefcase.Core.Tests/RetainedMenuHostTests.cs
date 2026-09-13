@@ -45,6 +45,51 @@ public sealed class RetainedMenuHostTests
     }
 
     [Fact]
+    public void Suspension_requested_before_creation_is_applied_when_host_is_prepared()
+    {
+        bool? applied = null;
+        using var lazy = new LazyRetainedMenuHost(
+            () => new FakeRetainedMenuHost(() => { }, value => applied = value),
+            _ => { });
+
+        lazy.SetSuspended(true);
+        Assert.Null(applied);
+
+        lazy.Prepare();
+        Assert.True(applied is true);
+
+        lazy.SetSuspended(false);
+        Assert.True(applied is false);
+    }
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Hotkey_requires_a_stable_release_before_another_press()
+    {
+        var hotkey = new ManagedRenderingHost.StableReleaseHotkey(100);
+
+        Assert.True(hotkey.Update(true, 0));
+        Assert.False(hotkey.Update(true, 10));
+        Assert.False(hotkey.Update(false, 20));
+        Assert.False(hotkey.Update(false, 119));
+        Assert.False(hotkey.Update(false, 120));
+        Assert.True(hotkey.Update(true, 121));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Hotkey_ignores_a_transient_release_during_focus_transfer()
+    {
+        var hotkey = new ManagedRenderingHost.StableReleaseHotkey(100);
+
+        Assert.True(hotkey.Update(true, 0));
+        Assert.False(hotkey.Update(false, 20));
+        Assert.False(hotkey.Update(true, 30));
+        Assert.False(hotkey.Update(false, 40));
+        Assert.False(hotkey.Update(false, 139));
+        Assert.False(hotkey.Update(false, 140));
+        Assert.True(hotkey.Update(true, 141));
+    }
+    [Fact]
     public void Offscreen_saved_position_is_brought_fully_inside_the_game()
     {
         var fitted = AvaloniaPlacementConstraints.Fit(
@@ -92,12 +137,15 @@ public sealed class RetainedMenuHostTests
         Assert.Equal(840, size.Height);
     }
 
-    private sealed class FakeRetainedMenuHost(Action started) : IRetainedMenuHost
+    private sealed class FakeRetainedMenuHost(
+        Action started,
+        Action<bool>? suspensionChanged = null) : IRetainedMenuHost
     {
         public bool HasFailed => false;
         public bool IsForeground => false;
         public void Start() => started();
         public void SetVisible(bool visible) { }
+        public void SetSuspended(bool suspended) => suspensionChanged?.Invoke(suspended);
         public void SubmitOverlay(Briefcase.ModApi.OverlayFrameSnapshot frame) { }
         public void Dispose() { }
     }

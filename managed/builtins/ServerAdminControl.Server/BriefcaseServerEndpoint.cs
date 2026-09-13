@@ -40,7 +40,13 @@ internal sealed class BriefcaseServerEndpoint : IDisposable
         info("Unified Briefcase endpoint: starting the TCP listener.");
         _listener.Start();
         info("Unified Briefcase endpoint: starting the accept loop.");
-        _acceptLoop = AcceptLoopAsync(_stop.Token);
+        // AcceptTcpClientAsync may complete synchronously while connection
+        // attempts are already queued. Starting the async loop inline would
+        // then keep this constructor (and Unreal's game thread) inside the
+        // accept loop until the queue becomes empty. Force the first
+        // continuation onto the thread pool so network traffic can never
+        // stall the dedicated server's game loop.
+        _acceptLoop = Task.Run(() => AcceptLoopAsync(_stop.Token));
         info($"Unified Briefcase endpoint listening on {address}:{port}/TCP " +
              $"(admin v{ServerAdminProtocol.Version}, handshake v{ModHandshakeProtocol.Version}, " +
              $"authentication={(_authenticator.IsConfigured ? "enabled" : "disabled")}).");

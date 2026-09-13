@@ -96,7 +96,8 @@ public static unsafe class EntryPoint
                     _configuration.GetAvaloniaPlacement,
                     _configuration.RememberAvaloniaPlacement,
                     enableGameWindowChrome,
-                    _startupProgress);
+                    _startupProgress,
+                    nativeContext.RenderingNative);
                 context.Info("Framework UI: Avalonia");
                 _rendering.Start();
             }

@@ -104,32 +104,58 @@ internal sealed unsafe class ManagedModManager : IFrameworkModControl, IDisposab
         string fileName,
         string section,
         string key,
-        JsonElement value)
+        JsonElement value) =>
+        SetConfiguration(fileName,
+            [new ManagedModConfigurationChange(section, key, value)]);
+
+    public void SetConfiguration(
+        string fileName,
+        IReadOnlyList<ManagedModConfigurationChange> changes)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(section);
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(changes);
+        if (changes.Count is <= 0 or > 512)
+            throw new ArgumentOutOfRangeException(
+                nameof(changes), "A configuration batch must contain between 1 and 512 values.");
+
         lock (_gate)
         {
             var path = ResolveFileName(fileName);
             if (!_loaded.TryGetValue(path, out var loaded))
                 throw new InvalidOperationException(
                     $"The server mod '{fileName}' must be loaded before its settings can be changed.");
-            var matches = loaded.Configuration.SnapshotEntries().Where(entry =>
-                    entry.Section.Equals(section, StringComparison.OrdinalIgnoreCase) &&
-                    entry.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            if (matches.Length != 1 || matches[0].Secret)
-                throw new InvalidOperationException(
-                    $"The public setting '{section}/{key}' was not found in {fileName}.");
-            var entry = matches[0];
-            object parsed = entry.ValueType.IsEnum
-                ? Enum.Parse(entry.ValueType, value.GetString() ?? "", ignoreCase: true)
-                : value.Deserialize(entry.ValueType) ??
-                  throw new InvalidOperationException("The setting value cannot be null.");
-            entry.BoxedValue = parsed;
+            var entries = loaded.Configuration.SnapshotEntries();
+            var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var parsed = new List<(IConfigurationEntry Entry, object Value)>(changes.Count);
+            foreach (var change in changes)
+            {
+                ArgumentException.ThrowIfNullOrWhiteSpace(change.Section);
+                ArgumentException.ThrowIfNullOrWhiteSpace(change.Key);
+                if (!unique.Add(change.Section + "\n" + change.Key))
+                    throw new InvalidOperationException(
+                        $"The setting '{change.Section}/{change.Key}' occurs more than once.");
+                var matches = entries.Where(entry =>
+                        entry.Section.Equals(change.Section, StringComparison.OrdinalIgnoreCase) &&
+                        entry.Key.Equals(change.Key, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (matches.Length != 1 || matches[0].Secret)
+                    throw new InvalidOperationException(
+                        $"The public setting '{change.Section}/{change.Key}' was not found in {fileName}.");
+                var entry = matches[0];
+                object value = entry.ValueType.IsEnum
+                    ? Enum.Parse(
+                        entry.ValueType,
+                        change.Value.GetString() ?? "",
+                        ignoreCase: true)
+                    : change.Value.Deserialize(entry.ValueType) ??
+                      throw new InvalidOperationException(
+                          $"The setting '{change.Section}/{change.Key}' cannot be null.");
+                parsed.Add((entry, value));
+            }
+
+            foreach (var change in parsed)
+                change.Entry.BoxedValue = change.Value;
         }
     }
-
     private static ManagedModConfigurationEntry ToConfigurationEntry(
         IConfigurationEntry entry)
     {

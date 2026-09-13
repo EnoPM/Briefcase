@@ -11,7 +11,7 @@ public sealed class OverlayDrawingApiTests
         var overlay = new OverlayDrawingApi(buffer);
 
         overlay.DrawLine(1, 2, 3, 4, OverlayColor.Rgba(10, 20, 30), 2);
-        overlay.DrawCircle(5, 6, 7, OverlayColor.Rgba(40, 50, 60), filled: true);
+        overlay.DrawCircle(5, 6, 7, OverlayColor.Rgba(40, 50, 60), segments: 24, filled: true);
         overlay.DrawRectFilled(8, 9, 10, 11, OverlayColor.Rgba(70, 80, 90), 3);
         overlay.DrawText(12, 13, OverlayColor.Rgba(100, 110, 120), "BOT 7m");
 
@@ -23,6 +23,7 @@ public sealed class OverlayDrawingApiTests
         Assert.Equal(OverlayCommandKind.Line, snapshot.Commands[0].Kind);
         Assert.Equal(OverlayCommandKind.Circle, snapshot.Commands[1].Kind);
         Assert.True(snapshot.Commands[1].Filled);
+        Assert.Equal(24, snapshot.Commands[1].Segments);
         Assert.Equal(OverlayCommandKind.FilledRectangle, snapshot.Commands[2].Kind);
         Assert.Equal(OverlayCommandKind.Text, snapshot.Commands[3].Kind);
         Assert.Equal("BOT 7m", snapshot.Commands[3].Text);

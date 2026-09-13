@@ -8,11 +8,12 @@ using Briefcase.ModApi;
 namespace Briefcase.Rendering;
 
 /// <summary>
-/// Coordinates the Avalonia client UI and toolkit-neutral mod overlay callbacks.
-/// It owns no graphics device; Avalonia/Skia is the sole visual renderer.
+/// Coordinates the Avalonia configuration menu and toolkit-neutral mod
+/// drawing callbacks. Passive drawings are submitted to the native D3D11
+/// renderer, so Avalonia never creates a second click-through overlay HWND.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
+public sealed unsafe class ManagedRenderingHost : IManagedRenderingService, IDisposable
 {
     private readonly Action<string> _info;
     private readonly Action<string> _error;
@@ -22,6 +23,7 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
     private readonly Action<AvaloniaWindowPlacement>? _saveAvaloniaPlacement;
     private readonly bool _enableGameWindowChrome;
     private readonly FrameworkStartupProgress? _startupProgress;
+    private readonly NativeOverlayBridge _nativeOverlay;
     private readonly object _callbacksGate = new();
     private readonly List<Registration> _callbacks = [];
     private readonly CancellationTokenSource _stop = new();
@@ -38,7 +40,8 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
         Func<AvaloniaWindowPlacement>? loadAvaloniaPlacement = null,
         Action<AvaloniaWindowPlacement>? saveAvaloniaPlacement = null,
         bool enableGameWindowChrome = false,
-        FrameworkStartupProgress? startupProgress = null)
+        FrameworkStartupProgress? startupProgress = null,
+        Briefcase.ModApi.Interop.NativeRenderingApi* nativeRendering = null)
     {
         _info = info;
         _error = error;
@@ -48,6 +51,7 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
         _saveAvaloniaPlacement = saveAvaloniaPlacement;
         _enableGameWindowChrome = enableGameWindowChrome;
         _startupProgress = startupProgress;
+        _nativeOverlay = new NativeOverlayBridge(nativeRendering, info, error);
     }
 
     public bool IsAvailable => Volatile.Read(ref _started) != 0;
@@ -85,6 +89,7 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
         if (Interlocked.Exchange(ref _started, 0) == 0) return;
         if (ReferenceEquals(ManagedRenderingBridge.Current, this))
             ManagedRenderingBridge.Current = null;
+        _nativeOverlay.Clear();
         _stop.Cancel();
         if (_thread is { IsAlive: true } && Thread.CurrentThread != _thread)
             _thread.Join(TimeSpan.FromSeconds(2));
@@ -100,6 +105,7 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
             var gameWindow = WaitForGameWindow();
             if (gameWindow == 0) return;
 
+            _nativeOverlay.Start();
             using var gameWindowChrome = CreateGameWindowChrome(gameWindow);
             using var avalonia = new LazyRetainedMenuHost(
                 () => CreateAvaloniaHost(gameWindow), _error);
@@ -243,34 +249,56 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
         var previous = Stopwatch.GetTimestamp();
         var frameNumber = 0UL;
         var appliedVisibility = false;
-        var f1WasDown = false;
+        var appliedSuspension = false;
+        var f1 = new StableReleaseHotkey(
+            Math.Max(1, Stopwatch.Frequency * 3 / 20));
+        var focusAcquisitionDeadline = 0L;
+        var focusAcquisitionTicks = Math.Max(1, Stopwatch.Frequency * 3 / 4);
 
         while (!_stop.IsCancellationRequested && Win32Native.IsWindow(gameWindow))
         {
+            var loopTimestamp = Stopwatch.GetTimestamp();
             gameWindowChrome?.Maintain();
             var foreground = Win32Native.GetAncestor(
                 Win32Native.GetForegroundWindow(), Win32Native.GaRoot);
-            var focused = foreground == gameWindow || avalonia.IsForeground;
-            var f1Down = IsKeyDown(Win32Native.VkF1);
-            if (f1Down && !f1WasDown && focused &&
+            Win32Native.GetWindowThreadProcessId(foreground, out var foregroundProcessId);
+            var focused = foreground == gameWindow || avalonia.IsForeground ||
+                          foregroundProcessId == (uint)Environment.ProcessId;
+            var f1Pressed = f1.Update(
+                IsKeyDown(Win32Native.VkF1), loopTimestamp);
+            if (f1Pressed && focused &&
                 _startupProgress?.Snapshot.IsComplete != false)
-                MenuVisible = !MenuVisible;
-            f1WasDown = f1Down;
-            if (!focused) MenuVisible = false;
-
-            var visible = MenuVisible;
-            if (visible != appliedVisibility)
             {
-                avalonia.SetVisible(visible);
-                appliedVisibility = visible;
-                _info(visible ? "Client UI: menu opened" : "Client UI: menu closed");
+                var opening = !MenuVisible;
+                MenuVisible = opening;
+                if (opening)
+                    focusAcquisitionDeadline = loopTimestamp + focusAcquisitionTicks;
             }
+
+            var menuOpen = MenuVisible;
+            var acquiringFocus = menuOpen && loopTimestamp < focusAcquisitionDeadline;
+            var suspended = !focused && !acquiringFocus;
+            if (suspended != appliedSuspension)
+            {
+                avalonia.SetSuspended(suspended);
+                appliedSuspension = suspended;
+                _info(suspended
+                    ? "Client UI: overlay suspended while the game is unfocused"
+                    : "Client UI: overlay resumed after focus returned");
+            }
+            if (menuOpen != appliedVisibility)
+            {
+                avalonia.SetVisible(menuOpen);
+                appliedVisibility = menuOpen;
+                _info(menuOpen ? "Client UI: menu opened" : "Client UI: menu closed");
+            }
+            var visible = menuOpen && !suspended;
 
             if (!Win32Native.GetClientRect(gameWindow, out var rectangle) ||
                 rectangle.Width <= 0 || rectangle.Height <= 0 ||
                 Win32Native.IsIconic(gameWindow))
             {
-                avalonia.SubmitOverlay(OverlayFrameSnapshot.Empty);
+                _nativeOverlay.Clear();
                 Thread.Sleep(25);
                 continue;
             }
@@ -292,7 +320,8 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
             foreach (var callback in SnapshotCallbacks())
                 if (visible || callback.RenderWhenMenuHidden)
                     callback.Invoke(frame, _error);
-            avalonia.SubmitOverlay(buffer.Snapshot(frame.Width, frame.Height));
+            _nativeOverlay.Submit(
+                buffer.Snapshot(frame.Width, frame.Height), frame.FrameNumber);
             Thread.Sleep(8);
         }
     }
@@ -310,6 +339,42 @@ public sealed class ManagedRenderingHost : IManagedRenderingService, IDisposable
     private static bool IsKeyDown(int key) =>
         (Win32Native.GetAsyncKeyState(key) & 0x8000) != 0;
 
+    /// <summary>
+    /// Emits one press until the key has remained released for a short, stable
+    /// interval. Moving focus from Unreal to Avalonia can otherwise make
+    /// GetAsyncKeyState flicker and turn one physical F1 press into two toggles.
+    /// </summary>
+    internal sealed class StableReleaseHotkey(long stableReleaseTicks)
+    {
+        private readonly long _stableReleaseTicks = Math.Max(1, stableReleaseTicks);
+        private bool _armed = true;
+        private long? _releaseStarted;
+
+        public bool Update(bool isDown, long timestamp)
+        {
+            if (isDown)
+            {
+                _releaseStarted = null;
+                if (!_armed) return false;
+                _armed = false;
+                return true;
+            }
+
+            if (_armed) return false;
+            if (_releaseStarted is null)
+            {
+                _releaseStarted = timestamp;
+                return false;
+            }
+
+            if (timestamp - _releaseStarted.Value >= _stableReleaseTicks)
+            {
+                _armed = true;
+                _releaseStarted = null;
+            }
+            return false;
+        }
+    }
     private sealed class Registration : IRenderRegistration
     {
         private readonly ManagedRenderingHost _owner;

@@ -178,7 +178,7 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         button.Classes.Add("briefcase-navigation");
         if (root) button.Classes.Add("briefcase-navigation-root");
         if (active) button.Classes.Add("briefcase-navigation-active");
-        button.Click += (_, _) => action();
+        button.Click += (_, _) => InvokeFrameworkAction(action);
         _navigation.Children.Add(button);
     }
 
@@ -223,7 +223,9 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
                     ServerPanelPrefix + scope.Info.Id + ":" + panel.Name,
                     scope.Info.Id,
                     panel.Name,
-                    panel.Content)))
+                    panel.Content,
+                    panel.Toolbar,
+                    panel.Footer)))
             .OrderBy(panel => panel.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -336,13 +338,41 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
     private Control BuildServerPanelPage(ServerPanel panel)
     {
         var stack = Page(panel.Name, "Remote Briefcase server management");
-        stack.Children.Add(MakeButton("Back to server list", () =>
+        var back = MakeButton("Back to server list", () =>
         {
             _selectedServerPanelId = null;
             RefreshAll();
-        }));
+        });
+        if (panel.Toolbar is null)
+        {
+            stack.Children.Add(back);
+        }
+        else
+        {
+            var toolbar = new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = RenderComponents(panel.Toolbar)
+            };
+            Grid.SetColumn(toolbar, 1);
+            stack.Children.Add(new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+                Children = { back, toolbar }
+            });
+        }
         stack.Children.Add(RenderComponents(panel.Content));
-        return ScrollPage(stack);
+        var scrollingContent = ScrollPage(stack);
+        if (panel.Footer is null) return scrollingContent;
+
+        var footer = RenderComponents(panel.Footer);
+        Grid.SetRow(footer, 1);
+        return new Grid
+        {
+            RowDefinitions = new RowDefinitions("*,Auto"),
+            Children = { scrollingContent, footer }
+        };
     }
 
     private void OpenFirstServerAdministration()
@@ -872,11 +902,14 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         var badge = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
             Child = new TextBlock
             {
                 Text = text,
                 FontSize = 12,
-                FontWeight = FontWeight.SemiBold
+                FontWeight = FontWeight.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center
             }
         };
         badge.Classes.Add(UiClasses.Status);
@@ -891,7 +924,7 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         return badge;
     }
 
-    private static Button MakeButton(
+    private Button MakeButton(
         string text,
         Action action,
         UiIcon? icon = null,
@@ -917,8 +950,25 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         }
         var button = new Button { Content = content };
         button.Classes.Add(primary ? UiClasses.Primary : UiClasses.Secondary);
-        button.Click += (_, _) => action();
+        button.Click += (_, _) => InvokeFrameworkAction(action);
         return button;
+    }
+
+    private void InvokeFrameworkAction(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception)
+        {
+            _registry.ReportClientUiError(exception);
+            _selectedModId = null;
+            _selectedServerPanelId = null;
+            _content.Content = MessageCard(
+                "Could not open this page",
+                exception.GetBaseException().Message);
+        }
     }
 
     private static NumericUpDown Numeric(
@@ -967,11 +1017,14 @@ internal sealed class AvaloniaConfigurationView : UserControl, IDisposable
         string Id,
         string ScopeId,
         string Name,
-        UiComponent Content)
+        UiComponent Content,
+        UiComponent? Toolbar,
+        UiComponent? Footer)
     {
         public bool IsDirectory => string.Equals(
             ScopeId,
             ServerDirectoryModId,
             StringComparison.OrdinalIgnoreCase);
     }
+
 }

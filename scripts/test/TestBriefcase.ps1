@@ -97,6 +97,13 @@ try {
     if ($IncludeIntegration) {
         Invoke-Checked 'dotnet' @(
             'run',
+            '--project', (Join-Path $root 'validation\Briefcase.Avalonia.Validation\Briefcase.Avalonia.Validation.csproj'),
+            '-c', $Configuration,
+            '--', '--construction-only') `
+            'Avalonia reusable-control construction validation'
+
+        Invoke-Checked 'dotnet' @(
+            'run',
             '--project', (Join-Path $root 'validation\Briefcase.GameThread.Validation\Briefcase.GameThread.Validation.csproj'),
             '-c', $Configuration) `
             'Game-thread integration validation'

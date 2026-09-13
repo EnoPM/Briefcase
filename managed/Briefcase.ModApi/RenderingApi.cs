@@ -52,7 +52,8 @@ public interface IRenderRegistration : IDisposable
 
 /// <summary>
 /// Toolkit-neutral immediate drawing surface. Calls made during a render
-/// callback are batched and rendered by Briefcase's Avalonia overlay.
+/// callback are batched and rendered in the game's D3D11 swap chain by
+/// Briefcase's client-only native renderer.
 /// </summary>
 public readonly struct OverlayDrawingApi
 {
@@ -71,10 +72,9 @@ public readonly struct OverlayDrawingApi
         float thickness = 1,
         bool filled = false)
     {
-        _ = segments; // Avalonia produces resolution-independent ellipse geometry.
         _commands?.Add(new OverlayCommand(
             OverlayCommandKind.Circle, x, y, 0, 0, radius, thickness, 0,
-            rgba, null, filled));
+            rgba, null, filled, segments));
     }
 
     public void DrawLine(
@@ -86,7 +86,7 @@ public readonly struct OverlayDrawingApi
         float thickness = 1) =>
         _commands?.Add(new OverlayCommand(
             OverlayCommandKind.Line, x1, y1, x2, y2, 0, thickness, 0,
-            rgba, null, false));
+            rgba, null, false, 0));
 
     public void DrawRectFilled(
         float minimumX,
@@ -98,14 +98,14 @@ public readonly struct OverlayDrawingApi
         _commands?.Add(new OverlayCommand(
             OverlayCommandKind.FilledRectangle,
             minimumX, minimumY, maximumX, maximumY, 0, 0, rounding,
-            rgba, null, true));
+            rgba, null, true, 0));
 
     public void DrawText(float x, float y, uint rgba, string text)
     {
         ArgumentNullException.ThrowIfNull(text);
         _commands?.Add(new OverlayCommand(
             OverlayCommandKind.Text, x, y, 0, 0, 0, 0, 0,
-            rgba, text, false));
+            rgba, text, false, 0));
     }
 }
 
@@ -135,7 +135,8 @@ internal readonly record struct OverlayCommand(
     float Rounding,
     uint Color,
     string? Text,
-    bool Filled);
+    bool Filled,
+    int Segments);
 
 internal sealed class OverlayCommandBuffer(float framerate)
 {

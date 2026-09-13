@@ -151,6 +151,9 @@ internal static class Win32Native
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     internal static extern nint GetModuleHandleW(string? moduleName);
 
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern ushort RegisterClassExW(ref WindowClass windowClass);
 
@@ -242,7 +245,14 @@ internal static class Win32Native
     internal static extern nint SetFocus(nint window);
 
     [DllImport("user32.dll")]
+    internal static extern nint SetActiveWindow(nint window);
+
+    [DllImport("user32.dll")]
     internal static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    internal static extern bool AttachThreadInput(
+        uint threadId, uint targetThreadId, bool attach);
 
     [DllImport("user32.dll")]
     internal static extern nint GetCapture();

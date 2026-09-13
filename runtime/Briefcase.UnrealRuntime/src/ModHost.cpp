@@ -5,6 +5,7 @@
 #include "UnrealProbe.h"
 
 #include <Briefcase/BriefcaseModApi.h>
+#include "../../Briefcase.Native.Rendering/src/NativeRendering.h"
 #include <Windows.h>
 #include <algorithm>
 #include <array>
@@ -33,6 +34,8 @@ constexpr BriefcaseVersion FrameworkVersion{
     0};
 std::vector<HMODULE> LoadedMods;
 std::vector<HMODULE> ResidentModules;
+HMODULE RenderingModule{};
+const BriefcaseRenderingApi* RenderingApi{};
 
 std::wstring utf8ToWide(const char* text, std::uint32_t length) {
     if (!text || length == 0 || length > 16 * 1024) return {};
@@ -114,10 +117,39 @@ std::filesystem::path moduleDirectory(HMODULE module) {
 
 namespace briefcase {
 
+void loadOptionalRenderingHost(const std::filesystem::path& frameworkDirectory) {
+    if (RenderingModule || RenderingApi) return;
+    const auto library = frameworkDirectory / L"Core" / L"Native" /
+                         L"Briefcase.Native.Rendering.dll";
+    if (!std::filesystem::is_regular_file(library)) {
+        log(L"native overlay renderer: optional client module is not installed");
+        return;
+    }
+    RenderingModule = LoadLibraryExW(library.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!RenderingModule) {
+        log(L"native overlay renderer: load failed error=" +
+            std::to_wstring(GetLastError()));
+        return;
+    }
+    const auto query = reinterpret_cast<BriefcaseGetRenderingApiFn>(
+        GetProcAddress(RenderingModule, BRIEFCASE_RENDERING_API_EXPORT));
+    const auto* api = query ? query() : nullptr;
+    if (!api || api->StructSize < sizeof(BriefcaseRenderingApi) ||
+        api->ApiVersion != BRIEFCASE_RENDERING_API_VERSION ||
+        !api->Start || !api->SubmitFrame || !api->GetStatus) {
+        log(L"native overlay renderer: incompatible module");
+        return;
+    }
+    RenderingApi = api;
+    log(L"native overlay renderer: ABI ready");
+}
+
 const BriefcaseHostApi* getHostApi() {
     HostApi.Capabilities = BRIEFCASE_CAPABILITY_CORE;
     HostApi.Unreal = nullptr;
-    HostApi.ReservedRendering = nullptr;
+    HostApi.Rendering = RenderingApi;
+    if (RenderingApi) HostApi.Capabilities |= BRIEFCASE_CAPABILITY_RENDERING;
     HostApi.Input = nullptr;
     HostApi.Patching = nullptr;
     HostApi.GameThread = nullptr;

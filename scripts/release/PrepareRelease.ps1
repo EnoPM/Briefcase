@@ -247,6 +247,7 @@ Briefcase\Mods.
     Assert-CoreLibraryLayout $clientStage $true
     Assert-CoreLibraryLayout $serverStage $false
     Assert-File $clientStage 'Briefcase\Core\Briefcase.ClientModApi.dll'
+    Assert-File $clientStage 'Briefcase\Core\Native\Briefcase.Native.Rendering.dll'
     Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaUi.dll'
     Assert-File $clientStage 'Briefcase\Core\Ui\Avalonia\Briefcase.AvaloniaMenu.dll'
     Assert-File $clientStage 'Briefcase\Core\ThirdPartyLibraries\Avalonia.Base.dll'
@@ -271,6 +272,7 @@ Briefcase\Mods.
         'Briefcase/Core/Briefcase.Updater.dll',
         'Briefcase/Core/Updater/Briefcase.UpdateInstaller.exe',
         'Briefcase/Core/Briefcase.ClientModApi.dll',
+        'Briefcase/Core/Native/Briefcase.Native.Rendering.dll',
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaUi.dll',
         'Briefcase/Core/Ui/Avalonia/Briefcase.AvaloniaMenu.dll',
         'Briefcase/Core/ThirdPartyLibraries/Avalonia.Base.dll',

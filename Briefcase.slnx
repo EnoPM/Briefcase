@@ -16,6 +16,7 @@
     <Project Path="loader/Briefcase.VersionProxy/Briefcase.VersionProxy.vcxproj" />
     <Project Path="loader/Briefcase.Bootstrap/Briefcase.Bootstrap.vcxproj" />
     <Project Path="runtime/Briefcase.Native.Foundation/Briefcase.Native.Foundation.vcxproj" />
+    <Project Path="runtime/Briefcase.Native.Rendering/Briefcase.Native.Rendering.vcxproj" />
     <Project Path="runtime/Briefcase.Unreal.Discovery/Briefcase.Unreal.Discovery.vcxproj" />
     <Project Path="runtime/Briefcase.Unreal.Invocation/Briefcase.Unreal.Invocation.vcxproj" />
     <Project Path="runtime/Briefcase.Unreal.Marshalling/Briefcase.Unreal.Marshalling.vcxproj" />

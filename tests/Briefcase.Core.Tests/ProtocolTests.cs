@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text.Json;
 using ServerAdminControl.Protocol;
 
 namespace Briefcase.Core.Tests;
@@ -20,6 +21,36 @@ public sealed class ProtocolTests
         Assert.NotNull(decoded);
         Assert.Equal(request, decoded);
         Assert.Equal(BriefcaseChannels.Administration, decoded.Channel);
+    }
+
+    [Fact]
+    public async Task Mod_configuration_batch_round_trips()
+    {
+        var request = new ServerAdminRequest(
+            ServerAdminProtocol.Version,
+            "request-batch",
+            ServerAdminOperations.SetModConfigurationBatch,
+            ModFileName: "SuspicionControl.dll",
+            ModConfigurationChanges:
+            [
+                new ServerModConfigurationChange(
+                    "Suspicion",
+                    "Multiplier",
+                    JsonSerializer.SerializeToElement(0.25f))
+            ]);
+        await using var stream = new MemoryStream();
+        await ServerAdminProtocol.WriteAsync(stream, request, CancellationToken.None);
+        stream.Position = 0;
+
+        var decoded = await ServerAdminProtocol.ReadAsync<ServerAdminRequest>(
+            stream, CancellationToken.None);
+
+        Assert.NotNull(decoded);
+        Assert.Equal("SuspicionControl.dll", decoded.ModFileName);
+        var change = Assert.Single(decoded.ModConfigurationChanges!);
+        Assert.Equal("Suspicion", change.Section);
+        Assert.Equal("Multiplier", change.Key);
+        Assert.Equal(0.25f, change.Value.GetSingle());
     }
 
     [Fact]

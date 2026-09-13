@@ -73,6 +73,10 @@ public static class UiClasses
     public const string Danger = "briefcase-danger";
     public const string Compact = "briefcase-compact";
     public const string Card = "briefcase-card";
+    public const string FlatCard = "briefcase-flat-card";
+    public const string ActionBar = "briefcase-actionbar";
+    public const string Tabs = "briefcase-tabs";
+    public const string Tab = "briefcase-tab";
     public const string Status = "briefcase-status";
     public const string StatusInformation = "briefcase-status-information";
     public const string StatusSuccess = "briefcase-status-success";
@@ -253,6 +257,41 @@ public sealed class UiExpander : UiComponent
     public string Title { get; }
     public bool InitiallyExpanded { get; }
     public IReadOnlyList<UiComponent> Children { get; }
+}
+
+/// <summary>One named page inside a horizontal tab set.</summary>
+public sealed class UiTab
+{
+    internal UiTab(string id, string label, UiComponent content)
+    {
+        Id = id;
+        Label = label;
+        Content = content;
+    }
+
+    public string Id { get; }
+    public string Label { get; }
+    public UiComponent Content { get; }
+}
+
+/// <summary>
+/// A toolkit-neutral tab set. The selected identifier is writable so the host
+/// and the mod keep one source of truth when the user changes pages.
+/// </summary>
+public sealed class UiTabs : UiComponent
+{
+    internal UiTabs(UiBinding<string> selection, IReadOnlyList<UiTab> items)
+    {
+        Selection = selection;
+        Items = items;
+        WithClass(UiClasses.Tabs);
+        ObserveBinding(selection);
+    }
+
+    public UiBinding<string> Selection { get; }
+    public IReadOnlyList<UiTab> Items { get; }
+    public string SelectedId => Selection.Value;
+    public void Select(string id) => Selection.SetValue(id);
 }
 
 /// <summary>A compact, themed status badge.</summary>
@@ -507,6 +546,33 @@ public static partial class Ui
         bool initiallyExpanded = false,
         params UiComponent[] children) =>
         new(RequireText(title, nameof(title)), initiallyExpanded, Validate(children));
+
+    public static UiTab Tab(string id, string label, UiComponent content) => new(
+        RequireText(id, nameof(id)),
+        RequireText(label, nameof(label)),
+        content ?? throw new ArgumentNullException(nameof(content)));
+
+    public static UiTabs Tabs(
+        Func<string> selectedId,
+        Action<string> changed,
+        params UiTab[] items) => Tabs(
+        UiBinding<string>.Create(
+            selectedId ?? throw new ArgumentNullException(nameof(selectedId)),
+            changed ?? throw new ArgumentNullException(nameof(changed))),
+        items);
+
+    public static UiTabs Tabs(UiBinding<string> selection, params UiTab[] items)
+    {
+        selection = RequireWritable(selection);
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Length == 0 || items.Any(item => item is null))
+            throw new ArgumentException(
+                "A tab set needs at least one non-null tab.", nameof(items));
+        if (items.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count() != items.Length)
+            throw new ArgumentException(
+                "Every tab identifier must be unique.", nameof(items));
+        return new UiTabs(selection, items);
+    }
 
     public static UiStatus Status(
         string value,
