@@ -85,7 +85,9 @@ public sealed class ServerRow(string id, string win64, bool managed, string inst
 public sealed class ServerRegistry
 {
     private readonly bool _inMemory;
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
+    public const string OfficialCatalogUrl =
+        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json";
     public string FilePath { get; private set; }
     public string DataDirectory => Path.GetDirectoryName(FilePath)!;
     public string LoadError { get; private set; } = "";
@@ -114,7 +116,11 @@ public sealed class ServerRegistry
     {
         _inMemory = inMemory;
         FilePath = filePath ?? DefaultFilePath();
-        if (!_inMemory) Load();
+        if (!_inMemory)
+        {
+            if (File.Exists(FilePath)) Load();
+            else CatalogUrls.Add(OfficialCatalogUrl);
+        }
     }
 
     public ServerRow Add(string executable, bool managed = false, string? serverName = null)
@@ -211,19 +217,22 @@ public sealed class ServerRegistry
         Installations.Clear();
         CatalogUrls.Clear();
         LoadError = "";
-        if (!_inMemory) Load();
+        if (!_inMemory)
+        {
+            if (File.Exists(FilePath)) Load();
+            else CatalogUrls.Add(OfficialCatalogUrl);
+        }
     }
 
     private void Load()
     {
-        if (!File.Exists(FilePath)) return;
         try
         {
             using var stream = File.OpenRead(FilePath);
             using var doc = JsonDocument.Parse(stream);
             var root = doc.RootElement;
             var schema = root.GetProperty("schemaVersion").GetInt32();
-            if (schema is not (1 or 2 or SchemaVersion))
+            if (schema < 1 || schema > SchemaVersion)
                 throw new InvalidDataException("Unsupported ServerApp settings version.");
             Language = root.TryGetProperty("language", out var language) && language.ValueKind == JsonValueKind.String
                 ? AppTranslations.NormalizeLanguage(language.GetString()) : "en";
@@ -283,6 +292,8 @@ public sealed class ServerRegistry
                     if (value.GetString() is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
                         uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo))
                         CatalogUrls.Add(uri.AbsoluteUri);
+            if (schema < 4 && !CatalogUrls.Contains(OfficialCatalogUrl, StringComparer.OrdinalIgnoreCase))
+                CatalogUrls.Add(OfficialCatalogUrl);
             if (schema < SchemaVersion && !_inMemory)
             {
                 var backup = FilePath + $".v{schema}-backup";
@@ -298,6 +309,7 @@ public sealed class ServerRegistry
             Servers.Clear();
             Installations.Clear();
             CatalogUrls.Clear();
+            CatalogUrls.Add(OfficialCatalogUrl);
             LoadError = "ServerApp settings could not be read. The original file will be backed up before new settings are saved.";
         }
     }

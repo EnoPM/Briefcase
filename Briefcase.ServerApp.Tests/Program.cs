@@ -659,6 +659,13 @@ try
         Check(!selection.IsSelectionLoading, "the loading view clears after the new server page is ready");
     }
 
+    var defaultCatalogSettings = Path.Combine(temp, "default-catalog-settings.json");
+    var defaultCatalogRegistry = new ServerRegistry(defaultCatalogSettings);
+    Check(defaultCatalogRegistry.CatalogUrls.SequenceEqual([ServerRegistry.OfficialCatalogUrl]),
+        "new installations include the official marketplace catalog");
+    defaultCatalogRegistry.RemoveCatalog(ServerRegistry.OfficialCatalogUrl);
+    Check(new ServerRegistry(defaultCatalogSettings).CatalogUrls.Count == 0,
+        "removing the default catalog is preserved across launches");
     var registry = new ServerRegistry(Path.Combine(temp, "app-settings.json"));
     registry.Language = "fr";
     registry.Save();
@@ -738,12 +745,28 @@ try
     var loaded = new ServerRegistry(registry.FilePath);
     Check(loaded.Servers.Count == 2 && loaded.Installations.Single().Branch == "smoketest" &&
           loaded.Servers[0].Win64 == version.Win64 &&
-          loaded.CatalogUrls.Single() == "https://example.test/catalog.json" &&
+          loaded.CatalogUrls.Count == 2 &&
+          loaded.CatalogUrls.Contains(ServerRegistry.OfficialCatalogUrl) &&
+          loaded.CatalogUrls.Contains("https://example.test/catalog.json") &&
           loaded.Servers[0].AutoUpdateBeforeStart && loaded.Servers[1].InstanceRoot != loaded.Servers[0].InstanceRoot,
         "server list, update preference and catalog sources persist");
     foreach (var row in loaded.Servers.ToArray()) loaded.Remove(row);
     Check(new ServerRegistry(registry.FilePath).Servers.Count == 0,
         "removing a server only removes its registry entry");
+    var schema3Settings = Path.Combine(temp, "schema3-settings.json");
+    File.WriteAllText(schema3Settings, JsonSerializer.Serialize(new
+    {
+        schemaVersion = 3, language = "en", installations = Array.Empty<object>(),
+        servers = Array.Empty<object>(), catalogUrls = new[] { "https://example.test/other.json" }
+    }));
+    var schema3Registry = new ServerRegistry(schema3Settings);
+    Check(schema3Registry.CatalogUrls.Contains(ServerRegistry.OfficialCatalogUrl) &&
+          schema3Registry.CatalogUrls.Contains("https://example.test/other.json") &&
+          File.Exists(schema3Settings + ".v3-backup"),
+        "existing settings gain the official catalog without losing custom sources");
+    schema3Registry.RemoveCatalog(ServerRegistry.OfficialCatalogUrl);
+    Check(new ServerRegistry(schema3Settings).CatalogUrls.SequenceEqual(["https://example.test/other.json"]),
+        "an existing user can remove the official catalog after migration");
     var legacyData = Path.Combine(temp, "schema2-data");
     var legacyWin64 = Path.Combine(legacyData, "game", "dedicated", "DeceiveInc", "Binaries", "Win64");
     Directory.CreateDirectory(legacyWin64);
@@ -759,6 +782,7 @@ try
     }));
     var upgraded = new ServerRegistry(legacySettings);
     Check(upgraded.Servers.Single().Id == legacyId && upgraded.Installations.Single().Branch == "public" &&
+          upgraded.CatalogUrls.Contains(ServerRegistry.OfficialCatalogUrl) &&
           upgraded.Installations.Single().InstallRoot == Path.Combine(legacyData, "game", "dedicated") &&
           File.Exists(legacySettings + ".v2-backup"),
         "schema 2 upgrades without losing servers and registers the existing shared public installation");
