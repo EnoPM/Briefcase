@@ -712,7 +712,24 @@ try
         Check(demoSettings["MaxPlayers"] == "12" && demoMaps.Count == 4,
             "demo configuration includes values and repeatable map rotation");
     }
+    var nativeModsRoot = Path.Combine(win64, "Briefcase", "Mods");
+    foreach (var id in new[] { "briefcase.player-cap", "briefcase.pregame-timer", "briefcase.custom" })
+    {
+        var nativeMod = Path.Combine(nativeModsRoot, id);
+        Directory.CreateDirectory(nativeMod);
+        File.WriteAllText(Path.Combine(nativeMod, "briefcase.mod.json"),
+            JsonSerializer.Serialize(new { id }));
+    }
     var first = registry.Add(location.Shipping);
+    using (var nativeSelection = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+               first.InstanceRoot, "Briefcase", "settings.json"))))
+    {
+        var enabled = nativeSelection.RootElement.GetProperty("enabledMods")
+            .EnumerateArray().Select(item => item.GetString()).ToArray();
+        Check(!enabled.Contains("briefcase.player-cap") &&
+              enabled.Contains("briefcase.pregame-timer") && enabled.Contains("briefcase.custom"),
+            "migration disables only native mods replaced by enabled UE4SS counterparts");
+    }
     Check(first.Name == Path.GetFileName(temp),
         "server list uses the installation folder when no name is configured in the INI");
     Check(!first.AutoUpdateBeforeStart,

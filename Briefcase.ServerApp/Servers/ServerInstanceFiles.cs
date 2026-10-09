@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Briefcase.ServerApp;
 
 /// <summary>Creates the small writable runtime beside an instance, never inside the shared game.</summary>
@@ -19,6 +21,7 @@ public static class ServerInstanceFiles
             if (!File.Exists(ini)) File.WriteAllText(ini, "[/Script/DeceiveInc.TripwireServerSettings]\n");
             CopyTree(Path.Combine(installation.Win64, "ue4ss"), Path.Combine(root, "ue4ss"));
             CopyTree(Path.Combine(installation.BriefcaseRoot, "Mods"), Path.Combine(root, "Briefcase", "Mods"));
+            EnsureLegacyNativeModSelection(root);
             if (name is not null) ServerIniEditor.SaveServerName(Path.Combine(root, "TripwireServer.ini"), name);
             return root;
         }
@@ -66,6 +69,63 @@ public static class ServerInstanceFiles
             selection.Insert(0, bridge + " : 1");
             File.WriteAllLines(targetList, selection);
         }
+        EnsureLegacyNativeModSelection(instance.InstanceRoot);
+    }
+
+    private static void EnsureLegacyNativeModSelection(string instanceRoot)
+    {
+        var settings = Path.Combine(instanceRoot, "Briefcase", "settings.json");
+        if (File.Exists(settings)) return; // Keep an explicit user selection intact.
+        var list = Path.Combine(instanceRoot, "ue4ss", "Mods", "mods.txt");
+        var nativeMods = Path.Combine(instanceRoot, "Briefcase", "Mods");
+        if (!File.Exists(list) || !Directory.Exists(nativeMods)) return;
+
+        var enabledUe4ss = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in File.ReadLines(list))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed[0] is '#' or ';') continue;
+            var separator = trimmed.IndexOf(':');
+            if (separator > 0 && trimmed[(separator + 1)..].Trim() == "1")
+                enabledUe4ss.Add(trimmed[..separator].Trim());
+        }
+
+        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["briefcase.player-cap"] = "BriefcasePlayerCap",
+            ["briefcase.pregame-timer"] = "BriefcasePregameTimer",
+            ["briefcase.suspicion-control"] = "BriefcaseSuspicionControl"
+        };
+        var nativeIds = Directory.EnumerateDirectories(nativeMods)
+            .Where(path => File.Exists(Path.Combine(path, "briefcase.mod.json")))
+            .Select(Path.GetFileName)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (!nativeIds.Any(id => replacements.TryGetValue(id, out var ue4ss) && enabledUe4ss.Contains(ue4ss)))
+            return;
+
+        var enabledNative = nativeIds
+            .Where(id => !replacements.TryGetValue(id, out var ue4ss) || !enabledUe4ss.Contains(ue4ss))
+            .ToArray();
+        Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+        var temporary = settings + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = File.Create(temporary))
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                writer.WritePropertyName("enabledMods");
+                writer.WriteStartArray();
+                foreach (var id in enabledNative) writer.WriteStringValue(id);
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+            File.Move(temporary, settings, overwrite: false);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     private static void CopyIfPresent(string source, string target)
