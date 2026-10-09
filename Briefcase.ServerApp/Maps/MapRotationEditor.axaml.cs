@@ -18,8 +18,8 @@ public sealed record MapRotationEntry(Guid EntryId, string Id, string Label);
 
 public sealed partial class MapRotationEditor : UserControl
 {
-    private const double RowHeight = 48;
-    private const double SlotHeight = 55;
+    private const double RowHeight = 38;
+    private const double SlotHeight = 44;
     private readonly List<RowView> _rows = [];
     private readonly DispatcherTimer _autoScroll = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private DragState? _drag;
@@ -88,18 +88,18 @@ public sealed partial class MapRotationEditor : UserControl
     {
         var handle = new TextBlock
         {
-            Text = "⋮⋮", FontSize = 18, Foreground = Brush("#C9ADEB"),
+            Text = "⋮⋮", FontSize = 16, Foreground = Brush("#C9ADEB"),
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
         };
         var order = new TextBlock
         {
             Text = (index + 1).ToString("00", CultureInfo.InvariantCulture),
-            FontSize = 12, FontWeight = FontWeight.Bold, Foreground = Brush("#AA8CCB"),
+            FontSize = 11, FontWeight = FontWeight.Bold, Foreground = Brush("#AA8CCB"),
             VerticalAlignment = VerticalAlignment.Center
         };
         var label = new TextBlock
         {
-            Text = entry.Label, FontSize = 14, FontWeight = FontWeight.SemiBold,
+            Text = entry.Label, FontSize = 13, FontWeight = FontWeight.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
@@ -107,12 +107,12 @@ public sealed partial class MapRotationEditor : UserControl
         {
             IconData = Geometry.Parse("M 3,3 L 15,15 M 15,3 L 3,15"),
             IconStroke = Brush("#EDAFBA"), IconStrokeThickness = 1.8,
-            Width = 32, Height = 32, IconSize = 17,
+            Width = 28, Height = 28, MinHeight = 28, IconSize = 15,
             VerticalAlignment = VerticalAlignment.Center, IsEnabled = Entries.Count > 1
         };
         ToolTip.SetTip(remove, AppTranslations.Get("ui.remove_this_occurrence"));
         remove.Classes.Add("subtle-danger");
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("24,32,*,Auto"), ColumnSpacing = 11 };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("22,27,*,Auto"), ColumnSpacing = 9 };
         grid.Children.Add(handle);
         Grid.SetColumn(order, 1);
         grid.Children.Add(order);
@@ -122,7 +122,7 @@ public sealed partial class MapRotationEditor : UserControl
         grid.Children.Add(remove);
         var surface = new Border
         {
-            Height = RowHeight, CornerRadius = new CornerRadius(5), Padding = new Thickness(8, 6),
+            Height = RowHeight, CornerRadius = new CornerRadius(5), Padding = new Thickness(8, 3),
             Background = Brush("#2B2533"), BorderBrush = Brush("#473A55"),
             BorderThickness = new Thickness(1), Child = grid,
             RenderTransform = At(index * SlotHeight),
