@@ -1,0 +1,724 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="using:Briefcase.ServerApp"
+        x:Class="Briefcase.ServerApp.MainWindow"
+        x:DataType="app:MainViewModel"
+        Title="{app:Tr Key=ui.briefcase_dedicated_server}"
+        Icon="/Assets/BriefcaseIcon.ico"
+        Width="1280" Height="800" MinWidth="1050" MinHeight="650"
+        WindowStartupLocation="CenterScreen">
+  <Grid>
+  <Grid RowDefinitions="*,Auto">
+  <Grid Grid.Row="0" ColumnDefinitions="250,*" Margin="24" ColumnSpacing="20">
+    <Grid Grid.Column="0" RowDefinitions="Auto,*" RowSpacing="14">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="4,2,4,0">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Image Width="36" Height="36" Stretch="Uniform" Source="/Assets/BriefcaseIcon.png" />
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="Briefcase" FontSize="18" FontWeight="Bold" />
+              <TextBlock Text="{app:Tr Key=ui.server_control}" Foreground="#A9A3B4" FontSize="11" />
+            </StackPanel>
+          </StackPanel>
+          <app:IconButton Grid.Column="1" Width="30" Height="30" IconSize="18"
+                          Classes="icon-button" VerticalAlignment="Center"
+                          IconData="M 10,2 L 14,2 L 14.5,4.1 L 16.4,4.9 L 18.2,3.8 L 20.2,5.8 L 19.1,7.6 L 19.9,9.5 L 22,10 L 22,14 L 19.9,14.5 L 19.1,16.4 L 20.2,18.2 L 18.2,20.2 L 16.4,19.1 L 14.5,19.9 L 14,22 L 10,22 L 9.5,19.9 L 7.6,19.1 L 5.8,20.2 L 3.8,18.2 L 4.9,16.4 L 4.1,14.5 L 2,14 L 2,10 L 4.1,9.5 L 4.9,7.6 L 3.8,5.8 L 5.8,3.8 L 7.6,4.9 L 9.5,4.1 Z M 12,9 A 3,3 0 1 0 12,15 A 3,3 0 1 0 12,9"
+                          IconStroke="#D4C5E8" IconStrokeThickness="1.5"
+                          ToolTip.Tip="{app:Tr Key=ui.application_settings}" Click="SettingsClicked" />
+        </Grid>
+    <Border Grid.Row="1" Background="#1F1C26" BorderBrush="#332D3D"
+            BorderThickness="1" CornerRadius="8" Padding="12">
+      <Grid RowDefinitions="Auto,*" RowSpacing="16">
+        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6" RowSpacing="5" Margin="4,2,4,0">
+          <TextBlock Text="{app:Tr Key=ui.servers}" FontSize="17" FontWeight="Bold" VerticalAlignment="Center" />
+          <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{app:Tr Key=ui.manage_your_installations}"
+                     Foreground="#A9A3B4" FontSize="11" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <app:IconButton Classes="primary" IconData="M 10,3 L 10,17 M 3,10 L 17,10"
+                            IconSize="18" IconStroke="#F5ECFF" IconStrokeThickness="1.8"
+                            ToolTip.Tip="{app:Tr Key=ui.add_server}" Click="AddServerClicked" IsEnabled="{Binding CanInstall}" />
+            <app:IconButton Classes="subtle-danger"
+                            IconData="M 4,6 L 16,6 M 7,4 L 13,4 M 6,7 L 7,17 L 13,17 L 14,7 M 9,9 L 9,15 M 11,9 L 11,15"
+                            IconSize="17" IconStroke="#EBA4B5" IconStrokeThickness="1.8"
+                            ToolTip.Tip="{app:Tr Key=ui.remove_selected_server}" Click="DeleteClicked" IsEnabled="{Binding CanDelete}" />
+          </StackPanel>
+        </Grid>
+        <ListBox x:Name="ServersList" Grid.Row="1" ItemsSource="{Binding Servers}" SelectedItem="{Binding SelectedServer, Mode=TwoWay}" Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="app:ServerRow">
+              <Border Background="Transparent" Padding="8,7" CornerRadius="6">
+                <Grid ColumnDefinitions="24,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="3">
+                  <Border Width="24" Height="24" Background="#392B49" CornerRadius="4" VerticalAlignment="Center" Grid.RowSpan="2">
+                    <Path Data="M 5,4 L 15,4 L 15,16 L 5,16 Z M 7,7 L 9,7 M 11,7 L 13,7 M 7,10 L 9,10 M 11,10 L 13,10 M 8,16 L 8,13 L 12,13 L 12,16"
+                          Stroke="#CBB4ED" StrokeThickness="1.4" Width="16" Height="16"
+                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="7">
+                    <Border Background="{Binding StateBackground}" CornerRadius="4" Padding="5,1">
+                      <TextBlock Text="{Binding DisplayState}" Foreground="{Binding StateForeground}" FontSize="10" FontWeight="SemiBold" />
+                    </Border>
+                    <TextBlock Text="{Binding PlayerSummary}" Foreground="#ABA3B6" FontSize="10" MaxWidth="108" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <Viewbox Grid.Column="2" Grid.RowSpan="2" IsVisible="{Binding NeedsRestart}"
+                           Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center"
+                           ToolTip.Tip="{app:Tr Key=status.restart_explanation}">
+                    <Canvas Width="20" Height="20">
+                      <Path Data="M 10,2 L 19,18 L 1,18 Z M 10,7 L 10,12 M 10,15 L 10,15.5"
+                            Stroke="#E7B874" StrokeThickness="1.8" Width="20" Height="20" Stretch="None" />
+                    </Canvas>
+                  </Viewbox>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+    </Border>
+    </Grid>
+
+    <Grid Grid.Column="1">
+    <Grid RowDefinitions="Auto,*" RowSpacing="16">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <StackPanel Spacing="5">
+          <TextBlock Text="{Binding SelectedServerName}" FontSize="25" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding ServerPathHint}" Foreground="#9891A3" FontSize="12" TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding Win64Path}" />
+        </StackPanel>
+        <Border Grid.Column="1" IsVisible="{Binding SelectedServer.NeedsRestart}"
+                MaxWidth="500" Background="#302717" BorderBrush="#8F6729" BorderThickness="1"
+                CornerRadius="6" Padding="11,8" VerticalAlignment="Top">
+          <Grid ColumnDefinitions="20,*" ColumnSpacing="9">
+            <Path Data="M 10,2 L 19,18 L 1,18 Z M 10,7 L 10,12 M 10,15 L 10,15.5"
+                  Stroke="#E7B874" StrokeThickness="1.8" Width="18" Height="18" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Spacing="2">
+              <TextBlock Text="{app:Tr Key=status.restart_required}" Foreground="#F1CB8D" FontWeight="SemiBold" />
+              <TextBlock Text="{app:Tr Key=status.restart_explanation}" Foreground="#D5BA92" FontSize="11" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+        </Border>
+      </Grid>
+    <TabControl x:Name="ServerTabs" Grid.Row="1" Background="Transparent" TabStripPlacement="Left">
+      <TabItem>
+        <TabItem.Header><StackPanel Orientation="Horizontal" Spacing="11">
+          <Path Data="M 2,8 L 10,2 L 18,8 M 4,7 L 4,18 L 16,18 L 16,7 M 8,18 L 8,12 L 12,12 L 12,18"
+                Stroke="#C9B9DD" StrokeThickness="1.6" Width="18" Height="18" />
+          <TextBlock Text="{app:Tr Key=ui.overview}" FontSize="14" VerticalAlignment="Center" />
+        </StackPanel></TabItem.Header>
+        <ScrollViewer>
+          <StackPanel Margin="4,20,4,4" Spacing="18">
+            <Border Background="#211D29" CornerRadius="8" Padding="16,14">
+              <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="11">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="3">
+                    <TextBlock Text="{app:Tr Key=ui.server_status}" FontSize="18" FontWeight="Bold" />
+                    <TextBlock Text="{Binding DataSourceDisplay}" Foreground="#A69DAF" FontSize="12" />
+                  </StackPanel>
+                  <Border Grid.Column="1" Background="{Binding SelectedServer.StateBackground}"
+                          BorderBrush="{Binding SelectedServer.StateForeground}" BorderThickness="1"
+                          CornerRadius="4" Padding="8,4" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding SelectedServer.DisplayState}"
+                               Foreground="{Binding SelectedServer.StateForeground}" FontWeight="SemiBold" FontSize="12" />
+                  </Border>
+                </Grid>
+                <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" ColumnSpacing="9">
+                  <Border Background="#2A2432" CornerRadius="6" Padding="12,9">
+                    <StackPanel Spacing="3"><TextBlock Text="{app:Tr Key=ui.label_server}" Foreground="#B8A6CA" FontSize="11" />
+                      <TextBlock Text="{Binding ServerName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /></StackPanel>
+                  </Border>
+                  <Border Grid.Column="1" Background="#2A2432" CornerRadius="6" Padding="12,9">
+                    <StackPanel Spacing="3"><TextBlock Text="{app:Tr Key=ui.label_players}" Foreground="#B8A6CA" FontSize="11" />
+                      <TextBlock Text="{Binding PlayerCountText}" FontWeight="SemiBold" /></StackPanel>
+                  </Border>
+                  <Border Grid.Column="2" Background="#2A2432" CornerRadius="6" Padding="12,9">
+                    <StackPanel Spacing="3"><TextBlock Text="{app:Tr Key=ui.label_map}" Foreground="#B8A6CA" FontSize="11" />
+                      <TextBlock Text="{Binding MapName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /></StackPanel>
+                  </Border>
+                  <Border Grid.Column="3" Background="#2A2432" CornerRadius="6" Padding="12,9">
+                    <StackPanel Spacing="3"><TextBlock Text="{app:Tr Key=ui.label_mode}" Foreground="#B8A6CA" FontSize="11" />
+                      <TextBlock Text="{Binding GameMode}" FontWeight="SemiBold" /></StackPanel>
+                  </Border>
+                </Grid>
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="7">
+                  <Button Classes="success status-action" IsEnabled="{Binding CanStart}" Click="StartClicked"><StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><app:IconGlyph Width="16" Height="16" IconData="M 5,3 L 16,10 L 5,17 Z" IconStroke="#F5ECFF" /><TextBlock Text="{app:Tr Key=ui.start_server}" VerticalAlignment="Center" /></StackPanel></Button>
+                  <Button Classes="danger status-action" IsEnabled="{Binding CanStop}" Click="StopClicked"><StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><app:IconGlyph Width="16" Height="16" IconData="M 4,4 L 16,4 L 16,16 L 4,16 Z" IconStroke="#F5ECFF" /><TextBlock Text="{app:Tr Key=ui.stop_server}" VerticalAlignment="Center" /></StackPanel></Button>
+                  <Button Classes="primary status-action" IsEnabled="{Binding CanRestart}" Click="RestartClicked"><StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><app:IconGlyph Width="16" Height="16" IconData="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" IconStroke="#F5ECFF" /><TextBlock Text="{app:Tr Key=ui.restart_server}" VerticalAlignment="Center" /></StackPanel></Button>
+                </StackPanel>
+              </Grid>
+            </Border>
+            <Border Background="#211D29" BorderBrush="#3D3446" BorderThickness="1"
+                    CornerRadius="6" Padding="12,9">
+              <Grid ColumnDefinitions="*,240,Auto" ColumnSpacing="9">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{app:Tr Key=versions.server_installation}" FontWeight="SemiBold" />
+                  <TextBlock Text="{app:Tr Key=versions.migration_hint}" FontSize="11"
+                             Foreground="#ADA3B6" TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" ItemsSource="{Binding Installations}"
+                          SelectedItem="{Binding SelectedInstallationTarget, Mode=TwoWay}"
+                          VerticalAlignment="Center">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="app:ServerInstallation">
+                      <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="2" Classes="primary" VerticalAlignment="Center"
+                        Content="{app:Tr Key=versions.migrate}" Click="MigrateInstallationClicked"
+                        IsEnabled="{Binding CanMigrateServer}" />
+              </Grid>
+            </Border>
+            <StackPanel Spacing="12">
+              <TextBlock Text="{app:Tr Key=ui.installations_and_updates}" FontSize="19" FontWeight="Bold" />
+              <StackPanel Spacing="2">
+                <CheckBox IsChecked="{Binding SelectedServer.AutoUpdateBeforeStart, Mode=TwoWay}"
+                          Click="AutomaticUpdatesChanged"
+                          Content="{app:Tr Key=updates.auto_before_start}" />
+                <TextBlock Text="{app:Tr Key=updates.auto_before_start_hint}" FontSize="11"
+                           Foreground="#A69DAF" TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Spacing="0">
+                <Grid ColumnDefinitions="8,*,Auto,Auto,Auto" ColumnSpacing="10" MinHeight="48" Margin="2,0">
+                  <Border Width="8" Height="8" Background="{Binding GameAppearance.Border}" CornerRadius="4" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="{app:Tr Key=updates.game_title}" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding GameUpdateStatus}" Foreground="#ADA3B6" FontSize="11" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" Text="{Binding GameInstalledVersion}" Foreground="#C9BED6"
+                             FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                             ToolTip.Tip="{app:Tr Key=updates.installed_version}" />
+                  <Button Grid.Column="3" Classes="success update-action" Click="UpdateGameClicked"
+                          IsVisible="{Binding GameUpdateAvailable}" IsEnabled="{Binding CanUpdateGame}"
+                          VerticalAlignment="Center" Content="{app:Tr Key=updates.update_game}" />
+                  <app:IconButton Grid.Column="4" Classes="icon-button" Click="RefreshGameClicked"
+                                  IsEnabled="{Binding CanCheckUpdates}" ToolTip.Tip="{app:Tr Key=ui.refresh}"
+                                  VerticalAlignment="Center" IconSize="16" IconStroke="#C9B8E0"
+                                  IconData="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" />
+                </Grid>
+                <Border Height="1" Background="#39313F" Margin="0,4" />
+                <Grid ColumnDefinitions="8,*,Auto,Auto,Auto" ColumnSpacing="10" MinHeight="48" Margin="2,0">
+                  <Border Width="8" Height="8" Background="{Binding BriefcaseAppearance.Border}" CornerRadius="4" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="{app:Tr Key=updates.briefcase_title}" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding BriefcaseUpdateStatus}" Foreground="#ADA3B6" FontSize="11" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" Text="{Binding BriefcaseInstalledVersion}" Foreground="#C9BED6"
+                             FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                             ToolTip.Tip="{app:Tr Key=updates.installed_version}" />
+                  <Button Grid.Column="3" Classes="success update-action" Click="InstallBriefcaseClicked"
+                          IsVisible="{Binding BriefcaseActionVisible}" IsEnabled="{Binding CanInstallBriefcase}"
+                          VerticalAlignment="Center" Content="{Binding BriefcaseActionLabel}" />
+                  <app:IconButton Grid.Column="4" Classes="icon-button" Click="RefreshBriefcaseClicked"
+                                  IsEnabled="{Binding CanCheckUpdates}" ToolTip.Tip="{app:Tr Key=ui.refresh}"
+                                  VerticalAlignment="Center" IconSize="16" IconStroke="#C9B8E0"
+                                  IconData="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" />
+                </Grid>
+                <Grid ColumnDefinitions="8,*,Auto,Auto,Auto" ColumnSpacing="10" MinHeight="40" Margin="28,0,2,0">
+                  <Border Width="6" Height="6" Background="{Binding RuntimeAppearance.Border}" CornerRadius="3" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="{app:Tr Key=updates.runtime_title}" FontSize="12" FontWeight="SemiBold"
+                               ToolTip.Tip="{app:Tr Key=updates.runtime_prerequisite}" />
+                    <TextBlock Text="{Binding RuntimeStatus}" Foreground="#ADA3B6" FontSize="11" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" Text="{Binding RuntimeInstalledVersion}" Foreground="#A99CBD"
+                             FontSize="11" VerticalAlignment="Center"
+                             ToolTip.Tip="{app:Tr Key=updates.installed_version}" />
+                  <Button Grid.Column="3" Classes="success update-action" Click="InstallCppClicked"
+                          IsVisible="{Binding RuntimeInstallVisible}" IsEnabled="{Binding CanInstallRuntime}"
+                          VerticalAlignment="Center" Content="{app:Tr Key=updates.install_runtime}" />
+                  <app:IconButton Grid.Column="4" Classes="icon-button" Click="RefreshRuntimeClicked"
+                                  IsEnabled="{Binding CanCheckUpdates}" ToolTip.Tip="{app:Tr Key=ui.refresh}"
+                                  VerticalAlignment="Center" IconSize="16" IconStroke="#C9B8E0"
+                                  IconData="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" />
+                </Grid>
+              </StackPanel>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem x:Name="PlayersTab" IsVisible="{Binding IsRunning}">
+        <TabItem.Resources>
+                <DataTemplate x:Key="PlayerCardTemplate" x:DataType="app:PlayerRow">
+                  <Border Classes="player-card" Background="#2A2432" CornerRadius="5" Margin="0,0,0,5" Padding="9,7"
+                          PointerPressed="PlayerCardPressed" PointerMoved="PlayerCardMoved"
+                          PointerReleased="PlayerCardReleased" PointerCaptureLost="PlayerCardCaptureLost"
+                          ToolTip.Tip="{app:Tr Key=player.drag_to_team}">
+                    <Grid ColumnDefinitions="68,190,*,Auto" ColumnSpacing="9" MinHeight="72">
+                      <Grid Width="52" Height="52" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <Border Width="52" Height="52" Background="#392B49" CornerRadius="4"
+                                ClipToBounds="True">
+                          <Grid>
+                            <TextBlock Text="?" Foreground="#A895BE" FontSize="18"
+                                       IsVisible="{Binding PortraitUnavailable}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Image Source="{Binding Portrait}" IsVisible="{Binding HasPortrait}"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapInterpolationMode="HighQuality" />
+                          </Grid>
+                        </Border>
+                        <Border IsVisible="{Binding HasCharacterLevel}" HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom" ZIndex="1" Padding="3,1" Margin="0,0,1,1"
+                                Background="{Binding CharacterLevelBadgeBackground}"
+                                BorderBrush="{Binding CharacterLevelBadgeBorder}"
+                                BorderThickness="1" CornerRadius="3">
+                          <TextBlock Text="{Binding CharacterLevelBadgeText}" FontSize="8"
+                                     FontWeight="SemiBold" Foreground="{Binding CharacterLevelBadgeForeground}" />
+                        </Border>
+                      </Grid>
+                      <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding CharacterSummary}" FontSize="11" Foreground="#C5A6EB"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding AccountLevelText}" FontSize="11" Foreground="#B9E5CF" />
+                        <TextBlock Text="{Binding Identity}" FontSize="10" Foreground="#A69DAF"
+                                   IsVisible="{Binding HasNetworkId}" TextTrimming="CharacterEllipsis"
+                                   ToolTip.Tip="{Binding Identity}" />
+                        <StackPanel IsVisible="{Binding HasHealth}" Orientation="Horizontal" Spacing="8"
+                                    Margin="0,3,0,0" HorizontalAlignment="Left"
+                                    ToolTip.Tip="{Binding HealthText}">
+                          <Border Width="96" Height="6" Background="#463B49" CornerRadius="3"
+                                  ClipToBounds="True" VerticalAlignment="Center">
+                            <Border Width="{Binding HealthBarWidth}" Height="6"
+                                    Background="{Binding HealthForeground}" CornerRadius="3"
+                                    HorizontalAlignment="Left" />
+                          </Border>
+                          <TextBlock Text="{Binding HealthText}" FontSize="10"
+                                     Foreground="{Binding HealthForeground}" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="13">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                          <TextBlock Text="{app:Tr Key=player.loadout}" Width="66" FontSize="10"
+                                     Foreground="#A99CBD" VerticalAlignment="Center" />
+                          <ItemsControl ItemsSource="{Binding LoadoutItems}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="app:PlayerLoadoutItem">
+                                <Border Width="28" Height="28" Background="#382F43" BorderBrush="#69577B"
+                                        BorderThickness="1" CornerRadius="4" ToolTip.Tip="{Binding Detail}">
+                                  <Grid>
+                                    <Image Source="{Binding Icon}" Width="23" Height="23" Stretch="Uniform"
+                                           RenderOptions.BitmapInterpolationMode="HighQuality" />
+                                    <TextBlock Text="?" IsVisible="{Binding IconUnavailable}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="#C9B8E0" FontWeight="Bold" />
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Text="—" IsVisible="{Binding LoadoutUnavailable}" Foreground="#847A8F"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                          <TextBlock Text="{app:Tr Key=player.gadgets}" Width="48" FontSize="10"
+                                     Foreground="#A99CBD" VerticalAlignment="Center" />
+                          <ItemsControl ItemsSource="{Binding GadgetItems}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="app:PlayerGadget">
+                                <Border Width="28" Height="28" Background="#382F43" BorderBrush="#69577B"
+                                        BorderThickness="1" CornerRadius="4" ToolTip.Tip="{Binding Label}">
+                                  <Grid>
+                                    <Image Source="{Binding Icon}" Width="23" Height="23" Stretch="Uniform" />
+                                    <TextBlock Text="?" IsVisible="{Binding IconUnavailable}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="#C9B8E0" FontWeight="Bold" />
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Text="—" IsVisible="{Binding GadgetsUnavailable}" Foreground="#847A8F"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                          <TextBlock Text="{app:Tr Key=player.upgrades}" Width="58" FontSize="10"
+                                     Foreground="#A99CBD" VerticalAlignment="Center" />
+                          <ItemsControl ItemsSource="{Binding UpgradeItems}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="app:PlayerUpgrade">
+                                <Border Width="28" Height="28" Background="#28232F" BorderBrush="#554B60"
+                                        BorderThickness="1" CornerRadius="4" Opacity="{Binding Opacity}"
+                                        ToolTip.Tip="{Binding Detail}">
+                                  <Grid>
+                                    <Border Width="21" Height="21" Background="{Binding Tint}"
+                                            IsVisible="{Binding !IconUnavailable}">
+                                      <Border.OpacityMask>
+                                        <ImageBrush Source="{Binding Icon}" Stretch="Uniform" />
+                                      </Border.OpacityMask>
+                                    </Border>
+                                    <TextBlock Text="?" IsVisible="{Binding IconUnavailable}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="#C9B8E0" FontWeight="Bold" />
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Text="—" IsVisible="{Binding UpgradesUnavailable}" Foreground="#847A8F"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                      </StackPanel>
+                      <StackPanel Grid.Column="3" Spacing="4" VerticalAlignment="Center">
+                        <app:IconButton Classes="icon-button" Click="CopyPlayerIdClicked"
+                                        HorizontalAlignment="Center" IconSize="17"
+                                        IsVisible="{Binding HasNetworkId}" ToolTip.Tip="{app:Tr Key=ui.copy_id}"
+                                        IconData="M 6,4 L 16,4 L 16,17 L 6,17 Z M 3,13 L 3,2 L 13,2"
+                                        IconStroke="#C9B8E0" IconStrokeThickness="1.5" />
+                        <app:IconButton Classes="danger" Click="KickClicked" HorizontalAlignment="Center"
+                                        IconSize="17" ToolTip.Tip="{app:Tr Key=ui.kick}"
+                                        IconData="M 2.5,9 L 12.5,9 M 8.5,5 L 12.5,9 L 8.5,13 M 14.5,3 L 17.5,3 L 17.5,16 L 14.5,16"
+                                        IconStroke="#FFE9EE" IconStrokeThickness="1.5" />
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+        </TabItem.Resources>
+        <TabItem.Header><StackPanel Orientation="Horizontal" Spacing="11">
+          <Path Data="M 7,10 A 3,3 0 1 0 7,4 A 3,3 0 1 0 7,10 M 14,11 A 2.5,2.5 0 1 0 14,6 A 2.5,2.5 0 1 0 14,11 M 2,18 L 2,16 C 2,13 4,12 7,12 C 10,12 12,13 12,16 L 12,18 M 13,13 C 16,12 18,14 18,17 L 18,18"
+                Stroke="#C9B9DD" StrokeThickness="1.5" Width="18" Height="18" />
+          <TextBlock Text="{app:Tr Key=ui.players}" FontSize="14" VerticalAlignment="Center" />
+        </StackPanel></TabItem.Header>
+        <Grid>
+        <ScrollViewer>
+        <StackPanel Margin="4,12,4,4" Spacing="9">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+            <TextBlock Text="{app:Tr Key=ui.connected_players}" FontSize="18" FontWeight="Bold" />
+            <TextBlock Grid.Column="1" Text="{Binding RosterMessage}" Foreground="#ADA3B6"
+                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+          </Grid>
+          <Border IsVisible="{Binding ShowTeamUnavailable}" Background="#3B3025"
+                  BorderBrush="#966B38" BorderThickness="1" CornerRadius="5" Padding="10,7">
+            <TextBlock Text="{app:Tr Key=player.team_data_unavailable}" Foreground="#F1CB8D"
+                       TextWrapping="Wrap" FontSize="12" />
+          </Border>
+          <StackPanel IsVisible="{Binding ShowPlayerTeams}" Spacing="7" Margin="0,2,0,4">
+            <TextBlock Text="{app:Tr Key=player.teams_hint}" FontSize="11" Foreground="#A99CBD"
+                       IsVisible="{Binding CanArrangeTeams}" TextWrapping="Wrap" />
+            <TextBlock Text="{app:Tr Key=player.teams_lobby_only}" FontSize="11" Foreground="#A99CBD"
+                       IsVisible="{Binding !CanArrangeTeams}" />
+            <ItemsControl x:Name="PlayerTeamList" ItemsSource="{Binding PlayerTeams}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="app:PlayerTeamGroup">
+                  <Border Classes="team-group" Margin="0,0,0,7" Padding="10,8" Background="#211D29"
+                          BorderBrush="#554867" BorderThickness="1" CornerRadius="6">
+                    <StackPanel Spacing="5">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold" Foreground="#CCB4E5" />
+                        <TextBlock Grid.Column="1" Text="{Binding Occupancy}" FontSize="11" Foreground="#A99CBD" />
+                      </Grid>
+                      <ItemsControl ItemsSource="{Binding Slots}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="app:PlayerTeamSlot">
+                            <Border Classes="team-slot" MinHeight="78" Margin="0,0,0,3"
+                                    Background="#28232F" BorderBrush="#473A55" BorderThickness="1"
+                                    CornerRadius="5">
+                              <Grid>
+                                <ContentControl Content="{Binding Player}" IsVisible="{Binding HasPlayer}"
+                                                ContentTemplate="{StaticResource PlayerCardTemplate}" />
+                                <TextBlock Text="{app:Tr Key=player.team_empty_slot}" IsVisible="{Binding IsEmpty}"
+                                           Foreground="#9586A6" FontSize="12" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <Border Background="#211D29" CornerRadius="6" Padding="8" IsVisible="{Binding !ShowPlayerTeams}">
+            <ItemsControl ItemsSource="{Binding Players}" ItemTemplate="{StaticResource PlayerCardTemplate}" />
+          </Border>
+        </StackPanel>
+        </ScrollViewer>
+        <Canvas x:Name="PlayerDragLayer" IsHitTestVisible="False" ClipToBounds="True">
+          <ContentControl x:Name="PlayerDragPreview" ContentTemplate="{StaticResource PlayerCardTemplate}"
+                          IsVisible="False" IsHitTestVisible="False" Opacity="0.95" />
+        </Canvas>
+        </Grid>
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header><StackPanel Orientation="Horizontal" Spacing="11">
+          <Path Data="M 3,5 L 17,5 M 3,10 L 17,10 M 3,15 L 17,15 M 7,3 L 7,7 M 13,8 L 13,12 M 8,13 L 8,17"
+                Stroke="#C9B9DD" StrokeThickness="1.6" Width="18" Height="18" />
+          <TextBlock Text="{app:Tr Key=ui.configuration}" FontSize="14" VerticalAlignment="Center" />
+        </StackPanel></TabItem.Header>
+        <Grid Margin="4,12,4,4" RowDefinitions="Auto,*" RowSpacing="10">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+              <StackPanel Spacing="2"><TextBlock Text="{app:Tr Key=ui.server_configuration}" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text="{app:Tr Key=ui.edit_tripwireserver_ini_a_running_server_needs_a_restart_after_saving}"
+                           TextWrapping="Wrap" Foreground="#ADA3B6" /></StackPanel>
+              <Button Grid.Column="1" Click="LoadSettingsClicked"><StackPanel Orientation="Horizontal" Spacing="7"><app:IconGlyph Width="16" Height="16" IconData="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" IconStroke="#F5ECFF" /><TextBlock Text="{app:Tr Key=ui.reload}" /></StackPanel></Button>
+              <Button Grid.Column="2" Classes="success" Click="SaveSettingsClicked"><StackPanel Orientation="Horizontal" Spacing="7"><app:IconGlyph Width="16" Height="16" IconData="M 3,3 L 15,3 L 17,5 L 17,17 L 3,17 Z M 6,3 L 6,8 L 14,8 L 14,3 M 6,17 L 6,11 L 14,11 L 14,17" IconStroke="#F5ECFF" IconStrokeThickness="1.5" /><TextBlock Text="{app:Tr Key=ui.save_changes}" /></StackPanel></Button>
+            </Grid>
+            <TabControl x:Name="ConfigurationTabs" Grid.Row="1" Background="Transparent" TabStripPlacement="Top">
+              <TabControl.ItemsPanel>
+                <ItemsPanelTemplate><UniformGrid Columns="5" /></ItemsPanelTemplate>
+              </TabControl.ItemsPanel>
+              <TabItem Header="{app:Tr Key=config.tab.Server}">
+                <ScrollViewer><StackPanel x:Name="ConfigurationServerFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
+              </TabItem>
+              <TabItem Header="{app:Tr Key=config.tab.GameMode}">
+                <ScrollViewer><StackPanel x:Name="ConfigurationGameModeFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
+              </TabItem>
+              <TabItem Header="{app:Tr Key=config.tab.Maps}">
+                <ScrollViewer><StackPanel x:Name="ConfigurationMapsFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
+              </TabItem>
+              <TabItem Header="{app:Tr Key=config.tab.Bots}">
+                <ScrollViewer><StackPanel x:Name="ConfigurationBotsFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
+              </TabItem>
+              <TabItem Header="{app:Tr Key=config.tab.Heat}">
+                <ScrollViewer><StackPanel x:Name="ConfigurationHeatFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
+              </TabItem>
+            </TabControl>
+        </Grid>
+      </TabItem>
+      <TabItem>
+        <TabItem.Header><StackPanel Orientation="Horizontal" Spacing="11">
+          <Path Data="M 10,2 L 10,18 M 3,6 L 17,6 M 5,6 L 2,12 L 8,12 Z M 15,6 L 12,12 L 18,12 Z M 6,18 L 14,18"
+                Stroke="#C9B9DD" StrokeThickness="1.5" Width="18" Height="18" />
+          <TextBlock Text="{app:Tr Key=ui.balancing}" FontSize="14" VerticalAlignment="Center" />
+        </StackPanel></TabItem.Header>
+        <app:BalancingPanel x:Name="BalancingView" />
+      </TabItem>
+      <TabItem>
+        <TabItem.Header><StackPanel Orientation="Horizontal" Spacing="11">
+          <Path Data="M 3,3 L 9,3 L 9,9 L 3,9 Z M 11,3 L 17,3 L 17,9 L 11,9 Z M 3,11 L 9,11 L 9,17 L 3,17 Z M 11,11 L 17,11 L 17,17 L 11,17 Z"
+                Stroke="#C9B9DD" StrokeThickness="1.5" Width="18" Height="18" />
+          <TextBlock Text="{app:Tr Key=ui.mods}" FontSize="14" VerticalAlignment="Center" />
+        </StackPanel></TabItem.Header>
+        <TabControl x:Name="ModsTabs" Background="Transparent" TabStripPlacement="Top">
+          <TabControl.ItemsPanel>
+            <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
+          </TabControl.ItemsPanel>
+          <TabItem>
+            <TabItem.Header>
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                  <Canvas Width="20" Height="20">
+                    <Path Data="M 4,3 L 8,3 C 8,1 12,1 12,3 L 16,3 L 16,7 C 18,7 18,11 16,11 L 16,16 L 11,16 C 11,18 7,18 7,16 L 4,16 Z"
+                          Stroke="#C9B9DD" StrokeThickness="1.4" />
+                  </Canvas>
+                </Viewbox>
+                <TextBlock Text="{app:Tr Key=ui.installed_mods}" VerticalAlignment="Center" />
+              </StackPanel>
+            </TabItem.Header>
+        <Grid Margin="4,12,4,4" RowDefinitions="Auto,*" RowSpacing="9">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Text="{app:Tr Key=ui.installed_ue4ss_mods}" FontSize="18" FontWeight="Bold" />
+              <TextBlock Text="{app:Tr Key=mod.manage_hint}" Foreground="#ADA3B6" FontSize="12" />
+            </StackPanel>
+            <TextBlock Grid.Column="1" Text="{app:Tr Key=mod.stop_to_manage}" Foreground="#D9A66B"
+                       VerticalAlignment="Center" IsVisible="{Binding IsRunning}" />
+          </Grid>
+          <Grid Grid.Row="1" ColumnDefinitions="272,*" ColumnSpacing="9">
+            <Border Background="#211D29" CornerRadius="6" Padding="6">
+              <ListBox x:Name="ModsList" ItemsSource="{Binding Mods}" SelectionChanged="ModSelectionChanged" Background="Transparent" BorderThickness="0">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="app:ModRow">
+                    <Border Background="Transparent" CornerRadius="5" Padding="7,5">
+                      <Grid ColumnDefinitions="38,*" ColumnSpacing="8">
+                        <Border Width="36" Height="36" Background="#3A3047" CornerRadius="5" ClipToBounds="True">
+                          <Grid>
+                            <Path Data="M 4,3 L 8,3 C 8,1 12,1 12,3 L 16,3 L 16,7 C 18,7 18,11 16,11 L 16,16 L 11,16 C 11,18 7,18 7,16 L 4,16 Z"
+                                  Stroke="#BFA9D9" StrokeThickness="1.5" Width="19" Height="19"
+                                  IsVisible="{Binding MissingLogo}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Image Source="{Binding Logo}" IsVisible="{Binding HasLogo}" Stretch="UniformToFill"
+                                   RenderOptions.BitmapInterpolationMode="HighQuality" />
+                          </Grid>
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <Border Grid.Column="1" Background="{Binding StateBackground}" CornerRadius="3" Padding="5,1">
+                              <TextBlock Text="{Binding DisplayState}" Foreground="{Binding StateForeground}" FontSize="10" />
+                            </Border>
+                          </Grid>
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{Binding VersionSummary}" Foreground="#A99CBD" FontSize="10" />
+                            <TextBlock Text="{Binding InstallSourceSummary}" Foreground="#A99CBD" FontSize="10" />
+                            <TextBlock Text="{Binding DisplayConfiguration}" Foreground="#A99CBD" FontSize="10" />
+                          </StackPanel>
+                          <TextBlock Text="{Binding Author}" IsVisible="{Binding HasAuthor}" Foreground="#9B88AE" FontSize="10" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Border>
+            <TextBlock IsVisible="{Binding NoInstalledMods}" Text="{app:Tr Key=mod.none_installed}"
+                       Foreground="#A99CBD" TextWrapping="Wrap" Margin="18" />
+            <Border Grid.Column="1" Background="#211D29" CornerRadius="6" Padding="12">
+              <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <StackPanel Spacing="4">
+                    <TextBlock x:Name="SelectedModTitle" Text="{app:Tr Key=mod.select_title}" FontSize="17" FontWeight="Bold" />
+                    <TextBlock x:Name="SelectedModPath" Foreground="#A99CBD" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="CoreModHint" Text="{app:Tr Key=mod.core_hint}" Foreground="#C9B3E7"
+                               FontSize="11" IsVisible="False" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="success" Click="SaveModSettingsClicked" x:Name="SaveModButton" IsEnabled="False" VerticalAlignment="Top">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                      <app:IconGlyph Width="16" Height="16" IconData="M 3,3 L 15,3 L 17,5 L 17,17 L 3,17 Z M 6,3 L 6,8 L 14,8 L 14,3 M 6,17 L 6,11 L 14,11 L 14,17" IconStroke="#F4FFF8" IconStrokeThickness="1.5" />
+                      <TextBlock Text="{app:Tr Key=ui.save_mod_configuration}" />
+                    </StackPanel>
+                  </Button>
+                </Grid>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6">
+                  <Button x:Name="EnableModButton" Classes="success mod-action" Click="EnableModClicked"
+                          IsEnabled="{Binding CanManageMods}" IsVisible="False" Content="{app:Tr Key=mod.enable}" />
+                  <Button x:Name="DisableModButton" Classes="mod-action" Click="DisableModClicked"
+                          IsEnabled="{Binding CanManageMods}" IsVisible="False" Content="{app:Tr Key=mod.disable}" />
+                  <Button x:Name="UninstallModButton" Classes="subtle-danger mod-action" Click="UninstallModClicked"
+                          IsEnabled="{Binding CanManageMods}" IsVisible="False" Content="{app:Tr Key=mod.uninstall}" />
+                  <Button x:Name="InstalledModDocsButton" Classes="mod-action" Click="OpenInstalledModDocsClicked"
+                          IsVisible="False" Content="Docs" />
+                  <Button x:Name="InstalledModDiscordButton" Classes="mod-action" Click="OpenInstalledModDiscordClicked"
+                          IsVisible="False" Content="Discord" />
+                  <Button x:Name="InstalledModHomepageButton" Classes="mod-action" Click="OpenInstalledModHomepageClicked"
+                          IsVisible="False" Content="Website" />
+                </StackPanel>
+                <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="6">
+                  <Button x:Name="FormModeButton" Classes="primary" Click="FormModeClicked" MinHeight="30" Padding="9,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6"><app:IconGlyph Width="15" Height="15" IconData="M 3,4 L 17,4 M 3,9 L 17,9 M 3,14 L 17,14 M 6,2 L 6,6 M 12,7 L 12,11 M 8,12 L 8,16" IconStroke="#F2EAFF" IconStrokeThickness="1.5" /><TextBlock Text="{app:Tr Key=mod.form_editor}" /></StackPanel>
+                  </Button>
+                  <Button x:Name="JsonModeButton" Grid.Column="1" Click="JsonModeClicked" MinHeight="30" Padding="9,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6"><app:IconGlyph Width="15" Height="15" IconData="M 7,3 L 3,9 L 7,15 M 13,3 L 17,9 L 13,15 M 11,2 L 9,16" IconStroke="#F2EAFF" IconStrokeThickness="1.5" /><TextBlock Text="{app:Tr Key=mod.json_editor}" /></StackPanel>
+                  </Button>
+                  <TextBlock x:Name="ModEditorError" Grid.Column="2" Foreground="#EBA4B5" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </Grid>
+                <ScrollViewer x:Name="ModFormScroll" Grid.Row="3" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel x:Name="ModConfigurationFields" Spacing="7" />
+                </ScrollViewer>
+                <TextBox x:Name="ModJsonEditor" Grid.Row="3" IsVisible="False" AcceptsReturn="True" AcceptsTab="True"
+                         FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap" VerticalContentAlignment="Top"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+              </Grid>
+            </Border>
+          </Grid>
+        </Grid>
+      </TabItem>
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+            <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+              <Canvas Width="20" Height="20">
+                <Path Data="M 3,7 L 17,7 L 16,18 L 4,18 Z M 6,7 L 6,5 C 6,2 14,2 14,5 L 14,7 M 7,11 L 13,11"
+                      Stroke="#C9B9DD" StrokeThickness="1.6" />
+              </Canvas>
+            </Viewbox>
+            <TextBlock Text="{app:Tr Key=ui.available_mods}" VerticalAlignment="Center" />
+          </StackPanel>
+        </TabItem.Header>
+        <Grid Margin="4,12,4,4" RowDefinitions="Auto,*" RowSpacing="9">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <StackPanel Spacing="2">
+              <TextBlock Text="{app:Tr Key=ui.mod_marketplace}" FontSize="18" FontWeight="Bold" />
+              <TextBlock Text="{app:Tr Key=ui.catalogs_description}" Foreground="#ADA3B6" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <Button Classes="mod-action" Click="RefreshMarketplaceClicked" IsEnabled="{Binding CanCheckUpdates}" Content="{app:Tr Key=ui.refresh_catalogs}" />
+              <Button x:Name="InstallMarketplaceButton" Classes="success mod-action" Click="InstallMarketplaceClicked"
+                      IsEnabled="{Binding CanInstallMarketplaceMod}" Content="{app:Tr Key=ui.install_or_update_selected_mod}" />
+            </StackPanel>
+          </Grid>
+          <Border Grid.Row="1" Background="#211D29" CornerRadius="6" Padding="6">
+            <ListBox x:Name="MarketplaceList" ItemsSource="{Binding MarketplaceMods}" Background="Transparent" BorderThickness="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="app:MarketplaceMod">
+                  <Border Background="Transparent" CornerRadius="5" Padding="8,6">
+                    <Grid ColumnDefinitions="48,*,Auto" ColumnSpacing="10">
+                      <Border Width="44" Height="44" Background="#3A3047" CornerRadius="5" ClipToBounds="True">
+                        <Grid>
+                          <Path Data="M 4,3 L 8,3 C 8,1 12,1 12,3 L 16,3 L 16,7 C 18,7 18,11 16,11 L 16,16 L 11,16 C 11,18 7,18 7,16 L 4,16 Z"
+                                Stroke="#BFA9D9" StrokeThickness="1.5" Width="22" Height="22"
+                                IsVisible="{Binding MissingLogo}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          <Image Source="{Binding Logo}" IsVisible="{Binding HasLogo}" Stretch="UniformToFill"
+                                 RenderOptions.BitmapInterpolationMode="HighQuality" />
+                        </Grid>
+                      </Border>
+                      <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Author}" IsVisible="{Binding HasAuthor}" Foreground="#A99CBD" FontSize="11" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Description}" Foreground="#BEB4C9" FontSize="11" TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                          <Button Content="Docs" Classes="mod-action" IsVisible="{Binding HasDocumentation}" Click="OpenModDocumentationClicked" />
+                          <Button Content="Discord" Classes="mod-action" IsVisible="{Binding HasDiscord}" Click="OpenModDiscordClicked" />
+                          <Button Content="Website" Classes="mod-action" IsVisible="{Binding HasHomepage}" Click="OpenModHomepageClicked" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Catalog}" Foreground="#82778F" FontSize="10" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <TextBlock Text="{Binding VersionSummary}" Foreground="#C5A6EB" FontSize="11" HorizontalAlignment="Right" />
+                        <TextBlock Text="{Binding Status}" Foreground="#B9E5CF" FontSize="11" HorizontalAlignment="Right" />
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </Border>
+          <TextBlock Grid.Row="1" IsVisible="{Binding NoMarketplaceMods}" Text="{app:Tr Key=mod.no_catalog_entries}"
+                     Foreground="#A99CBD" TextWrapping="Wrap" Margin="18" />
+        </Grid>
+      </TabItem>
+        </TabControl>
+      </TabItem>
+    </TabControl>
+    </Grid>
+    <Border IsVisible="{Binding IsSelectionLoading}" Background="#17151C" ZIndex="10">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16" Width="320">
+        <TextBlock Text="{app:Tr Key=ui.loading_server}" FontSize="19" FontWeight="SemiBold"
+                   HorizontalAlignment="Center" />
+        <TextBlock Text="{app:Tr Key=ui.loading_server_details}" Foreground="#ABA3B6" TextWrapping="Wrap"
+                   TextAlignment="Center" />
+        <ProgressBar IsIndeterminate="True" Height="4" />
+      </StackPanel>
+    </Border>
+    </Grid>
+  </Grid>
+  <Border Grid.Row="1" Background="#211D28" BorderBrush="#37303F" BorderThickness="0,1,0,0"
+          Padding="24,11" MinHeight="48">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" VerticalAlignment="Center">
+      <Path Data="M 10,2 A 8,8 0 1 0 10,18 A 8,8 0 1 0 10,2 M 10,8 L 10,14 M 10,5 L 10,6"
+            Stroke="#A98BD5" StrokeThickness="1.6" Width="18" Height="18" VerticalAlignment="Center" />
+      <TextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="12"
+                 VerticalAlignment="Center" />
+      <ProgressBar Grid.Column="2" Width="160" IsVisible="{Binding IsBusy}"
+                   IsIndeterminate="{Binding ProgressIndeterminate}" Value="{Binding ProgressPercent}"
+                   Minimum="0" Maximum="100" Height="4" VerticalAlignment="Center" />
+    </Grid>
+  </Border>
+  </Grid>
+  <Grid x:Name="ModalLayer" Background="#A9000000" IsVisible="False" Focusable="True" ZIndex="100">
+    <Border x:Name="ModalCard" Width="560" MaxHeight="540"
+            Background="#24202B" BorderBrush="#574963" BorderThickness="1"
+            CornerRadius="8" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <ContentControl x:Name="ModalContent" VerticalContentAlignment="Stretch" />
+    </Border>
+  </Grid>
+  <Grid x:Name="ConfirmationLayer" Background="#C0000000" IsVisible="False"
+        Focusable="True" ZIndex="110">
+    <Border Width="520" MaxHeight="480" Background="#24202B" BorderBrush="#8C6849"
+            BorderThickness="1" CornerRadius="8" Padding="24"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <ContentControl x:Name="ConfirmationContent" />
+    </Border>
+  </Grid>
+  </Grid>
+</Window>
+

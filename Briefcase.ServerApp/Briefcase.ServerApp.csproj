@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>Assets/BriefcaseIcon.ico</ApplicationIcon>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <BriefcaseNativeBuildDirectory Condition="'$(BriefcaseNativeBuildDirectory)' == ''">$(MSBuildProjectDirectory)\..\..\BriefcaseNative\build</BriefcaseNativeBuildDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="$(BriefcaseNativeBuildDirectory)\Briefcase.ServerInjector.exe" Link="Native\Briefcase.ServerInjector.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(BriefcaseNativeBuildDirectory)\Briefcase.ServerInjector.exe')" />
+    <Content Include="$(BriefcaseNativeBuildDirectory)\Briefcase.ServerBootstrap.dll" Link="Native\Briefcase.ServerBootstrap.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(BriefcaseNativeBuildDirectory)\Briefcase.ServerBootstrap.dll')" />
+    <AvaloniaResource Include="Assets/Game/UI/**/*.png" />
+    <AvaloniaResource Include="Assets/BriefcaseIcon.png" />
+    <AvaloniaResource Include="Assets/BriefcaseIcon.ico" />
+    <AvaloniaResource Include="Assets/Game/IconCatalog.json" />
+    <EmbeddedResource Include="Translations/en.json" LogicalName="Briefcase.ServerApp.Fallback.en.json" />
+    <None Update="Translations/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,1298 @@
+[
+  {
+    "category": "Expertise",
+    "character": "Ace",
+    "name": "T_UI_ActiveIcon_Ace_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_ActiveIcon_Ace_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_ActiveIcon_Ace_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Ace",
+    "name": "T_UI_ActiveIcon_Ace_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_ActiveIcon_Ace_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_ActiveIcon_Ace_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Ace",
+    "name": "T_UI_ActiveIcon_Ace",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_ActiveIcon_Ace.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_ActiveIcon_Ace.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Ace",
+    "name": "T_UI_PassiveIcon_Ace_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_PassiveIcon_Ace_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_PassiveIcon_Ace_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Ace",
+    "name": "T_UI_PassiveIcon_Ace_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_PassiveIcon_Ace_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_PassiveIcon_Ace_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Ace",
+    "name": "T_UI_PassiveIcon_Ace",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_PassiveIcon_Ace.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_PassiveIcon_Ace.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Ace",
+    "name": "T_UI_WpnIcon_Ace_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_WpnIcon_Ace_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_WpnIcon_Ace_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Ace",
+    "name": "T_UI_WpnIcon_Ace_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_WpnIcon_Ace_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_WpnIcon_Ace_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Ace",
+    "name": "T_UI_WpnIcon_Ace_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_WpnIcon_Ace_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Ace/T_UI_WpnIcon_Ace_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Cavaliere",
+    "name": "T_UI_ActiveIcon_Cavaliere_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_ActiveIcon_Cavaliere_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_ActiveIcon_Cavaliere_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Cavaliere",
+    "name": "T_UI_ActiveIcon_Cavaliere_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_ActiveIcon_Cavaliere_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_ActiveIcon_Cavaliere_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Cavaliere",
+    "name": "T_UI_ActiveIcon_Cavaliere",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_ActiveIcon_Cavaliere.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_ActiveIcon_Cavaliere.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Cavaliere",
+    "name": "T_UI_PassiveIcon_Cavaliere_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_PassiveIcon_Cavaliere_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_PassiveIcon_Cavaliere_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Cavaliere",
+    "name": "T_UI_PassiveIcon_Cavaliere_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_PassiveIcon_Cavaliere_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_PassiveIcon_Cavaliere_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Cavaliere",
+    "name": "T_UI_PassiveIcon_Cavaliere",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_PassiveIcon_Cavaliere.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_PassiveIcon_Cavaliere.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Cavaliere",
+    "name": "T_UI_WpnIcon_Cavaliere_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_WpnIcon_Cavaliere_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_WpnIcon_Cavaliere_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Cavaliere",
+    "name": "T_UI_WpnIcon_Cavaliere_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_WpnIcon_Cavaliere_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_WpnIcon_Cavaliere_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Cavaliere",
+    "name": "T_UI_WpnIcon_Cavaliere_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_WpnIcon_Cavaliere_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Cavaliere/T_UI_WpnIcon_Cavaliere_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Chavez",
+    "name": "T_UI_ActiveIcon_Chavez_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_ActiveIcon_Chavez_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_ActiveIcon_Chavez_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Chavez",
+    "name": "T_UI_ActiveIcon_Chavez_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_ActiveIcon_Chavez_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_ActiveIcon_Chavez_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Chavez",
+    "name": "T_UI_ActiveIcon_Chavez",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_ActiveIcon_Chavez.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_ActiveIcon_Chavez.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Chavez",
+    "name": "T_UI_PassiveIcon_Chavez_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_PassiveIcon_Chavez_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_PassiveIcon_Chavez_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Chavez",
+    "name": "T_UI_PassiveIcon_Chavez_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_PassiveIcon_Chavez_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_PassiveIcon_Chavez_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Chavez",
+    "name": "T_UI_PassiveIcon_Chavez",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_PassiveIcon_Chavez.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_PassiveIcon_Chavez.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Chavez",
+    "name": "T_UI_WpnIcon_Chavez_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_WpnIcon_Chavez_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_WpnIcon_Chavez_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Chavez",
+    "name": "T_UI_WpnIcon_Chavez_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_WpnIcon_Chavez_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_WpnIcon_Chavez_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Chavez",
+    "name": "T_UI_WpnIcon_Chavez_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_WpnIcon_Chavez_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Chavez/T_UI_WpnIcon_Chavez_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Hans",
+    "name": "T_UI_ActiveIcon_Hans_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_ActiveIcon_Hans_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_ActiveIcon_Hans_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Hans",
+    "name": "T_UI_ActiveIcon_Hans_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_ActiveIcon_Hans_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_ActiveIcon_Hans_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Hans",
+    "name": "T_UI_ActiveIcon_Hans",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_ActiveIcon_Hans.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_ActiveIcon_Hans.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Hans",
+    "name": "T_UI_PassiveIcon_Hans_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_PassiveIcon_Hans_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_PassiveIcon_Hans_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Hans",
+    "name": "T_UI_PassiveIcon_Hans_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_PassiveIcon_Hans_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_PassiveIcon_Hans_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Hans",
+    "name": "T_UI_PassiveIcon_Hans",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_PassiveIcon_Hans.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_PassiveIcon_Hans.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Hans",
+    "name": "T_UI_WpnIcon_Hans_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_WpnIcon_Hans_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_WpnIcon_Hans_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Hans",
+    "name": "T_UI_WpnIcon_Hans_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_WpnIcon_Hans_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_WpnIcon_Hans_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Hans",
+    "name": "T_UI_WpnIcon_Hans_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_WpnIcon_Hans_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Hans/T_UI_WpnIcon_Hans_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Larcin",
+    "name": "T_UI_ActiveIcon_Larcin_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_ActiveIcon_Larcin_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_ActiveIcon_Larcin_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Larcin",
+    "name": "T_UI_ActiveIcon_Larcin_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_ActiveIcon_Larcin_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_ActiveIcon_Larcin_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Larcin",
+    "name": "T_UI_ActiveIcon_Larcin",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_ActiveIcon_Larcin.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_ActiveIcon_Larcin.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Larcin",
+    "name": "T_UI_PassiveIcon_Larcin_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_PassiveIcon_Larcin_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_PassiveIcon_Larcin_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Larcin",
+    "name": "T_UI_PassiveIcon_Larcin_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_PassiveIcon_Larcin_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_PassiveIcon_Larcin_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Larcin",
+    "name": "T_UI_PassiveIcon_Larcin",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_PassiveIcon_Larcin.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_PassiveIcon_Larcin.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Larcin",
+    "name": "T_UI_WpnIcon_Larcin_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_WpnIcon_Larcin_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_WpnIcon_Larcin_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Larcin",
+    "name": "T_UI_WpnIcon_Larcin_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_WpnIcon_Larcin_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_WpnIcon_Larcin_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Larcin",
+    "name": "T_UI_WpnIcon_Larcin_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_WpnIcon_Larcin_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Larcin/T_UI_WpnIcon_Larcin_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "MadameXiu",
+    "name": "T_UI_ActiveIcon_Xiu_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_ActiveIcon_Xiu_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_ActiveIcon_Xiu_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "MadameXiu",
+    "name": "T_UI_ActiveIcon_Xiu_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_ActiveIcon_Xiu_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_ActiveIcon_Xiu_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "MadameXiu",
+    "name": "T_UI_ActiveIcon_Xiu",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_ActiveIcon_Xiu.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_ActiveIcon_Xiu.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "MadameXiu",
+    "name": "T_UI_PassiveIcon_Xiu_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_PassiveIcon_Xiu_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_PassiveIcon_Xiu_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "MadameXiu",
+    "name": "T_UI_PassiveIcon_Xiu_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_PassiveIcon_Xiu_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_PassiveIcon_Xiu_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "MadameXiu",
+    "name": "T_UI_PassiveIcon_Xiu",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_PassiveIcon_Xiu.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_PassiveIcon_Xiu.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "MadameXiu",
+    "name": "T_UI_WpnIcon_Xiu_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_WpnIcon_Xiu_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_WpnIcon_Xiu_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "MadameXiu",
+    "name": "T_UI_WpnIcon_Xiu_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_WpnIcon_Xiu_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_WpnIcon_Xiu_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "MadameXiu",
+    "name": "T_UI_WpnIcon_Xiu_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_WpnIcon_Xiu_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/MadameXiu/T_UI_WpnIcon_Xiu_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Octo",
+    "name": "T_UI_ActiveIcon_Octo_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_ActiveIcon_Octo_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_ActiveIcon_Octo_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Octo",
+    "name": "T_UI_ActiveIcon_Octo_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_ActiveIcon_Octo_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_ActiveIcon_Octo_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Octo",
+    "name": "T_UI_ActiveIcon_Octo",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_ActiveIcon_Octo.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_ActiveIcon_Octo.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Octo",
+    "name": "T_UI_PassiveIcon_Octo_Mod0",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_PassiveIcon_Octo_Mod0.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_PassiveIcon_Octo_Mod0.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Octo",
+    "name": "T_UI_PassiveIcon_Octo_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_PassiveIcon_Octo_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_PassiveIcon_Octo_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Octo",
+    "name": "T_UI_PassiveIcon_Octo_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_PassiveIcon_Octo_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_PassiveIcon_Octo_Mod2.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Octo",
+    "name": "T_UI_WpnIcon_Octo_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_WpnIcon_Octo_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_WpnIcon_Octo_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Octo",
+    "name": "T_UI_WpnIcon_Octo_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_WpnIcon_Octo_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_WpnIcon_Octo_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Octo",
+    "name": "T_UI_WpnIcon_Octo_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_WpnIcon_Octo_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Octo/T_UI_WpnIcon_Octo_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Sasori",
+    "name": "T_UI_ActiveIcon_Sasori_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_ActiveIcon_Sasori_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_ActiveIcon_Sasori_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Sasori",
+    "name": "T_UI_ActiveIcon_Sasori_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_ActiveIcon_Sasori_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_ActiveIcon_Sasori_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Sasori",
+    "name": "T_UI_ActiveIcon_Sasori",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_ActiveIcon_Sasori.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_ActiveIcon_Sasori.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Sasori",
+    "name": "T_UI_PassiveIcon_Sasori_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_PassiveIcon_Sasori_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_PassiveIcon_Sasori_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Sasori",
+    "name": "T_UI_PassiveIcon_Sasori_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_PassiveIcon_Sasori_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_PassiveIcon_Sasori_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Sasori",
+    "name": "T_UI_PassiveIcon_Sasori",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_PassiveIcon_Sasori.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_PassiveIcon_Sasori.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Sasori",
+    "name": "T_UI_WpnIcon_Sasori_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_WpnIcon_Sasori_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_WpnIcon_Sasori_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Sasori",
+    "name": "T_UI_WpnIcon_Sasori_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_WpnIcon_Sasori_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_WpnIcon_Sasori_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Sasori",
+    "name": "T_UI_WpnIcon_Sasori_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_WpnIcon_Sasori_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Sasori/T_UI_WpnIcon_Sasori_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Socialite",
+    "name": "T_UI_ActiveIcon_Socialite_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_ActiveIcon_Socialite_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_ActiveIcon_Socialite_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Socialite",
+    "name": "T_UI_ActiveIcon_Socialite_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_ActiveIcon_Socialite_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_ActiveIcon_Socialite_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Socialite",
+    "name": "T_UI_ActiveIcon_Socialite",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_ActiveIcon_Socialite.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_ActiveIcon_Socialite.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Socialite",
+    "name": "T_UI_PassiveIcon_Socialite_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_PassiveIcon_Socialite_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_PassiveIcon_Socialite_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Socialite",
+    "name": "T_UI_PassiveIcon_Socialite_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_PassiveIcon_Socialite_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_PassiveIcon_Socialite_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Socialite",
+    "name": "T_UI_PassiveIcon_Socialite",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_PassiveIcon_Socialite.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_PassiveIcon_Socialite.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Socialite",
+    "name": "T_UI_WpnIcon_Socialite_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_WpnIcon_Socialite_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_WpnIcon_Socialite_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Socialite",
+    "name": "T_UI_WpnIcon_Socialite_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_WpnIcon_Socialite_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_WpnIcon_Socialite_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Socialite",
+    "name": "T_UI_WpnIcon_Socialite_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_WpnIcon_Socialite_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Socialite/T_UI_WpnIcon_Socialite_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Squire",
+    "name": "T_UI_ActiveIcon_Squire_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Squire",
+    "name": "T_UI_ActiveIcon_Squire_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Squire",
+    "name": "T_UI_ActiveIcon_Squire_PingAmmo",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_PingAmmo.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_PingAmmo.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Squire",
+    "name": "T_UI_ActiveIcon_Squire_PingSnack",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_PingSnack.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire_PingSnack.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Squire",
+    "name": "T_UI_ActiveIcon_Squire",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_ActiveIcon_Squire.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Squire",
+    "name": "T_UI_PassiveIcon_Squire_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_PassiveIcon_Squire_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_PassiveIcon_Squire_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Squire",
+    "name": "T_UI_PassiveIcon_Squire_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_PassiveIcon_Squire_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_PassiveIcon_Squire_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Squire",
+    "name": "T_UI_PassiveIcon_Squire",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_PassiveIcon_Squire.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_PassiveIcon_Squire.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Squire",
+    "name": "T_UI_WpnIcon_Squire_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_WpnIcon_Squire_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_WpnIcon_Squire_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Squire",
+    "name": "T_UI_WpnIcon_Squire_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_WpnIcon_Squire_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_WpnIcon_Squire_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Squire",
+    "name": "T_UI_WpnIcon_Squire_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_WpnIcon_Squire_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Squire/T_UI_WpnIcon_Squire_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Vigil",
+    "name": "T_UI_ActiveIcon_Vigil_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_ActiveIcon_Vigil_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_ActiveIcon_Vigil_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Vigil",
+    "name": "T_UI_ActiveIcon_Vigil_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_ActiveIcon_Vigil_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_ActiveIcon_Vigil_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Vigil",
+    "name": "T_UI_ActiveIcon_Vigil",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_ActiveIcon_Vigil.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_ActiveIcon_Vigil.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Vigil",
+    "name": "T_UI_PassiveIcon_Vigil_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_PassiveIcon_Vigil_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_PassiveIcon_Vigil_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Vigil",
+    "name": "T_UI_PassiveIcon_Vigil_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_PassiveIcon_Vigil_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_PassiveIcon_Vigil_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Vigil",
+    "name": "T_UI_PassiveIcon_Vigil",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_PassiveIcon_Vigil.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_PassiveIcon_Vigil.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Vigil",
+    "name": "T_UI_WpnIcon_Vigil_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_WpnIcon_Vigil_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_WpnIcon_Vigil_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Vigil",
+    "name": "T_UI_WpnIcon_Vigil_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_WpnIcon_Vigil_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_WpnIcon_Vigil_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Vigil",
+    "name": "T_UI_WpnIcon_Vigil_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_WpnIcon_Vigil_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Vigil/T_UI_WpnIcon_Vigil_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Yumi",
+    "name": "T_UI_ActiveIcon_Yumi_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_ActiveIcon_Yumi_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_ActiveIcon_Yumi_Mod1.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Yumi",
+    "name": "T_UI_ActiveIcon_Yumi_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_ActiveIcon_Yumi_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_ActiveIcon_Yumi_Mod2.uasset"
+  },
+  {
+    "category": "Expertise",
+    "character": "Yumi",
+    "name": "T_UI_ActiveIcon_Yumi",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_ActiveIcon_Yumi.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_ActiveIcon_Yumi.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Yumi",
+    "name": "T_UI_PassiveIcon_Yumi_Mod1",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_PassiveIcon_Yumi_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_PassiveIcon_Yumi_Mod1.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Yumi",
+    "name": "T_UI_PassiveIcon_Yumi_Mod2",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_PassiveIcon_Yumi_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_PassiveIcon_Yumi_Mod2.uasset"
+  },
+  {
+    "category": "Passive",
+    "character": "Yumi",
+    "name": "T_UI_PassiveIcon_Yumi",
+    "width": 256,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_PassiveIcon_Yumi.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_PassiveIcon_Yumi.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Yumi",
+    "name": "T_UI_WpnIcon_Yumi_Base",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_WpnIcon_Yumi_Base.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_WpnIcon_Yumi_Base.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Yumi",
+    "name": "T_UI_WpnIcon_Yumi_Mod1",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_WpnIcon_Yumi_Mod1.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_WpnIcon_Yumi_Mod1.uasset"
+  },
+  {
+    "category": "Weapon",
+    "character": "Yumi",
+    "name": "T_UI_WpnIcon_Yumi_Mod2",
+    "width": 324,
+    "height": 256,
+    "png": "HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_WpnIcon_Yumi_Mod2.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/AgentSpecificHUDs/AgentSkillHUD/Yumi/T_UI_WpnIcon_Yumi_Mod2.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_BouncingMat",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_BouncingMat.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_BouncingMat.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Drone",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Drone.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Drone.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Eye",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Eye.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Eye.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Glasses",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Glasses.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Glasses.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Goo",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Goo.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Goo.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_HackTrap",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_HackTrap.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_HackTrap.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Jammer",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Jammer.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Jammer.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Mimic",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Mimic.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Mimic.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Shield",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Shield.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Shield.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Soundbox",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Soundbox.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Soundbox.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Turret",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Turret.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Turret.uasset"
+  },
+  {
+    "category": "Gadget",
+    "character": null,
+    "name": "T_UI_Gadget_Wire",
+    "width": 128,
+    "height": 128,
+    "png": "HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Wire.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/LoadoutSpecificHUDs/GadgetIcons/T_UI_Gadget_Wire.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Boost_Cover",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Boost_Cover.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Boost_Cover.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Boost_Expertise",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Boost_Expertise.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Boost_Expertise.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Boost_HackSpeed",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Boost_HackSpeed.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Boost_HackSpeed.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_BriefcaseScan_Duration",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_BriefcaseScan_Duration.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_BriefcaseScan_Duration.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Empty",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Empty.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Empty.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Maxup_Ammo",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Maxup_Ammo.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Maxup_Ammo.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Maxup_Health",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Maxup_Health.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Maxup_Health.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_Maxup_Intel",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Maxup_Intel.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_Maxup_Intel.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_SnacksHealth",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_SnacksHealth.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_SnacksHealth.uasset"
+  },
+  {
+    "category": "Lootable",
+    "character": null,
+    "name": "T_UI_Lootable_SocialHealthRegen",
+    "width": 80,
+    "height": 80,
+    "png": "HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_SocialHealthRegen.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/HUDs/PlayerPossessionsHUDs/Lootable/T_UI_Lootable_SocialHealthRegen.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Ace",
+    "name": "T_UI_AgentPortrait_Ace_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Ace_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Ace_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Cavaliere",
+    "name": "T_UI_AgentPortrait_Cavaliere_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Cavaliere_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Cavaliere_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Chavez",
+    "name": "T_UI_AgentPortrait_Chavez_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Chavez_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Chavez_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Hans",
+    "name": "T_UI_AgentPortrait_Hans_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Hans_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Hans_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Larcin",
+    "name": "T_UI_AgentPortrait_Larcin_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Larcin_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Larcin_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Octo",
+    "name": "T_UI_AgentPortrait_Octo_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Octo_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Octo_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Sasori",
+    "name": "T_UI_AgentPortrait_Sasori_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Sasori_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Sasori_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Socialite",
+    "name": "T_UI_AgentPortrait_Socialite_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Socialite_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Socialite_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Squire",
+    "name": "T_UI_AgentPortrait_Squire_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Squire_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Squire_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Vigil",
+    "name": "T_UI_AgentPortrait_Vigil_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Vigil_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Vigil_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Xiu",
+    "name": "T_UI_AgentPortrait_Xiu_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Xiu_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Xiu_U.uasset"
+  },
+  {
+    "category": "Character",
+    "character": "Yumi",
+    "name": "T_UI_AgentPortrait_Yumi_U",
+    "width": 316,
+    "height": 316,
+    "png": "MENUs/AgentSelection/T_UI_AgentPortrait_Yumi_U.png",
+    "unrealPackage": "DeceiveInc/Content/Textures/UI/MENUs/AgentSelection/T_UI_AgentPortrait_Yumi_U.uasset"
+  }
+]

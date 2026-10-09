@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:Briefcase.ServerApp"
+             x:Class="Briefcase.ServerApp.MapRotationEditor"
+             x:DataType="app:MapRotationEditor">
+  <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12">
+    <StackPanel Spacing="3">
+      <TextBlock Text="{app:Tr Key=ui.map_rotation_cycle}" FontSize="15" FontWeight="SemiBold" />
+      <TextBlock Text="{app:Tr Key=ui.map_cycle_description}" Foreground="#ADA3B6" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <Button x:Name="AddMapButton" Grid.Row="1" Classes="success"
+            HorizontalAlignment="Left" HorizontalContentAlignment="Stretch"
+            Width="176" Height="32" MinHeight="32" Padding="10,4" FontSize="12">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalAlignment="Center">
+        <TextBlock Text="{app:Tr Key=ui.add_map}" VerticalAlignment="Center" />
+        <app:IconGlyph Grid.Column="1" Width="14" Height="14" VerticalAlignment="Center"
+                       IconData="M 4,7 L 10,13 L 16,7" IconStroke="#F5ECFF"
+                       IconStrokeThickness="1.8" />
+      </Grid>
+    </Button>
+
+    <Border Grid.Row="2" Background="#211C28" BorderBrush="#493B58" BorderThickness="1"
+            CornerRadius="6" Padding="8">
+      <Grid>
+        <ScrollViewer x:Name="RotationScroll" HorizontalScrollBarVisibility="Disabled">
+          <Canvas x:Name="RowsCanvas" Height="294" MinWidth="300" />
+        </ScrollViewer>
+        <TextBlock x:Name="EmptyHint" Text="{app:Tr Key=ui.map_rotation_empty}"
+                   IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="#A99CB6" />
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

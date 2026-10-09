@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:tr="using:Briefcase.ServerApp"
+        x:Class="Briefcase.ServerApp.Launcher.MainWindow"
+        Title="{tr:Tr Key=launcher.window_title}"
+        Icon="/Assets/BriefcaseIcon.ico"
+        Width="650" Height="400" MinWidth="650" MinHeight="400" MaxWidth="650" MaxHeight="400"
+        CanResize="False" WindowDecorations="None" WindowStartupLocation="CenterScreen"
+        Background="#0E0A18">
+  <Canvas Width="650" Height="400" ClipToBounds="True">
+    <Image Width="650" Height="400" Stretch="UniformToFill"
+           Source="avares://Briefcase.Launcher/Assets/SplashScreen.png"
+           PointerPressed="BackgroundPressed" />
+
+    <Button x:Name="CloseButton" Classes="splash-close" Canvas.Left="606" Canvas.Top="12"
+            Width="32" Height="32" MinHeight="0" Padding="0" CornerRadius="5"
+            Background="#880F0B19" BorderBrush="#66CBB9EA" BorderThickness="1"
+            HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+            Click="CloseClicked" ToolTip.Tip="{tr:Tr Key=launcher.cancel}">
+      <Path Data="M3 3L13 13M13 3L3 13" Width="16" Height="16"
+            Stroke="#F4EEFF" StrokeThickness="1.8" StrokeLineCap="Round" />
+    </Button>
+
+    <Border x:Name="StatusPanel" Canvas.Left="20" Canvas.Top="334" Width="610" Height="52"
+            Background="#9919102B" BorderBrush="#A0805BC7" BorderThickness="1"
+            CornerRadius="7" Padding="14,7">
+      <StackPanel VerticalAlignment="Center" Spacing="7">
+        <TextBlock x:Name="StageText" TextTrimming="CharacterEllipsis"
+                   FontSize="13" FontWeight="Medium" Foreground="#E9DBFF" />
+        <ProgressBar x:Name="LoadingProgress" Height="4" Minimum="0" Maximum="100"
+                     IsIndeterminate="True" Foreground="#AE82F5" Background="#68463972" />
+      </StackPanel>
+    </Border>
+  </Canvas>
+</Window>

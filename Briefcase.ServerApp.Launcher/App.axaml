@@ -1,0 +1,31 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Briefcase.ServerApp.Launcher.App"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="#17151C" />
+      <Setter Property="Foreground" Value="#EDE9F4" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="MinHeight" Value="39" />
+      <Setter Property="Padding" Value="16,9" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="#372A42" />
+      <Setter Property="Foreground" Value="#F0E7FA" />
+    </Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4A3657" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="#7350C6" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#8967D7" />
+    </Style>
+    <Style Selector="Button.splash-close:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#AD3B2855" />
+    </Style>
+  </Application.Styles>
+</Application>

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "mods": [
+    {
+      "id": "briefcaseplayercap",
+      "name": "Player Cap",
+      "description": "Raise Solo, Duo and Trio player ceilings to 32 while keeping the configured MaxPlayers value.",
+      "version": "0.3.7",
+      "author": "EnoPM",
+      "downloadUrl": "https://github.com/EnoPM/Briefcase.PlayerCap/releases/download/v0.3.7/Briefcase.PlayerCap-windows-x64-0.3.7.zip",
+      "archiveSha256": "a3fcc2e5bc799b44727f173a2efb5981722437d6480a3cb21c075d740681e550",
+      "documentationUrl": "https://github.com/EnoPM/Briefcase.PlayerCap#readme",
+      "homepageUrl": "https://github.com/EnoPM/Briefcase.PlayerCap"
+    },
+    {
+      "id": "briefcasepregametimer",
+      "name": "Pregame Timer",
+      "description": "Configure the dedicated server lobby countdown before a match starts.",
+      "version": "0.3.6",
+      "author": "EnoPM",
+      "downloadUrl": "https://github.com/EnoPM/Briefcase.PregameTimer/releases/download/v0.3.6/Briefcase.PregameTimer-windows-x64-0.3.6.zip",
+      "archiveSha256": "e3c50d91b8db75d386105f4fb505b05e1274fb30f7c673221fabff40d93fed6c",
+      "documentationUrl": "https://github.com/EnoPM/Briefcase.PregameTimer#readme",
+      "homepageUrl": "https://github.com/EnoPM/Briefcase.PregameTimer"
+    },
+    {
+      "id": "briefcasesuspicioncontrol",
+      "name": "Suspicion Control",
+      "description": "Configure the suspicion drain associated with actions such as running in NPC sight.",
+      "version": "0.4.7",
+      "author": "EnoPM",
+      "downloadUrl": "https://github.com/EnoPM/Briefcase.StaminaControl/releases/download/v0.4.7/Briefcase.StaminaControl-windows-x64-0.4.7.zip",
+      "archiveSha256": "6738694fc15557dc7f76732421422c928fd54c35b149125f0ea75b7428660116",
+      "documentationUrl": "https://github.com/EnoPM/Briefcase.StaminaControl#readme",
+      "homepageUrl": "https://github.com/EnoPM/Briefcase.StaminaControl"
+    }
+  ]
+}

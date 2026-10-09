@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj" />
+  <Project Path="Briefcase.ServerApp/Briefcase.ServerApp.csproj" />
+  <Project Path="Briefcase.ServerApp.Launcher/Briefcase.ServerApp.Launcher.csproj" />
+</Solution>

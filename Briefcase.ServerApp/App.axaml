@@ -1,0 +1,237 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:Briefcase.ServerApp"
+             x:Class="Briefcase.ServerApp.App"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="#17151C" />
+      <Setter Property="Foreground" Value="#EDE9F4" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="#34273F" />
+      <Setter Property="Foreground" Value="#F0E7FA" />
+    </Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#493356" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="#7350C6" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#8967D7" />
+    </Style>
+    <Style Selector="Button.success">
+      <Setter Property="Background" Value="#246D51" />
+    </Style>
+    <Style Selector="Button.success:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2E8564" />
+    </Style>
+    <Style Selector="Button.danger">
+      <Setter Property="Background" Value="#843C4F" />
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#A34B60" />
+    </Style>
+    <Style Selector="Button.subtle-danger">
+      <Setter Property="Background" Value="#33252F" />
+      <Setter Property="Foreground" Value="#EDAFBA" />
+    </Style>
+    <Style Selector="Button.subtle-danger:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#49303B" />
+    </Style>
+    <Style Selector="Button.icon-button">
+      <Setter Property="Background" Value="#332B3E" />
+      <Setter Property="BorderBrush" Value="#685579" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="app|IconButton">
+      <Setter Property="Background" Value="#332B3E" />
+      <Setter Property="BorderBrush" Value="#685579" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="PART_IconButtonBorder"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="app|IconButton:pointerover /template/ Border#PART_IconButtonBorder">
+      <Setter Property="Background" Value="#493356" />
+      <Setter Property="BorderBrush" Value="#9B79C9" />
+    </Style>
+    <Style Selector="app|IconButton.primary">
+      <Setter Property="Background" Value="#7350C6" />
+      <Setter Property="BorderBrush" Value="#A989F0" />
+    </Style>
+    <Style Selector="app|IconButton.primary:pointerover /template/ Border#PART_IconButtonBorder">
+      <Setter Property="Background" Value="#8967D7" />
+      <Setter Property="BorderBrush" Value="#C3A7FF" />
+    </Style>
+    <Style Selector="app|IconButton.danger, app|IconButton.subtle-danger">
+      <Setter Property="BorderBrush" Value="#A66A7B" />
+    </Style>
+    <Style Selector="app|IconButton.danger:pointerover /template/ Border#PART_IconButtonBorder,
+                     app|IconButton.subtle-danger:pointerover /template/ Border#PART_IconButtonBorder">
+      <Setter Property="Background" Value="#6C3849" />
+      <Setter Property="BorderBrush" Value="#D08A9E" />
+    </Style>
+    <Style Selector="app|IconButton:disabled">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <Style Selector="Button.status-action">
+      <Setter Property="Padding" Value="9,4" />
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.update-action">
+      <Setter Property="Padding" Value="9,4" />
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter.map-rotation-menu">
+      <Setter Property="Width" Value="176" />
+    </Style>
+    <Style Selector="Button.mod-action">
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="FontSize" Value="11" />
+    </Style>
+    <Style Selector="TabControl#ServerTabs TabItem">
+      <Setter Property="MinWidth" Value="168" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="11,9" />
+      <Setter Property="Margin" Value="0,0,10,2" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Foreground" Value="#B6AFC1" />
+    </Style>
+    <Style Selector="TabControl#ServerTabs TabItem:selected">
+      <Setter Property="Background" Value="#30263F" />
+      <Setter Property="Foreground" Value="#F2E8FF" />
+    </Style>
+    <Style Selector="TabControl#ServerTabs TabItem:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="#292331" />
+    </Style>
+    <Style Selector="TabControl#ServerTabs TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="#30263F" />
+      <Setter Property="TextElement.Foreground" Value="#F2E8FF" />
+    </Style>
+    <Style Selector="TabControl#ServerTabs TabItem /template/ ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="TabControl#ModsTabs TabItem">
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="Background" Value="#24202D" />
+      <Setter Property="Foreground" Value="#BEB4CD" />
+    </Style>
+    <Style Selector="TabControl#ModsTabs TabItem:selected">
+      <Setter Property="Background" Value="#3A2D4A" />
+      <Setter Property="Foreground" Value="#F2E8FF" />
+    </Style>
+    <Style Selector="TabControl#ModsTabs TabItem:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="#30283B" />
+    </Style>
+    <Style Selector="TabControl#ModsTabs TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="#3A2D4A" />
+    </Style>
+    <Style Selector="TabControl#ModsTabs TabItem:selected /template/ Border#PART_SelectedPipe">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="TabControl#ConfigurationTabs TabItem">
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Background" Value="#24202D" />
+      <Setter Property="Foreground" Value="#BEB4CD" />
+    </Style>
+    <Style Selector="TabControl#ConfigurationTabs TabItem:selected">
+      <Setter Property="Background" Value="#3A2D4A" />
+      <Setter Property="Foreground" Value="#F2E8FF" />
+    </Style>
+    <Style Selector="TabControl#ConfigurationTabs TabItem:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="#30283B" />
+    </Style>
+    <Style Selector="TabControl#ConfigurationTabs TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="#3A2D4A" />
+    </Style>
+    <Style Selector="TabControl#ConfigurationTabs TabItem:selected /template/ Border#PART_SelectedPipe">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="ListBox#ServersList ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="#28232F" />
+    </Style>
+    <Style Selector="ListBox#ServersList ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#30283A" />
+    </Style>
+    <Style Selector="ListBox#ServersList ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="#382D48" />
+    </Style>
+    <Style Selector="ListBox#ServersList ListBoxItem:selected:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#382D48" />
+    </Style>
+    <Style Selector="ListBox#ModsList ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="#2A2432" />
+    </Style>
+    <Style Selector="ListBox#ModsList ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#362A42" />
+    </Style>
+    <Style Selector="ListBox#ModsList ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="#443354" />
+    </Style>
+    <Style Selector="ListBox#ModsList ListBoxItem:selected:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#443354" />
+    </Style>
+    <Style Selector="ListBox#MarketplaceList ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="#2A2432" />
+    </Style>
+    <Style Selector="ListBox#MarketplaceList ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#362A42" />
+    </Style>
+    <Style Selector="ListBox#MarketplaceList ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="#443354" />
+    </Style>
+    <Style Selector="ListBox#MarketplaceList ListBoxItem:selected:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#443354" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="MinHeight" Value="38" />
+    </Style>
+  </Application.Styles>
+</Application>

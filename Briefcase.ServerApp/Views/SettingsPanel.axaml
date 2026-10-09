@@ -1,0 +1,121 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:Briefcase.ServerApp"
+             x:Class="Briefcase.ServerApp.SettingsPanel"
+             x:DataType="app:MainViewModel">
+  <Grid RowDefinitions="Auto,*" RowSpacing="18">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <StackPanel Spacing="5">
+        <TextBlock Text="{app:Tr Key=ui.application_settings}" FontSize="21" FontWeight="Bold" />
+        <TextBlock Text="{app:Tr Key=ui.these_settings_apply_to_all_your_servers}" Foreground="#ADA3B6" />
+      </StackPanel>
+      <app:IconButton Grid.Column="1" Classes="icon-button" Click="CloseClicked"
+                      Width="32" Height="32" VerticalAlignment="Top" IconSize="17"
+                      IconData="M 4,4 L 16,16 M 16,4 L 4,16" IconStroke="#EDE9F4"
+                      ToolTip.Tip="{app:Tr Key=ui.close}" />
+    </Grid>
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Spacing="14">
+        <Border Background="#2D2735" CornerRadius="6" Padding="18">
+          <StackPanel Spacing="12">
+            <TextBlock Text="{app:Tr Key=settings.data_directory}" FontSize="17" FontWeight="Bold" />
+            <TextBlock Text="{app:Tr Key=settings.data_directory_hint}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
+            <Border IsVisible="{Binding HasRunningDataServers}" Background="#3D301F"
+                    BorderBrush="#A87A3E" BorderThickness="1" CornerRadius="5" Padding="10,8">
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="9">
+                <Path Data="M 10,2 L 19,18 L 1,18 Z M 10,7 L 10,12 M 10,15 L 10,15.5"
+                      Stroke="#F0C57F" StrokeThickness="1.6" Width="20" Height="20"
+                      VerticalAlignment="Top" />
+                <TextBlock Grid.Column="1" Text="{app:Tr Key=settings.running_servers_warning}" TextWrapping="Wrap"
+                           Foreground="#F0C57F" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+              <TextBox x:Name="DataDirectoryPath" IsReadOnly="True" />
+              <Button x:Name="ChooseDataDirectoryButton" Grid.Column="1" Content="{app:Tr Key=settings.choose_directory}"
+                      Click="ChooseDataDirectoryClicked" />
+              <Button x:Name="MoveDataButton" Grid.Column="2" Classes="success" Content="{app:Tr Key=settings.move_data}"
+                      Click="MoveDataClicked" />
+            </Grid>
+            <TextBlock Text="{app:Tr Key=settings.external_servers_hint}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
+          </StackPanel>
+        </Border>
+        <Border Background="#2D2735" CornerRadius="6" Padding="18">
+          <StackPanel Spacing="12">
+            <TextBlock Text="{app:Tr Key=versions.title}" FontSize="17" FontWeight="Bold" />
+            <TextBlock Text="{app:Tr Key=versions.description}" TextWrapping="Wrap" Foreground="#ADA3B6" />
+            <Grid ColumnDefinitions="180,*" ColumnSpacing="9">
+              <StackPanel Spacing="5">
+                <TextBlock Text="{app:Tr Key=versions.branch}" />
+                <TextBox x:Name="BranchNameInput" Text="public" TextChanged="BranchChanged" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Spacing="5">
+                <TextBlock Text="{app:Tr Key=versions.beta_password}" />
+                <TextBox x:Name="BetaPasswordInput" PasswordChar="●" />
+              </StackPanel>
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBox x:Name="VersionInstallPath" IsReadOnly="True" />
+              <Button x:Name="ChooseVersionDirectoryButton" Grid.Column="1" Content="{app:Tr Key=settings.choose_directory}"
+                      Click="ChooseVersionDirectoryClicked" />
+            </Grid>
+            <Button x:Name="InstallVersionButton" Classes="success" HorizontalAlignment="Left"
+                    Content="{app:Tr Key=versions.install}" Click="InstallVersionClicked"
+                    IsEnabled="{Binding CanInstall}" />
+            <ProgressBar IsVisible="{Binding IsBusy}" Height="5" Minimum="0" Maximum="100"
+                         Value="{Binding ProgressPercent}" IsIndeterminate="{Binding ProgressIndeterminate}" />
+            <TextBlock Text="{Binding Message}" FontSize="11" Foreground="#C9B8E0"
+                       TextWrapping="Wrap" />
+            <ListBox x:Name="VersionList" ItemsSource="{Binding Installations}" MinHeight="84" MaxHeight="220"
+                     SelectionChanged="VersionSelectionChanged">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="app:ServerInstallation">
+                  <StackPanel Spacing="2" Margin="4,3">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Details}" FontSize="11" Foreground="#ADA3B6"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <Button x:Name="UpdateVersionButton" HorizontalAlignment="Left"
+                    Content="{app:Tr Key=versions.update_selected}" Click="UpdateVersionClicked"
+                    IsEnabled="False" />
+          </StackPanel>
+        </Border>
+        <Border Background="#2D2735" CornerRadius="6" Padding="18">
+          <StackPanel Spacing="12">
+            <TextBlock Text="{app:Tr Key=ui.language}" FontSize="17" FontWeight="Bold" />
+            <TextBlock Text="{app:Tr Key=ui.language_description}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <ComboBox x:Name="LanguageChoice" MinWidth="220" />
+              <Button Grid.Column="1" Classes="success" Content="{app:Tr Key=ui.save_language}"
+                      Click="SaveLanguageClicked" />
+            </Grid>
+            <TextBlock Text="{app:Tr Key=ui.translation_files_hint}" Foreground="#ADA3B6"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+        <Border Background="#2D2735" CornerRadius="6" Padding="18">
+          <StackPanel Spacing="12">
+            <TextBlock Text="{app:Tr Key=ui.marketplace_catalog_sources}" FontSize="17" FontWeight="Bold" />
+            <TextBlock Text="{app:Tr Key=ui.catalog_source_description}"
+                       TextWrapping="Wrap" Foreground="#ADA3B6" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBox Text="{Binding CatalogUrlDraft, Mode=TwoWay}" PlaceholderText="https://example.org/briefcase-catalog.json" />
+              <Button Grid.Column="1" Classes="success" Content="{app:Tr Key=ui.add_source}" Click="AddCatalogClicked" />
+            </Grid>
+            <ListBox x:Name="CatalogList" ItemsSource="{Binding CatalogUrls}" MinHeight="110" />
+            <Button Classes="danger" Content="{app:Tr Key=ui.remove_selected_source}" Click="RemoveCatalogClicked"
+                    HorizontalAlignment="Left" />
+          </StackPanel>
+        </Border>
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Foreground="#ADA3B6" />
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>
+

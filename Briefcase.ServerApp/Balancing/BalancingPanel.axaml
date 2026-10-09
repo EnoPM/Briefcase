@@ -1,0 +1,113 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:Briefcase.ServerApp"
+             x:Class="Briefcase.ServerApp.BalancingPanel"
+             x:DataType="app:BalancingPanel">
+  <UserControl.Styles>
+    <Style Selector="Button.balance-folder">
+      <Setter Property="Background" Value="#292431" />
+      <Setter Property="BorderBrush" Value="#3B3346" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+    </Style>
+    <Style Selector="Button.balance-folder:pointerover">
+      <Setter Property="Background" Value="#342A40" />
+      <Setter Property="BorderBrush" Value="#725297" />
+    </Style>
+    <Style Selector="ListBox#BalanceTree ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,0,3" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBox#BalanceTree ListBoxItem:pointerover">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox#BalanceTree ListBoxItem:selected">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+  </UserControl.Styles>
+  <Grid Margin="4,12,4,4" RowDefinitions="Auto,Auto,*" RowSpacing="10">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+      <StackPanel Spacing="3">
+        <TextBlock Text="{app:Tr Key=ui.balancing}" FontSize="19" FontWeight="Bold" />
+        <TextBlock Text="{app:Tr Key=ui.tune_the_dedicated_server_s_community_balance_profile_restart_a_running_server_after_saving}"
+                   Foreground="#ADA3B6" TextWrapping="Wrap" />
+      </StackPanel>
+      <Button Grid.Column="1" Click="ReloadClicked" VerticalAlignment="Top">
+        <StackPanel Orientation="Horizontal" Spacing="7">
+          <Path Data="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" Stroke="#F5ECFF" StrokeThickness="1.7" Width="16" Height="16" />
+          <TextBlock Text="{app:Tr Key=ui.reload}" />
+        </StackPanel>
+      </Button>
+      <Button Grid.Column="2" Classes="success" Click="SaveClicked" IsEnabled="{Binding CanSave}" VerticalAlignment="Top">
+        <StackPanel Orientation="Horizontal" Spacing="7">
+          <Path Data="M 3,3 L 15,3 L 17,5 L 17,17 L 3,17 Z M 6,3 L 6,8 L 14,8 L 14,3 M 6,17 L 6,11 L 14,11 L 14,17" Stroke="#F5ECFF" StrokeThickness="1.5" Width="16" Height="16" />
+          <TextBlock Text="{app:Tr Key=ui.save_changes}" />
+        </StackPanel>
+      </Button>
+    </Grid>
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <TextBox x:Name="SearchBox" PlaceholderText="{app:Tr Key=ui.search_by_name_table_key_or_value}"
+               TextChanged="SearchChanged" />
+      <TextBlock Grid.Column="1" Text="{Binding ResultCount}" Foreground="#AFA6BB"
+                 VerticalAlignment="Center" />
+    </Grid>
+
+    <Border Grid.Row="2" Background="#211D29" BorderBrush="#332D3D"
+            BorderThickness="1" CornerRadius="6" Padding="10">
+      <Grid RowDefinitions="Auto,*" RowSpacing="5">
+        <TextBlock Text="{Binding Message}" Foreground="#ADA3B6" TextWrapping="Wrap" />
+        <ListBox x:Name="BalanceTree" Grid.Row="1" ItemsSource="{Binding VisibleRows}"
+                 Background="Transparent" BorderThickness="0"
+                 HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="app:BalanceTreeRow">
+              <Grid ColumnDefinitions="*" HorizontalAlignment="Stretch">
+                <Button Classes="balance-folder" IsVisible="{Binding IsFolder}"
+                        Click="ToggleNodeClicked" Padding="7,3" MinHeight="32"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        ToolTip.Tip="{Binding Node.Path}">
+                  <Grid Margin="{Binding Indent}" ColumnDefinitions="16,28,*,Auto"
+                        ColumnSpacing="7" HorizontalAlignment="Stretch">
+                    <Path Data="{Binding Chevron}" Stroke="#BCA8D0" StrokeThickness="1.8"
+                          Width="14" Height="14" VerticalAlignment="Center" />
+                    <Image Grid.Column="1" Source="{Binding Icon}" IsVisible="{Binding HasIcon}"
+                           Width="25" Height="25" Stretch="Uniform" VerticalAlignment="Center"
+                           RenderOptions.BitmapInterpolationMode="HighQuality" />
+                    <Path Grid.Column="1" Data="{Binding Glyph}" IsVisible="{Binding HasGlyph}"
+                          Stroke="#B292DD" StrokeThickness="1.5" Width="19" Height="19"
+                          Stretch="Uniform" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding Title}" FontSize="13"
+                               FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="3" Text="{Binding Count}" FontSize="10"
+                               Foreground="#A99CBD" VerticalAlignment="Center" />
+                  </Grid>
+                </Button>
+                <Border IsVisible="{Binding IsField}" Background="#2A2432" CornerRadius="4"
+                        Padding="10,5" HorizontalAlignment="Stretch" ToolTip.Tip="{Binding Hint}">
+                  <Grid Margin="{Binding Indent}" ColumnDefinitions="*,170"
+                        ColumnSpacing="12" MinHeight="34" HorizontalAlignment="Stretch">
+                    <TextBlock Text="{Binding Title}" FontSize="12" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBox Grid.Column="1" Text="{Binding Value, Mode=TwoWay}"
+                             IsVisible="{Binding IsNumber}" MinHeight="30" VerticalAlignment="Center" />
+                    <CheckBox Grid.Column="1" IsChecked="{Binding BoolValue, Mode=TwoWay}"
+                              IsVisible="{Binding IsBoolean}" HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+                  </Grid>
+                </Border>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

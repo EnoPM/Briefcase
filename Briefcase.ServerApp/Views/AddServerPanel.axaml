@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:Briefcase.ServerApp"
+             x:Class="Briefcase.ServerApp.AddServerPanel">
+  <StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <TextBlock Text="{app:Tr Key=add.server_title}" FontSize="21" FontWeight="Bold"
+                 VerticalAlignment="Center" />
+      <app:IconButton Grid.Column="1" Classes="icon-button" Click="CancelClicked"
+                      Width="32" Height="32" IconSize="17"
+                      IconData="M 4,4 L 16,16 M 16,4 L 4,16" IconStroke="#EDE9F4"
+                      ToolTip.Tip="{app:Tr Key=ui.close}" />
+    </Grid>
+
+    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+      <Border x:Name="InstallChoiceCard" Background="#392D49" BorderBrush="#7350C6"
+              BorderThickness="1" CornerRadius="6" Padding="12,9"
+              PointerPressed="InstallChoicePressed">
+        <RadioButton x:Name="InstallChoice" Content="{app:Tr Key=add.create_from_version}"
+                     GroupName="ServerSource" IsChecked="True" />
+      </Border>
+      <Border x:Name="ExistingChoiceCard" Grid.Column="1" Background="#2D2735"
+              BorderBrush="#493B58" BorderThickness="1" CornerRadius="6" Padding="12,9"
+              PointerPressed="ExistingChoicePressed">
+        <RadioButton x:Name="ExistingChoice" Content="{app:Tr Key=add.use_existing}"
+                     GroupName="ServerSource" />
+      </Border>
+    </Grid>
+
+    <StackPanel x:Name="InstallFields" Spacing="14">
+      <StackPanel Spacing="6">
+        <TextBlock Text="{app:Tr Key=install.server_name}" FontWeight="SemiBold" />
+        <TextBox x:Name="ServerNameInput" MaxLength="48" />
+      </StackPanel>
+      <StackPanel Spacing="6">
+        <TextBlock Text="{app:Tr Key=versions.choose_version}" FontWeight="SemiBold" />
+        <ComboBox x:Name="VersionChoice" HorizontalAlignment="Stretch">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="app:ServerInstallation">
+              <TextBlock Text="{Binding DisplayName}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <TextBlock Text="{app:Tr Key=versions.install_first_hint}" Foreground="#ADA3B6"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+    </StackPanel>
+
+    <StackPanel x:Name="ExistingFields" Spacing="10" IsVisible="False">
+      <TextBlock Text="{app:Tr Key=add.existing_hint}" Foreground="#ADA3B6"
+                 TextWrapping="Wrap" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <TextBox x:Name="ExistingExecutablePath" IsReadOnly="True" />
+        <Button Grid.Column="1" Content="{app:Tr Key=add.select_executable}"
+                Click="BrowseExistingClicked" />
+      </Grid>
+    </StackPanel>
+
+    <TextBlock x:Name="ValidationMessage" Foreground="#EDAFBA" TextWrapping="Wrap" />
+    <Button x:Name="ConfirmButton" Classes="success" Content="{app:Tr Key=install.install_button}"
+            Click="ConfirmClicked" HorizontalAlignment="Right" />
+  </StackPanel>
+</UserControl>

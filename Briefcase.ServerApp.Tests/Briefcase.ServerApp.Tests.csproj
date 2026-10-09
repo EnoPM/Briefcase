@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Briefcase.ServerApp/Briefcase.ServerApp.csproj" />
+    <Compile Include="../Briefcase.ServerApp.Launcher/Updates/AppUpdateStore.cs" Link="Updates/AppUpdateStore.cs" />
+    <Compile Include="../Briefcase.ServerApp.Launcher/Updates/LauncherUpdateService.cs" Link="Updates/LauncherUpdateService.cs" />
+    <Content Include="../Briefcase.ServerApp/Translations/*.json" Link="Translations/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
