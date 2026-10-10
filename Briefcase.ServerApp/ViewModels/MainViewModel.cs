@@ -153,7 +153,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public int FormAssetsRevision { get; private set; }
     public bool HasMarketplaceMods => MarketplaceMods.Count > 0;
     public bool NoMarketplaceMods => MarketplaceMods.Count == 0;
-    public bool CanInstallMarketplaceMod => CanManageMods && HasMarketplaceMods;
     private string _catalogUrlDraft = "";
     public string CatalogUrlDraft { get => _catalogUrlDraft; set => Set(ref _catalogUrlDraft, value); }
 
@@ -163,7 +162,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             OnPropertyChanged(nameof(HasMarketplaceMods));
             OnPropertyChanged(nameof(NoMarketplaceMods));
-            OnPropertyChanged(nameof(CanInstallMarketplaceMod));
         };
         Mods.CollectionChanged += (_, _) =>
         {
@@ -225,7 +223,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(CanStart));
                 OnPropertyChanged(nameof(CanDelete));
                 OnPropertyChanged(nameof(CanManageMods));
-                OnPropertyChanged(nameof(CanInstallMarketplaceMod));
                 if (IsDemo) ApplyDemoProfile();
             }
         }
@@ -349,12 +346,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             serverName: AppDataStore.ValidateServerName(serverName));
     }
 
-    public async Task InstallSteamVersionAsync(string branch, string? betaPassword, string? installRoot = null)
+    public async Task<bool> InstallSteamVersionAsync(string branch, string? betaPassword, string? installRoot = null)
     {
-        if (IsDemo) { ReportPreviewOnly(); return; }
-        if (IsBusy) return;
+        if (IsDemo) { ReportPreviewOnly(); return false; }
+        if (IsBusy) return false;
         IsBusy = true;
         ProgressIndeterminate = true;
+        ProgressPercent = 0;
         try
         {
             branch = ServerInstallation.ValidateBranch(branch);
@@ -367,17 +365,34 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (running is not null)
                     throw new InvalidOperationException("Stop all servers using this version before updating it.");
             }
-            var progress = new Progress<string>(ReportProgress);
-            await new SteamCmdService(AppDataStore.SteamCmdRoot).InstallOrUpdateAsync(
-                root, existing is not null && File.Exists(existing.Shipping), progress,
-                CancellationToken.None, branch, betaPassword);
+            using var progress = new OperationProgress(ReportProgress);
+            var updating = existing is not null && File.Exists(existing.Shipping);
+            var tools = AppDataStore.SteamCmdRoot;
+            if (ElevatedUpdateService.NeedsElevation(root) || ElevatedUpdateService.NeedsElevation(tools))
+                await ElevatedUpdateService.InstallSteamVersionAsync(root, updating, branch, betaPassword,
+                    progress, CancellationToken.None);
+            else
+            {
+                try
+                {
+                    await new SteamCmdService(tools).InstallOrUpdateAsync(root, updating, progress,
+                        CancellationToken.None, branch, betaPassword);
+                }
+                catch (Exception ex) when (ElevatedUpdateService.AccessDenied(ex))
+                {
+                    await ElevatedUpdateService.InstallSteamVersionAsync(root, updating, branch, betaPassword,
+                        progress, CancellationToken.None);
+                }
+            }
             if (existing is null) Registry.AddInstallation(branch, root);
             else Registry.RefreshInstallation(existing);
             Message = AppTranslations.Format("versions.installed", "Steam branch {0} is ready.", branch);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
-            InvalidDataException or ArgumentException or System.Net.Http.HttpRequestException)
-        { Message = ex.Message; }
+            InvalidDataException or ArgumentException or System.Net.Http.HttpRequestException or
+            Win32Exception or OperationCanceledException)
+        { Message = ex.Message; return false; }
         finally { IsBusy = false; await RefreshAsync(); }
     }
 
@@ -625,14 +640,35 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (serverName is not null && !sharedInstall && Directory.Exists(folder) &&
                 Directory.EnumerateFileSystemEntries(folder).Any())
                 throw new InvalidDataException("Choose an empty folder for the new server.");
-            var progress = new Progress<string>(ReportProgress);
+            using var progress = new OperationProgress(ReportProgress);
             var tools = AppDataStore.SteamCmdRoot;
-            var shipping = await new SteamCmdService(tools).InstallOrUpdateAsync(folder, false, progress, CancellationToken.None);
+            string shipping;
+            if (ElevatedUpdateService.NeedsElevation(folder) || ElevatedUpdateService.NeedsElevation(tools))
+            {
+                await ElevatedUpdateService.InstallSteamVersionAsync(folder, false, "public", null,
+                    progress, CancellationToken.None);
+                shipping = existingShipping;
+            }
+            else
+            {
+                try
+                {
+                    shipping = await new SteamCmdService(tools).InstallOrUpdateAsync(folder, false, progress,
+                        CancellationToken.None);
+                }
+                catch (Exception ex) when (ElevatedUpdateService.AccessDenied(ex))
+                {
+                    await ElevatedUpdateService.InstallSteamVersionAsync(folder, false, "public", null,
+                        progress, CancellationToken.None);
+                    shipping = existingShipping;
+                }
+            }
+            if (!File.Exists(shipping)) throw new IOException("The dedicated server installation is incomplete.");
             AddServer(shipping, managed: true, serverName: serverName);
             Message = AppTranslations.Get("status.server_installed");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
-            InvalidDataException or System.Net.Http.HttpRequestException)
+            InvalidDataException or System.Net.Http.HttpRequestException or Win32Exception)
         {
             Message = ex.Message;
         }
@@ -652,7 +688,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (Installations.Any(item => item.Win64.Equals(location!.Win64, StringComparison.OrdinalIgnoreCase) &&
                 item.Branch != "public"))
                 throw new InvalidOperationException("Update beta server versions from application settings.");
-            var progress = new Progress<string>(ReportProgress);
+            using var progress = new OperationProgress(ReportProgress);
             var tools = AppDataStore.SteamCmdRoot;
             if (ElevatedUpdateService.NeedsElevation(root) || ElevatedUpdateService.NeedsElevation(tools))
                 await ElevatedUpdateService.RunAsync("game", location!.Win64, progress, CancellationToken.None);
@@ -668,7 +704,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Message = AppTranslations.Get("status.server_current");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
-            InvalidDataException or System.Net.Http.HttpRequestException)
+            InvalidDataException or System.Net.Http.HttpRequestException or Win32Exception)
         {
             Message = ex.Message;
         }
@@ -717,10 +753,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     { formError ??= error.Message; }
                 }
             }
-            list = list.Select(mod =>
-            {
-                return mod with { Status = MarketplaceStatus(location!, mod) };
-            }).ToList();
+            list = list.Select(mod => WithMarketplaceStatus(location!, mod)).ToList();
         }
         using var logoGate = new SemaphoreSlim(4);
         var withLogos = await Task.WhenAll(list.Select(async mod =>
@@ -736,15 +769,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return formError is null ? summary : summary + " Mod form update failed: " + formError;
     });
 
-    private static string MarketplaceStatus(ServerLocation location, MarketplaceMod mod)
+    private static MarketplaceMod WithMarketplaceStatus(ServerLocation location, MarketplaceMod mod)
     {
         var version = ModMarketplace.InstalledVersion(location, mod.Id);
         var exists = Directory.Exists(Path.Combine(location.ModsRoot, mod.Id));
-        return !exists ? AppTranslations.Get("market.not_installed") : version.Length == 0
+        var updateAvailable = exists && (version.Length == 0 || GitHubReleaseService.IsNewer(mod.Version, version));
+        var status = !exists ? AppTranslations.Get("market.not_installed") : version.Length == 0
             ? AppTranslations.Get("market.installed_unknown")
-            : GitHubReleaseService.IsNewer(mod.Version, version)
+            : updateAvailable
                 ? AppTranslations.Format("market.update_from", "Update available from {0}", version)
                 : AppTranslations.Get("market.current");
+        return mod with { Status = status, IsInstalled = exists, CanApply = !exists || updateAvailable };
     }
 
     private void RefreshMarketplaceStatuses(ServerLocation location)
@@ -752,8 +787,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         for (var index = 0; index < MarketplaceMods.Count; index++)
         {
             var mod = MarketplaceMods[index];
-            var status = MarketplaceStatus(location, mod);
-            if (status != mod.Status) MarketplaceMods[index] = mod with { Status = status };
+            var updated = WithMarketplaceStatus(location, mod);
+            if (updated.Status != mod.Status || updated.IsInstalled != mod.IsInstalled || updated.CanApply != mod.CanApply)
+                MarketplaceMods[index] = updated;
         }
     }
 
@@ -762,6 +798,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (!ServerLocation.TryCreate(SelectedServer, out var location, out var error)) throw new InvalidDataException(error);
         using (var running = ServerProcess.Find(location!))
             if (running is not null) throw new InvalidOperationException("Stop the server before installing or updating a mod.");
+        if (!ModMarketplace.BriefcaseRuntimeInstalled(location!))
+            throw new InvalidOperationException("Install Briefcase before installing mods.");
         async Task InstallNormallyAsync()
         {
             var market = new ModMarketplace();
@@ -780,7 +818,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         async Task InstallElevatedAsync() => await ElevatedUpdateService.RunAsync("mod", location!.Win64,
             progress, CancellationToken.None, mod.Catalog, mod.Id, mod.Sha256,
-            location.InstanceRoot, location.InstanceId);
+            location.InstanceRoot, location.InstanceId, Registry.DataDirectory);
         if (ElevatedUpdateService.NeedsElevation(location!.Win64) ||
             ElevatedUpdateService.NeedsElevation(location.ModsRoot))
             await InstallElevatedAsync();
@@ -1087,8 +1125,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task InstallCppRuntimeAsync() => await RunBusyAsync(async progress =>
     {
-        if (!ServerLocation.TryCreate(SelectedServer, out var location, out var error)) throw new InvalidDataException(error);
-        var folder = Path.Combine(location!.BriefcaseRoot, "Updates", "ServerAppDownloads");
+        var folder = Path.Combine(Path.GetTempPath(), "Briefcase", "InstallerDownloads");
         return await new VisualCppInstaller().InstallAsync(folder, progress, CancellationToken.None);
     });
 
@@ -1098,7 +1135,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (IsBusy) return;
         IsBusy = true;
         ProgressIndeterminate = true;
-        try { Message = await action(new Progress<string>(ReportProgress)); }
+        try
+        {
+            using var progress = new OperationProgress(ReportProgress);
+            Message = await action(progress);
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Message = ex.Message; }
         finally { IsBusy = false; await RefreshAsync(); }
     }
@@ -1306,7 +1347,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private async Task InstallKnownUpdatesBeforeStartAsync(ServerLocation location)
     {
-        var progress = new Progress<string>(ReportProgress);
+        using var progress = new OperationProgress(ReportProgress);
         if (BriefcaseActionVisible && GitHubReleaseService.InstalledBriefcaseVersion(location) is not null)
         {
             Message = "Updating Briefcase before server startup…";
@@ -1364,6 +1405,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return true;
     }
     private void OnPropertyChanged(string? property) => PropertyChanged?.Invoke(this, new(property));
+
+    private sealed class OperationProgress : IProgress<string>, IDisposable
+    {
+        private readonly IProgress<string> _dispatcher;
+        private int _completed;
+
+        public OperationProgress(Action<string> report) => _dispatcher = new Progress<string>(line =>
+        {
+            if (Volatile.Read(ref _completed) == 0) report(line);
+        });
+
+        public void Report(string line) => _dispatcher.Report(line);
+        public void Dispose() => Volatile.Write(ref _completed, 1);
+    }
+
     private void ReportProgress(string line)
     {
         Message = line;
@@ -1391,7 +1447,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CanStop));
         OnPropertyChanged(nameof(CanRestart));
         OnPropertyChanged(nameof(CanManageMods));
-        OnPropertyChanged(nameof(CanInstallMarketplaceMod));
         OnPropertyChanged(nameof(CanDelete));
         OnPropertyChanged(nameof(CanInstall));
         OnPropertyChanged(nameof(CanCheckUpdates));

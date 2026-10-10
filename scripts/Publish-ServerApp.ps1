@@ -1,14 +1,18 @@
 param(
     [string]$OutputDirectory,
     [string]$NativeBuildDirectory,
-    [switch]$EnableUpdates
+    [switch]$EnableUpdates,
+    [switch]$SkipArchive,
+    [string]$VersionOverride
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
+$version = if ([string]::IsNullOrWhiteSpace($VersionOverride)) {
+    (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
+} else { $VersionOverride.Trim() }
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain a three-part numeric version.' }
 $project = Join-Path $projectRoot 'Briefcase.ServerApp/Briefcase.ServerApp.csproj'
 $launcherProject = Join-Path $projectRoot 'Briefcase.ServerApp.Launcher/Briefcase.ServerApp.Launcher.csproj'
@@ -99,6 +103,20 @@ foreach ($name in $runtimeFiles) {
     Copy-Item -LiteralPath (Join-Path $publishDirectory $name) -Destination (Join-Path $appDirectory $name)
     Copy-Item -LiteralPath (Join-Path $launcherPublishDirectory $name) -Destination (Join-Path $destination $name)
 }
+$launcherFiles = @('Briefcase.Launcher.exe') + $runtimeFiles
+$launcherManifestFiles = @($launcherFiles | ForEach-Object {
+    $file = Join-Path $destination $_
+    [ordered]@{
+        path = $_
+        bytes = (Get-Item -LiteralPath $file).Length
+        sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+})
+$launcherManifestDirectory = Join-Path $destination 'Launcher'
+New-Item -ItemType Directory -Path $launcherManifestDirectory -Force | Out-Null
+$launcherManifest = [ordered]@{ schemaVersion = 1; version = $version; files = $launcherManifestFiles }
+[IO.File]::WriteAllText((Join-Path $launcherManifestDirectory 'manifest.json'),
+    ($launcherManifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
 foreach ($name in $nativeFiles) {
     $source = Join-Path $publishDirectory $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing app-private injection component: $name" }
@@ -139,6 +157,11 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 [IO.File]::WriteAllText((Join-Path $destination 'UpdateSource.json'),
     (@{ schemaVersion = 1; enabled = [bool]$EnableUpdates; repository = 'EnoPM/Briefcase' } | ConvertTo-Json), $utf8)
 
+if ($SkipArchive) {
+    Write-Output "ServerApp AOT folder ready: $destination"
+    return
+}
+
 $archive = Join-Path $distRoot "Briefcase.ServerApp-win-x64-$version.zip"
 if (Test-Path -LiteralPath $archive) {
     $entry = Get-Item -LiteralPath $archive -Force
@@ -165,7 +188,7 @@ try {
     try {
         $actualFiles = @($zip.Entries | ForEach-Object { $_.FullName.Replace([char]92, [char]47) } | Sort-Object)
         $expectedFiles = @(
-            'Briefcase.Launcher.exe', 'UpdateSource.json', 'App/current.json',
+            'Briefcase.Launcher.exe', 'Launcher/manifest.json', 'UpdateSource.json', 'App/current.json',
             'Translations/en.json', 'Translations/fr.json'
         ) + $runtimeFiles + @($manifestFiles | ForEach-Object { "App/versions/$version/$($_.path)" }) +
             @("App/versions/$version/manifest.json")

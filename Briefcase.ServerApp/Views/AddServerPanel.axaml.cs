@@ -11,11 +11,12 @@ public sealed partial class AddServerPanel : UserControl
 {
     public AddServerPanel() : this([]) { }
 
-    public AddServerPanel(IEnumerable<ServerInstallation> installations)
+    public AddServerPanel(IEnumerable<ServerInstallation> installations, bool preferExisting = false)
     {
         InitializeComponent();
         VersionChoice.ItemsSource = installations.ToArray();
         VersionChoice.SelectedIndex = VersionChoice.ItemCount > 0 ? 0 : -1;
+        if (preferExisting) ExistingChoice.IsChecked = true;
         InstallChoice.PropertyChanged += (_, args) =>
         {
             if (args.Property == ToggleButton.IsCheckedProperty) UpdateMode();

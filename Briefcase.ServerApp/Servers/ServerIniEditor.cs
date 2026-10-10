@@ -10,9 +10,55 @@ public static class ServerIniEditor
     [
         ("DI_Hardsell", "Hard Sell"), ("DI_SR", "Silver Reef"), ("DI_DS", "Diamond Spire"),
         ("DI_FS", "Fragrant Shore"), ("DI_SE", "Sound Eclipse"),
-        ("DI_FSN", "Fragrant Shore (Night)"), ("DI_HSD", "Hard Sell (Morning)")
+        ("DI_HSD", "Hard Sell (Morning)"), ("DI_FSN", "Fragrant Shore (Night)")
     ];
     public static IReadOnlyList<FormField> Fields => FormSchema.LoadBase().Fields;
+
+    public static void WriteDefault(string file, string? name = null)
+    {
+        var values = FormSchema.LoadBase().Defaults();
+        values["ServerName"] = name is null ? values["ServerName"] : AppDataStore.ValidateServerName(name);
+        var lines = new List<string>
+        {
+            "[" + Section + "]",
+            "ServerName=" + values["ServerName"],
+            "MaxPlayers=" + values["MaxPlayers"],
+            "ServerRegion=" + values["ServerRegion"],
+            "GameMode=" + values["GameMode"]
+        };
+        lines.AddRange(new[] { "Hardsell", "Silverreef", "Diamondspire", "FragrantShore",
+            "SoundEclipse", "Hardsell_Day", "FragrantShore_Night" }.Select(map => "MapRotation=" + map));
+        lines.AddRange([
+            "Password=" + values["Password"],
+            "bCrossplay=" + values["bCrossplay"],
+            "Platform=PC",
+            "bIsPublic=" + values["bIsPublic"],
+            "bIsOfficial=False",
+            "GamePort=" + values["GamePort"],
+            "QueryPort=" + values["QueryPort"],
+            "bEnableUPnP=" + values["bEnableUPnP"],
+            "AdminPassword=",
+            "AutoShutdownEmptyMinutes=" + values["AutoShutdownEmptyMinutes"],
+            "bSandboxMode=" + values["bSandboxMode"],
+            "bFillWithBots=" + values["bFillWithBots"],
+            "BotsDifficulty=" + values["BotsDifficulty"],
+            "bRandomizeMap=" + values["bRandomizeMap"],
+            "BotsAmount=" + values["BotsAmount"],
+            "HeatPercentDamagingCivilian=" + values["HeatPercentDamagingCivilian"],
+            "HeatPercentDamagingStaff=" + values["HeatPercentDamagingStaff"],
+            "HeatPercentDamagingGuard=" + values["HeatPercentDamagingGuard"],
+            "HeatPercentDamagingTechnician=" + values["HeatPercentDamagingTechnician"],
+            "HeatPercentDamagingVIP=" + values["HeatPercentDamagingVIP"],
+            "ScoldHeatPerSecond=" + values["ScoldHeatPerSecond"],
+            "HeatDelayForSpyHit=" + values["HeatDelayForSpyHit"],
+            "HeatDelayPassiveGain=" + values["HeatDelayPassiveGain"],
+            "HeatDelayAggroPostCover=" + values["HeatDelayAggroPostCover"],
+            "HeatDelayToDecay=" + values["HeatDelayToDecay"],
+            "HeatDecayRate=" + values["HeatDecayRate"]
+        ]);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllLines(file, lines, new UTF8Encoding(false));
+    }
 
     public static string? ReadConfiguredServerName(string file)
     {
@@ -91,7 +137,10 @@ public static class ServerIniEditor
             {
                 rotationSpecified = true;
                 foreach (var map in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-                    maps.Add(map.Trim('"'));
+                {
+                    var id = map.Trim('"');
+                    maps.Add(AppTranslations.TryResolveMapAlias(id, out var alias) ? alias : id);
+                }
             }
             else if (schema.Fields.Any(field => field.Key.Equals(key, StringComparison.OrdinalIgnoreCase) &&
                          (field.Section.Length == 0 ? schema.Section : field.Section) == activeSection))

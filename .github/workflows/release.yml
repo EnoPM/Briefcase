@@ -1,0 +1,217 @@
+name: Publish Briefcase ServerApp
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Keep the release as a draft after verification
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: briefcase-serverapp-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    env:
+      RUSTUP_TOOLCHAIN: 1.97.1
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: serverapp
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate application version and pinned native source
+        run: |
+          if ($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_REPOSITORY -cne 'EnoPM/Briefcase') {
+            throw 'Releases must be built from EnoPM/Briefcase main.'
+          }
+          $version = (Get-Content serverapp/VERSION -Raw).Trim()
+          $nativeRef = (Get-Content serverapp/NativeSource.ref -Raw).Trim()
+          if ($version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw 'Invalid application VERSION.'
+          }
+          if ($nativeRef -cnotmatch '^[a-f0-9]{40}$') { throw 'NativeSource.ref must pin a commit SHA.' }
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "NATIVE_REF=$nativeRef" >> $env:GITHUB_ENV
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: EnoPM/BriefcaseNative
+          ref: ${{ env.NATIVE_REF }}
+          path: BriefcaseNative
+          persist-credentials: false
+
+      - name: Configure compiler cache
+        uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+        with:
+          version: v0.16.0
+
+      - name: Fetch pinned native dependencies
+        env:
+          UPSTREAM_READ_TOKEN: ${{ secrets.UPSTREAM_READ_TOKEN }}
+        run: |
+          if (-not $env:UPSTREAM_READ_TOKEN) {
+            throw 'UPSTREAM_READ_TOKEN is required for the gated Unreal submodule.'
+          }
+          rustup toolchain install 1.97.1 --profile minimal --no-self-update
+          if ($LASTEXITCODE) { throw 'Rust toolchain installation failed.' }
+          $encoded = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes('x-access-token:' + $env:UPSTREAM_READ_TOKEN))
+          Write-Output "::add-mask::$encoded"
+          $env:GIT_CONFIG_COUNT = '1'
+          $env:GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'
+          $env:GIT_CONFIG_VALUE_0 = 'AUTHORIZATION: basic ' + $encoded
+          ./BriefcaseNative/scripts/build/Fetch-Dependencies.ps1
+
+      - name: Configure native injector build
+        run: ./BriefcaseNative/scripts/build/Build.ps1 -ConfigureOnly
+
+      - name: Test application contracts and marketplace catalog
+        working-directory: serverapp
+        run: |
+          dotnet run --project Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj -c Release
+          if ($LASTEXITCODE) { throw 'ServerApp contracts failed.' }
+          dotnet run --project Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj -c Release -- --verify-catalog marketplace/catalog.json
+          if ($LASTEXITCODE) { throw 'Marketplace catalog verification failed.' }
+
+      - name: Publish launcher and application AOT archive
+        working-directory: serverapp
+        run: |
+          ./scripts/Publish-ServerApp.ps1 -NativeBuildDirectory ../BriefcaseNative/build -EnableUpdates
+          $archive = "dist/Briefcase.ServerApp-win-x64-$env:RELEASE_VERSION.zip"
+          $testInstall = Join-Path $env:RUNNER_TEMP 'BriefcaseArchiveSmoke'
+          dotnet run --project Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj -c Release -- --verify-update-archive $archive $testInstall $env:RELEASE_VERSION
+          if ($LASTEXITCODE) { throw 'AOT release archive verification failed.' }
+
+      - name: Install verified Inno Setup compiler
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $setup
+          $digest = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -cne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+            throw 'Inno Setup installer checksum mismatch.'
+          }
+          $compilerDir = Join-Path $env:RUNNER_TEMP 'InnoSetupCompiler'
+          $process = Start-Process -FilePath $setup -WindowStyle Hidden -Wait -PassThru -ArgumentList @('/CURRENTUSER', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$compilerDir")
+          if ($process.ExitCode -ne 0 -or -not (Test-Path (Join-Path $compilerDir 'ISCC.exe'))) {
+            throw 'Inno Setup compiler installation failed.'
+          }
+          "INNO_COMPILER=$(Join-Path $compilerDir 'ISCC.exe')" >> $env:GITHUB_ENV
+
+      - name: Compile and smoke-test Windows installer
+        working-directory: serverapp
+        run: |
+          & $env:INNO_COMPILER "/DAppVersion=$env:RELEASE_VERSION" installer/Briefcase.iss
+          if ($LASTEXITCODE) { throw 'Inno Setup compilation failed.' }
+          $installer = "dist/Briefcase-Setup-$env:RELEASE_VERSION-win-x64.exe"
+          if (-not (Test-Path $installer)) { throw 'Installer output is missing.' }
+          $smoke = Join-Path $env:RUNNER_TEMP 'BriefcaseInstallerSmoke'
+          $installArgs = @('/CURRENTUSER', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$smoke")
+          $process = Start-Process -FilePath (Resolve-Path $installer) -WindowStyle Hidden -Wait -PassThru -ArgumentList $installArgs
+          if ($process.ExitCode -ne 0) { throw 'Silent installer test failed.' }
+          foreach ($file in @(
+            'Briefcase.Launcher.exe',
+            'Launcher/manifest.json',
+            'App/current.json',
+            "App/versions/$env:RELEASE_VERSION/Briefcase.ServerApp.exe",
+            "App/versions/$env:RELEASE_VERSION/Native/Briefcase.ServerInjector.exe",
+            "App/versions/$env:RELEASE_VERSION/Native/Briefcase.ServerBootstrap.dll"
+          )) {
+            if (-not (Test-Path (Join-Path $smoke $file))) { throw "Installer omitted $file" }
+          }
+          $active = Get-Content (Join-Path $smoke 'App/current.json') -Raw | ConvertFrom-Json
+          if ($active.version -cne $env:RELEASE_VERSION) { throw 'Installer activated the wrong version.' }
+          $newer = '{0}.{1}.{2}' -f (([int]($env:RELEASE_VERSION.Split('.')[0])) + 1), 0, 0
+          $pointer = Join-Path $smoke 'App/current.json'
+          $launcher = Join-Path $smoke 'Briefcase.Launcher.exe'
+          [IO.File]::WriteAllText($pointer, ('{"version":"' + $newer + '"}'))
+          [IO.File]::WriteAllBytes($launcher, [byte[]](42, 17, 90, 128))
+          $process = Start-Process -FilePath (Resolve-Path $installer) -WindowStyle Hidden -Wait -PassThru -ArgumentList $installArgs
+          if ($process.ExitCode -ne 0 -or (Get-Content $pointer -Raw | ConvertFrom-Json).version -cne $newer -or
+              (([IO.File]::ReadAllBytes($launcher) -join ',') -cne '42,17,90,128')) {
+            throw 'An older installer replaced a newer launcher or active app version.'
+          }
+          $uninstaller = Join-Path $smoke 'unins000.exe'
+          $process = Start-Process -FilePath $uninstaller -WindowStyle Hidden -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+          if ($process.ExitCode -ne 0) { throw 'Silent uninstaller test failed.' }
+
+      - name: Store verified release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: serverapp-windows-release
+          path: |
+            serverapp/dist/Briefcase.ServerApp-win-x64-${{ env.RELEASE_VERSION }}.zip
+            serverapp/dist/Briefcase-Setup-${{ env.RELEASE_VERSION }}-win-x64.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: serverapp
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: serverapp-windows-release
+          path: release
+
+      - name: Create and verify draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_DRAFT: ${{ inputs.draft }}
+        run: |
+          $version = (Get-Content serverapp/VERSION -Raw).Trim()
+          $archive = "release/Briefcase.ServerApp-win-x64-$version.zip"
+          $installer = "release/Briefcase-Setup-$version-win-x64.exe"
+          $notes = Join-Path $env:RUNNER_TEMP 'briefcase-release-notes.md'
+          @(
+            "Briefcase $version for Windows x64.",
+            '',
+            'Use the installer for a first installation, or extract the full ZIP and run Briefcase.Launcher.exe.',
+            'The launcher checks for later releases and updates both the application and its own files.'
+          ) | Set-Content -LiteralPath $notes -Encoding utf8
+          gh release create "v$version" $archive $installer --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Briefcase $version" --notes-file $notes --draft
+          if ($LASTEXITCODE) { throw 'Failed to create the draft release.' }
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$version" | ConvertFrom-Json
+          if ($LASTEXITCODE -or -not $release.draft) { throw 'Cannot verify the draft release.' }
+          foreach ($file in @($archive, $installer)) {
+            $name = Split-Path $file -Leaf
+            $matches = @($release.assets | Where-Object { $_.name -ceq $name })
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($matches.Count -ne 1 -or $matches[0].digest -cne "sha256:$hash") {
+              throw "Release asset verification failed: $name"
+            }
+          }
+          if ($env:RELEASE_DRAFT -ne 'true') {
+            gh release edit "v$version" --repo $env:GITHUB_REPOSITORY --draft=false --latest
+            if ($LASTEXITCODE) { throw 'Failed to publish the verified release.' }
+          }

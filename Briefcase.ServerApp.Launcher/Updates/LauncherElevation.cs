@@ -60,6 +60,7 @@ internal static class LauncherElevation
                     if (!Convert.ToHexString(SHA256.HashData(input))
                             .Equals(arguments[4], StringComparison.OrdinalIgnoreCase)) return 1;
                     AppUpdateStore.Prepare(root, archive, arguments[3]);
+                    LauncherUpdateStore.Stage(root, archive, arguments[3]);
                 }
                 else
                 {
@@ -71,7 +72,11 @@ internal static class LauncherElevation
                         !release.Sha256.Equals(arguments[4], StringComparison.OrdinalIgnoreCase)) return 1;
                     var downloaded = updates.DownloadAsync(release, root, new Progress<double>(),
                         CancellationToken.None).GetAwaiter().GetResult();
-                    try { AppUpdateStore.Prepare(root, downloaded, arguments[3]); }
+                    try
+                    {
+                        AppUpdateStore.Prepare(root, downloaded, arguments[3]);
+                        LauncherUpdateStore.Stage(root, downloaded, arguments[3]);
+                    }
                     finally { if (File.Exists(downloaded)) File.Delete(downloaded); }
                 }
                 return 0;

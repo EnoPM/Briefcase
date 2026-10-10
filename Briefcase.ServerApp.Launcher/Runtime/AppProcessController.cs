@@ -8,20 +8,30 @@ public sealed class AppProcessController : IDisposable
 {
     private Process? _owned;
 
-    public async Task<bool> LaunchAndWaitAsync(InstalledApp app, CancellationToken cancellationToken)
+    public async Task<bool> LaunchAndWaitAsync(InstalledApp app, CancellationToken cancellationToken,
+        string? launcherUpdateVersion = null)
     {
-        if (!File.Exists(app.Executable))
+        var useDotnet = app.Version == "0.0.0" && !File.Exists(app.Executable) &&
+                        File.Exists(Path.Combine(app.Directory, "Briefcase.ServerApp.dll"));
+        if (!File.Exists(app.Executable) && !useDotnet)
             throw new FileNotFoundException("Briefcase.ServerApp.exe is missing.", app.Executable);
 
         var signalName = "Local\\Briefcase.ServerApp.Ready." + Guid.NewGuid().ToString("N");
         using var ready = new EventWaitHandle(false, EventResetMode.ManualReset, signalName);
         _owned?.Dispose();
-        _owned = Process.Start(new ProcessStartInfo(app.Executable)
+        var start = new ProcessStartInfo(useDotnet ? "dotnet" : app.Executable)
         {
             WorkingDirectory = app.Directory,
-            UseShellExecute = false,
-            ArgumentList = { "--launcher-ready=" + signalName }
-        }) ?? throw new Win32Exception("Briefcase ServerApp could not be started.");
+            UseShellExecute = false
+        };
+        if (useDotnet) start.ArgumentList.Add(Path.Combine(app.Directory, "Briefcase.ServerApp.dll"));
+        start.ArgumentList.Add("--launcher-ready=" + signalName);
+        if (launcherUpdateVersion is not null)
+        {
+            start.ArgumentList.Add("--launcher-update=" + launcherUpdateVersion);
+            start.ArgumentList.Add("--launcher-pid=" + Environment.ProcessId);
+        }
+        _owned = Process.Start(start) ?? throw new Win32Exception("Briefcase ServerApp could not be started.");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(60));

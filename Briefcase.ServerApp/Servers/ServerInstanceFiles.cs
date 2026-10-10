@@ -14,15 +14,18 @@ public static class ServerInstanceFiles
         Directory.CreateDirectory(root);
         try
         {
-            CopyIfPresent(installation.ConfigFile, Path.Combine(root, "TripwireServer.ini"));
+            if (name is null) CopyIfPresent(installation.ConfigFile, Path.Combine(root, "TripwireServer.ini"));
             CopyIfPresent(installation.BalanceProfileFile, Path.Combine(root, "CommunityBalanceProfile.json"));
             CopyIfMissing(installation.BalanceTemplateFile, Path.Combine(root, "CommunityBalanceProfile.json"));
             var ini = Path.Combine(root, "TripwireServer.ini");
-            if (!File.Exists(ini)) File.WriteAllText(ini, "[/Script/DeceiveInc.TripwireServerSettings]\n");
+            if (!File.Exists(ini))
+            {
+                if (name is null) File.WriteAllText(ini, "[/Script/DeceiveInc.TripwireServerSettings]\n");
+                else ServerIniEditor.WriteDefault(ini, name);
+            }
             CopyTree(Path.Combine(installation.Win64, "ue4ss"), Path.Combine(root, "ue4ss"));
             CopyTree(Path.Combine(installation.BriefcaseRoot, "Mods"), Path.Combine(root, "Briefcase", "Mods"));
             EnsureLegacyNativeModSelection(root);
-            if (name is not null) ServerIniEditor.SaveServerName(Path.Combine(root, "TripwireServer.ini"), name);
             return root;
         }
         catch

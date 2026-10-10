@@ -1,38 +1,67 @@
-# Windows installer plan
+# Windows release and installer
 
-Status: deferred. Keep distributing the complete AOT ZIP until the installer is implemented and tested.
+The release workflow builds a Windows x64 AOT archive and Inno Setup installer.
 
-## Goal and layout
+## Release inputs
 
-Use the existing `scripts/Publish-ServerApp.ps1` output as the installer input. An initial per-user installer (Inno Setup is a suitable candidate) should place the application under `%LOCALAPPDATA%\Programs\Briefcase`, register it with Windows, and create Start menu and optional desktop shortcuts to `Briefcase.Launcher.exe` only. It should not install a dedicated server or any gameplay mods.
+`VERSION` is the application version. `NativeSource.ref` pins the exact published
+BriefcaseNative commit whose injector and bootstrap will be bundled. Update the
+pin whenever a release needs newer native injection components.
 
-Keep the published directory structure intact:
+The release workflow needs the `UPSTREAM_READ_TOKEN` GitHub Actions secret to
+fetch the gated Unreal dependency of BriefcaseNative. The secret is used only
+during the native build. The Inno Setup installer is fetched from its official
+release and checked against a pinned SHA-256 digest before compiling.
 
-```text
-Briefcase.Launcher.exe
-libSkiaSharp.dll, libHarfBuzzSharp.dll, av_libglesv2.dll
-UpdateSource.json
-Translations/en.json, Translations/fr.json
-App/current.json
-App/versions/<version>/Briefcase.ServerApp.exe
-App/versions/<version>/manifest.json
-App/versions/<version>/Native/Briefcase.ServerInjector.exe
-App/versions/<version>/Native/Briefcase.ServerBootstrap.dll
-App/versions/<version>/Translations/en.json, Translations/fr.json
-```
+## Workflow
 
-The installer supplies a complete first version. The launcher remains the entry point for later application updates: it checks the configured release, downloads and verifies the AOT archive, installs a new immutable `App/versions/<version>` directory, starts it, and then changes `App/current.json`. The installer should not become a second automatic updater. A future all-users installation under Program Files may be offered separately; its writes need administrator approval.
+The workflow starts through a manual run on `main`. It defaults to leaving the
+GitHub release as a draft so it can be reviewed before publication.
 
-## Installation and repair rules
+1. Check out ServerApp and the pinned BriefcaseNative source, then fetch native
+   dependencies and configure the injector build.
+2. Run the application contract tests and verify the marketplace catalog and
+   its referenced local assets.
+3. Publish the launcher and application for Windows x64 AOT. The complete ZIP
+   includes the launcher, its native DLLs, the versioned app, its private native
+   injection components, translations, and manifests. Verify that the app and
+   launcher can both be staged from that actual ZIP.
+4. Compile `installer/Briefcase.iss` using Inno Setup. Silently install it to a
+   temporary directory, verify its key files and active version, then uninstall
+   it. The installer is a per-user installation by default and creates a Start
+   menu shortcut and an optional desktop shortcut to the launcher.
+5. Upload the ZIP and installer as workflow artifacts. Create a draft GitHub
+   release and verify the SHA-256 digests reported by GitHub for both assets.
+   A manual run with **draft** turned off publishes it after verification.
 
-- Give the installer a stable application identity and upgrade path. Preserve the selected installation directory on upgrades.
-- A repair or reinstall must not replace an existing `App/current.json` with a pointer to an older bundled version. It must not delete other installed version directories before the launcher has successfully switched versions.
-- Do not overwrite user-edited translation files without an explicit repair choice. The built-in English fallback remains available.
-- Keep server installations and `%LOCALAPPDATA%\Briefcase\ServerApp\settings.json` outside the install directory. Uninstalling the app must never remove registered server installations, Briefcase, UE4SS mods, or their configurations. Decide separately whether the uninstaller offers to remove application preferences.
-- Package the launcher, the initial app version, native injection components, and all required native runtime DLLs together. Shortcuts must never point directly to a versioned app executable.
-- Keep automatic GitHub update checks disabled while the release repository is private for users without access. Enable `UpdateSource.json` only when the release and distribution policy is ready.
-- Sign the installer and executables before broad public distribution when a suitable Windows code-signing identity is available. Keep artwork redistribution pending the publisher's permission.
+Build/test failure stops before the release is created. An already existing
+release tag causes the publish step to fail rather than replacing assets silently.
 
-## Acceptance checks before release
+## Update behavior
 
-Test a clean per-user install, a normal launch, an in-app update, a repair over an already updated version, a reinstall from an older installer, and uninstall/reinstall. Confirm that the active version, editable translations, saved server list, and external server files survive the relevant operations. Also test an installation in a protected directory, where update writes may request UAC, and cancellation of that request. Do not add an AOT archive build to every ordinary source edit; build the installer from a deliberate release package.
+The launcher downloads the complete ZIP, verifies its download checksum and
+app manifest, prepares a new immutable `App/versions/<version>` directory, and
+stages its own files under `App/launcher-updates/<version>`. The new app starts
+before the current launcher exits. Once its window is ready, the launcher
+activates the app version and closes. The app then waits for that launcher
+process to exit, verifies the staged launcher manifest and SHA-256 hashes, and
+replaces the launcher executable and its three native DLLs. The executable is
+replaced last. A write-protected installation can request UAC at that point.
+If the replacement is interrupted or UAC is declined, the verified staged files
+remain available and the launcher retries them on the next start.
+
+The installer supplies a complete first version. On a later installer run, it
+keeps `App/current.json` if it already selects the same or a newer version;
+otherwise it selects the bundled app. It preserves user-edited translation
+files. The app's settings, catalogs, and registered server data live outside
+the installation directory, and the uninstaller does not remove them or the
+servers. Shortcuts point only to `Briefcase.Launcher.exe`.
+
+## Release validation still required
+
+Before publication, run the workflow on a commit containing the intended
+native source, then test a normal launcher update, an installer repair over an
+updated app, a downgrade attempt with an older installer, and an installation
+in a protected directory where UAC is accepted and canceled. The local contract
+tests exercise staging and replacement, but they do not substitute for those
+Windows end-to-end tests.

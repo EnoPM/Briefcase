@@ -9,15 +9,19 @@ public sealed record ModRow(string Name, string State, string Configuration, str
     string? DocumentationUrl = null, string? DiscordUrl = null, string? HomepageUrl = null)
 {
     public string Title => DisplayName.Length > 0 ? DisplayName : Name;
+    public bool HasDistinctId => DisplayName.Length > 0 && !DisplayName.Equals(Name, StringComparison.OrdinalIgnoreCase);
     public bool HasAuthor => Author.Length > 0;
     public bool HasDescription => Description.Length > 0;
     public bool HasDocumentation => !string.IsNullOrWhiteSpace(DocumentationUrl);
     public bool HasDiscord => !string.IsNullOrWhiteSpace(DiscordUrl);
+    public bool HasHomepage => !string.IsNullOrWhiteSpace(HomepageUrl);
     public bool HasLogo => Logo is not null;
     public bool MissingLogo => Logo is null;
     public bool IsEnabled => State == "Enabled";
     public bool IsCore => Name.Equals("BriefcaseServerBridge", StringComparison.OrdinalIgnoreCase);
     public bool CanToggle => !IsCore;
+    public bool CanEnable => CanToggle && !IsEnabled;
+    public bool CanDisable => CanToggle && IsEnabled;
     public string DisplayState => AppTranslations.Get("mod." + State, State);
     public string DisplayConfiguration => AppTranslations.Get("mod." + Configuration, Configuration);
     public bool HasVersion => Version.Length > 0;

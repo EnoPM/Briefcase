@@ -24,6 +24,22 @@ public sealed partial class App : Application
                     }
                     catch (WaitHandleCannotBeOpenedException) { }
                 };
+            if (Program.LauncherUpdateVersion is { } updateVersion && Program.LauncherProcessId > 0)
+                window.Opened += async (_, _) =>
+                {
+                    try
+                    {
+                        await Task.Run(() => AppLauncherUpdate.ApplyAsync(updateVersion,
+                            Program.LauncherProcessId, CancellationToken.None));
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+                                                  InvalidDataException or System.ComponentModel.Win32Exception or
+                                                  OperationCanceledException or System.Text.Json.JsonException)
+                    {
+                        if (window.DataContext is MainViewModel model)
+                            model.Report("Launcher update failed: " + error.Message);
+                    }
+                };
             desktop.MainWindow = window;
         }
         base.OnFrameworkInitializationCompleted();

@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Briefcase.ServerApp;
+using System.Diagnostics;
 
 namespace Briefcase.ServerApp.Launcher;
 
@@ -52,16 +53,23 @@ public sealed partial class MainWindow : Window
 
     private async Task RunAsync()
     {
+        try { await WaitForPreviousAppAsync(_shutdown.Token); }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { return; }
+        catch (Exception ex) { ShowError(ex); return; }
         var root = AppContext.BaseDirectory;
         InstalledApp? installed;
-        try { installed = AppUpdateStore.Current(root); }
+        try { installed = Program.RestartAppDirectory is { } directory
+            ? new InstalledApp("0.0.0", directory) : AppUpdateStore.Current(root); }
         catch (Exception ex) { ShowError(ex); return; }
 
         var candidate = installed;
+        string? stagedLauncherVersion = installed is not null &&
+            LauncherUpdateStore.IsPending(root, installed.Version) ? installed.Version : null;
         try
         {
             StageText.Text = AppTranslations.Get("launcher.checking");
-            var repository = LauncherUpdateService.ReadRepository(root);
+            var repository = Program.RestartAppDirectory is null
+                ? LauncherUpdateService.ReadRepository(root) : null;
             if (repository is not null)
             {
                 var latest = await _updates.LatestAsync(repository, _shutdown.Token);
@@ -74,7 +82,13 @@ public sealed partial class MainWindow : Window
                         StageText.Text = AppTranslations.Get("launcher.installing");
                         try
                         {
-                            candidate = await Task.Run(() => AppUpdateStore.Prepare(root, archive, latest.Version), _shutdown.Token);
+                            candidate = await Task.Run(() =>
+                            {
+                                var prepared = AppUpdateStore.Prepare(root, archive, latest.Version);
+                                LauncherUpdateStore.Stage(root, archive, latest.Version);
+                                return prepared;
+                            }, _shutdown.Token);
+                            stagedLauncherVersion = latest.Version;
                         }
                         catch (Exception ex) when (LauncherElevation.AccessDenied(ex))
                         {
@@ -84,6 +98,7 @@ public sealed partial class MainWindow : Window
                                 Path.Combine(root, "App", "versions", latest.Version));
                             if (!File.Exists(candidate.Executable))
                                 throw new IOException("The application update did not install its executable.");
+                            stagedLauncherVersion = latest.Version;
                         }
                     }
                     finally { if (File.Exists(archive)) File.Delete(archive); }
@@ -95,6 +110,7 @@ public sealed partial class MainWindow : Window
         {
             if (installed is null) { ShowError(ex); return; }
             candidate = installed;
+            stagedLauncherVersion = null;
             StageText.Text = AppTranslations.Get("launcher.update_failed");
         }
 
@@ -111,7 +127,7 @@ public sealed partial class MainWindow : Window
         {
             StageText.Text = AppTranslations.Get("launcher.starting");
             var opened = false;
-            try { opened = await _process.LaunchAndWaitAsync(candidate, _shutdown.Token); }
+            try { opened = await _process.LaunchAndWaitAsync(candidate, _shutdown.Token, stagedLauncherVersion); }
             catch (Exception) when (installed is not null && candidate != installed && !_shutdown.IsCancellationRequested)
             {
                 StageText.Text = AppTranslations.Get("launcher.fallback");
@@ -146,6 +162,22 @@ public sealed partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
         catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async Task WaitForPreviousAppAsync(CancellationToken cancellationToken)
+    {
+        if (Program.RestartWaitPid <= 0) return;
+        StageText.Text = AppTranslations.Get("launcher.waiting_for_restart");
+        try
+        {
+            using var previous = Process.GetProcessById(Program.RestartWaitPid);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            try { await previous.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { throw new TimeoutException("Briefcase is still closing. Please close the application and retry."); }
+        }
+        catch (ArgumentException) { /* The previous application has already exited. */ }
     }
 
     private async Task FinishAsync()

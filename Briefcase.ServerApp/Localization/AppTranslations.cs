@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Avalonia.Markup.Xaml;
 
@@ -21,6 +22,29 @@ public static class AppTranslations
             language.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-'))
             return "en";
         return language;
+    }
+
+    public static string DefaultLanguage(string? executableDirectory = null)
+    {
+        try { return MatchAvailableLanguage(CultureInfo.CurrentUICulture.Name, executableDirectory); }
+        catch (CultureNotFoundException) { return "en"; }
+    }
+
+    public static string MatchAvailableLanguage(string? systemLanguage, string? executableDirectory = null)
+    {
+        if (string.IsNullOrWhiteSpace(systemLanguage)) return "en";
+        var available = AvailableLanguages(executableDirectory);
+        var code = systemLanguage.Trim();
+        while (code.Length > 0)
+        {
+            var match = available.FirstOrDefault(option =>
+                option.Code.Equals(code, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return match.Code;
+            var separator = code.LastIndexOf('-');
+            if (separator < 0) break;
+            code = code[..separator];
+        }
+        return "en";
     }
 
     public static IReadOnlyList<LanguageOption> AvailableLanguages(string? executableDirectory = null)

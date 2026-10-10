@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -17,13 +18,9 @@ namespace Briefcase.ServerApp;
 public sealed partial class MainWindow : Window
 {
     private sealed record ServerAddChoice(string? Name, ServerInstallation? Installation, string? Executable);
-    private sealed record FormChoiceOption(string Value, string Label)
-    {
-        public override string ToString() => Label;
-    }
     private readonly MainViewModel _model;
     private readonly DispatcherTimer _reconciliationTimer = new() { Interval = TimeSpan.FromSeconds(10) };
-    private readonly Dictionary<string, Control> _settingControls = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SchemaFieldControl> _settingControls = new(StringComparer.OrdinalIgnoreCase);
     private FormSchema? _configurationSchema;
     private bool _updatingReferencedBounds;
     private List<string> _mapRotationDraft = [];
@@ -48,13 +45,6 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         if (demo) Title += " [" + AppTranslations.Get("ui.demo") + "]";
         DataContext = _model;
-        if (_model.MarketplaceMods.Count > 0) MarketplaceList.SelectedIndex = 0;
-        _model.MarketplaceMods.CollectionChanged += (_, _) =>
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (MarketplaceList.SelectedItem is null && _model.MarketplaceMods.Count > 0)
-                    MarketplaceList.SelectedIndex = 0;
-            });
         _model.LiveStateChanged += OnLiveStateChanged;
         _model.PlayerTeams.CollectionChanged += (_, _) => CancelPlayerCardDrag();
         _model.PropertyChanged += (_, args) =>
@@ -62,6 +52,7 @@ public sealed partial class MainWindow : Window
             if (args.PropertyName == nameof(MainViewModel.SelectedServer))
             {
                 CancelPlayerCardDrag();
+                if (ModEditorCard.IsVisible) HideModal();
                 CaptureModDraft();
                 ClearConfigurationFields();
                 ModConfigurationFields.Children.Clear();
@@ -70,12 +61,6 @@ public sealed partial class MainWindow : Window
                 _modEditor = null;
                 _selectedModPath = null;
                 SaveModButton.IsEnabled = false;
-                EnableModButton.IsVisible = false;
-                DisableModButton.IsVisible = false;
-                UninstallModButton.IsVisible = false;
-                InstalledModDocsButton.IsVisible = false;
-                InstalledModDiscordButton.IsVisible = false;
-                InstalledModHomepageButton.IsVisible = false;
                 SelectedModTitle.Text = AppTranslations.Get("mod.select_title");
                 SelectedModPath.Text = "";
                 CoreModHint.IsVisible = false;
@@ -85,7 +70,6 @@ public sealed partial class MainWindow : Window
                 {
                     LoadSettings();
                     BalancingView.Load(selected, _model.IsDemo, _model.Report);
-                    if (_model.IsDemo) Dispatcher.UIThread.Post(() => ModsList.SelectedIndex = 0);
                 }
                 else Dispatcher.UIThread.Post(() => _ = LoadSelectedServerAsync(selected));
             }
@@ -95,7 +79,6 @@ public sealed partial class MainWindow : Window
         LoadSettings();
         BalancingView.Load(_model.SelectedServer, _model.IsDemo, _model.Report);
         BalancingView.Saved += async (_, _) => await _model.RefreshAsync();
-        if (demo) ModsList.SelectedIndex = 0;
         _reconciliationTimer.Tick += async (_, _) => await _model.RefreshAsync();
         Opened += async (_, _) =>
         {
@@ -105,6 +88,8 @@ public sealed partial class MainWindow : Window
             {
                 _ = _model.CheckUpdatesAsync();
                 _ = RefreshMarketplaceAndSettingsAsync();
+                if (!_model.Registry.OnboardingCompleted && _model.Servers.Count == 0)
+                    Dispatcher.UIThread.Post(ShowFirstRun);
             }
         };
         KeyDown += (_, args) =>
@@ -125,7 +110,7 @@ public sealed partial class MainWindow : Window
             _reconciliationTimer.Stop();
             _model.LiveStateChanged -= OnLiveStateChanged;
             _dismissConfirmation?.Invoke();
-            _dismissModal?.Invoke();
+            if (ModalContent.Content is not FirstRunPanel) _dismissModal?.Invoke();
             _model.Dispose();
         };
     }
@@ -286,6 +271,8 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            if (_model.SelectedServer == selected)
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
             _model.CompleteSelectionLoading(selected);
             if (_model.SelectedServer == selected)
             {
@@ -295,7 +282,10 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void AddServerClicked(object? sender, RoutedEventArgs e)
+    private async void AddServerClicked(object? sender, RoutedEventArgs e) =>
+        await OpenAddServerAsync();
+
+    private async Task OpenAddServerAsync(bool preferExisting = false)
     {
         if (_model.IsDemo) { _model.Report(AppTranslations.Get("status.demo_no_add")); return; }
         if (_model.IsBusy || ModalLayer.IsVisible) return;
@@ -305,7 +295,7 @@ public sealed partial class MainWindow : Window
             if (!result.TrySetResult(choice)) return;
             HideModal();
         }
-        var panel = new AddServerPanel(_model.Installations);
+        var panel = new AddServerPanel(_model.Installations, preferExisting);
         panel.InstallRequested += (name, installation) => Finish(new ServerAddChoice(name, installation, null));
         panel.ExistingRequested += executable => Finish(new ServerAddChoice(null, null, executable));
         panel.CancelRequested += () => Finish(null);
@@ -329,6 +319,29 @@ public sealed partial class MainWindow : Window
             InvalidOperationException or ArgumentException)
         { _model.Report(ex.Message); }
     }
+
+    private void ShowFirstRun()
+    {
+        if (_model.IsDemo || _model.Registry.OnboardingCompleted || _model.Servers.Count > 0 || ModalLayer.IsVisible)
+            return;
+        var panel = new FirstRunPanel(_model);
+        void Finish(bool openServerDialog, bool preferExisting = false)
+        {
+            try { _model.Registry.CompleteOnboarding(); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                _model.Report(error.Message);
+                return;
+            }
+            HideModal();
+            if (openServerDialog) _ = OpenAddServerAsync(preferExisting);
+        }
+        panel.LaterRequested += () => Finish(false);
+        panel.CreateRequested += () => Finish(true);
+        panel.ImportRequested += () => Finish(true, preferExisting: true);
+        ShowModal(panel, 590, panel.TryDismiss);
+    }
+
     private async void DeleteClicked(object? sender, RoutedEventArgs e)
     {
         if (_model.IsDemo) { _model.Report(AppTranslations.Get("status.demo_no_remove")); return; }
@@ -456,78 +469,10 @@ public sealed partial class MainWindow : Window
                     });
                     foreach (var spec in schema.Fields.Where(field => field.Group == group.Id))
                     {
-                        Control input;
-                        Control? inputDisplay = null;
-                        var value = values[spec.Key];
-                        if (spec.Kind == FormFieldKind.Boolean)
-                            input = new CheckBox { IsChecked = value.Equals("True", StringComparison.OrdinalIgnoreCase) || value == "1" };
-                        else if (spec.Kind == FormFieldKind.Choice)
-                        {
-                            var options = spec.Choices!.Select(choice => new FormChoiceOption(choice.Value,
-                                schema.Text(choice.LabelKey, choice.Label))).ToArray();
-                            var combo = new ComboBox { ItemsSource = options,
-                                SelectedItem = options.FirstOrDefault(option => option.Value == value) };
-                            combo.SelectionChanged += (_, _) => UpdateReferencedBounds(schema);
-                            input = combo;
-                        }
-                        else if (spec.Display == "slider")
-                        {
-                            var maximum = (double)spec.SliderMaximum(schema.EffectiveMaximum(spec, values) ?? 100);
-                            var selected = decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
-                                out var configuredValue) ? Math.Clamp(configuredValue, spec.Minimum ?? 0, (decimal)maximum) :
-                                decimal.Parse(spec.Default, CultureInfo.InvariantCulture);
-                            var slider = new Slider
-                            {
-                                Minimum = (double)(spec.Minimum ?? 0), Maximum = maximum, Value = (double)selected,
-                                TickFrequency = (double)spec.Step, IsSnapToTickEnabled = true,
-                                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-                            };
-                            var valueLabel = new TextBlock
-                            {
-                                Text = selected.ToString(CultureInfo.InvariantCulture), MinWidth = 22,
-                                TextAlignment = Avalonia.Media.TextAlignment.Right,
-                                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-                            };
-                            slider.ValueChanged += (_, _) =>
-                            {
-                                valueLabel.Text = spec.FormatSliderValue(slider.Value);
-                                UpdateReferencedBounds(schema);
-                            };
-                            var sliderDisplay = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
-                            sliderDisplay.Children.Add(slider);
-                            Grid.SetColumn(valueLabel, 1);
-                            sliderDisplay.Children.Add(valueLabel);
-                            input = slider;
-                            inputDisplay = sliderDisplay;
-                        }
-                        else if (spec.Kind is FormFieldKind.Integer or FormFieldKind.Decimal)
-                        {
-                            var parsed = decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
-                                out var number) ? number : decimal.Parse(spec.Default, CultureInfo.InvariantCulture);
-                            var numeric = new NumericUpDown
-                            {
-                                Minimum = spec.Minimum ?? -1000000, Maximum = schema.EffectiveMaximum(spec, values) ?? 1000000,
-                                Value = parsed, Increment = spec.Step,
-                                FormatString = spec.Kind == FormFieldKind.Integer ? "0" : "0.##",
-                                ParsingNumberStyle = spec.Kind == FormFieldKind.Integer ? NumberStyles.Integer : NumberStyles.Float,
-                                ClipValueToMinMax = true, ShowButtonSpinner = false
-                            };
-                            numeric.ValueChanged += (_, _) => UpdateReferencedBounds(schema);
-                            input = numeric;
-                        }
-                        else
-                            input = new TextBox { Text = value,
-                                MaxLength = spec.MaxLength ?? 0,
-                                PasswordChar = spec.Kind == FormFieldKind.Secret ? '●' : '\0' };
-                        inputDisplay ??= input;
-                        _settingControls[spec.Key] = input;
-                        var line = new Grid { ColumnDefinitions = new ColumnDefinitions("3*,2*"), ColumnSpacing = 10 };
-                        line.Children.Add(new TextBlock { Text = schema.Text(spec.LabelKey, spec.Label),
-                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
-                        Grid.SetColumn(inputDisplay, 1);
-                        line.Children.Add(inputDisplay);
-                        panel.Children.Add(line);
+                        var control = new SchemaFieldControl(schema, spec, values[spec.Key], values);
+                        control.ValueChanged += (_, _) => UpdateReferencedBounds(schema);
+                        _settingControls[spec.Key] = control;
+                        panel.Children.Add(control);
                     }
                     tabPanel.Children.Add(new Border
                     {
@@ -628,32 +573,23 @@ public sealed partial class MainWindow : Window
         try
         {
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (key, control) in _settingControls)
+            foreach (var (key, control) in _settingControls) values[key] = control.Value;
+            var referencedFields = schema.Fields.Where(field =>
+                field.MaximumReference is not null || field.MaximumByChoice is not null).ToArray();
+            for (var pass = 0; pass < referencedFields.Length; pass++)
             {
-                var field = schema.Fields.FirstOrDefault(candidate => candidate.Key == key);
-                values[key] = control switch
+                var changed = false;
+                foreach (var field in referencedFields)
                 {
-                    Slider slider when field is not null => field.FormatSliderValue(slider.Value),
-                    NumericUpDown numeric => numeric.Value?.ToString(CultureInfo.InvariantCulture) ?? "",
-                    ComboBox combo => (combo.SelectedItem as FormChoiceOption)?.Value ?? "",
-                    _ => ""
-                };
-            }
-            foreach (var field in schema.Fields.Where(field =>
-                         field.MaximumReference is not null || field.MaximumByChoice is not null))
-            {
-                var bound = schema.EffectiveMaximum(field, values);
-                if (bound is null || !_settingControls.TryGetValue(field.Key, out var control)) continue;
-                if (control is Slider slider)
-                {
-                    slider.Maximum = (double)field.SliderMaximum(bound.Value);
-                    if (slider.Value > slider.Maximum) slider.Value = slider.Maximum;
+                    var bound = schema.EffectiveMaximum(field, values);
+                    if (bound is null || !_settingControls.TryGetValue(field.Key, out var control)) continue;
+                    control.SetMaximum(bound.Value);
+                    var current = control.Value;
+                    if (values[field.Key] == current) continue;
+                    values[field.Key] = current;
+                    changed = true;
                 }
-                else if (control is NumericUpDown numeric)
-                {
-                    numeric.Maximum = bound.Value;
-                    if (numeric.Value > numeric.Maximum) numeric.Value = numeric.Maximum;
-                }
+                if (!changed) break;
             }
         }
         finally { _updatingReferencedBounds = false; }
@@ -723,18 +659,7 @@ public sealed partial class MainWindow : Window
         {
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var spec in (_configurationSchema ?? FormSchema.LoadBase()).Fields)
-            {
-                var input = _settingControls[spec.Key];
-                values[spec.Key] = input switch
-                {
-                    CheckBox box => box.IsChecked == true ? "True" : "False",
-                    ComboBox combo => combo.SelectedItem is FormChoiceOption choice ? choice.Value : "",
-                    Slider slider => spec.FormatSliderValue(slider.Value),
-                    NumericUpDown number => number.Value?.ToString(CultureInfo.InvariantCulture) ?? "",
-                    TextBox text => text.Text ?? "",
-                    _ => ""
-                };
-            }
+                values[spec.Key] = _settingControls[spec.Key].Value;
             ServerIniEditor.Save(location!.ConfigFile, values, _mapRotationDraft,
                 FormSchema.LoadForServer(location));
             _model.Report(AppTranslations.Get("status.config_saved"));
@@ -744,35 +669,26 @@ public sealed partial class MainWindow : Window
         { _model.Report(ex.Message); }
     }
 
-    private void ModSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void OpenInstalledModSettingsClicked(object? sender, RoutedEventArgs e)
     {
+        if (sender is not Button { DataContext: ModRow mod } || !mod.HasConfiguration || ModalLayer.IsVisible) return;
         CaptureModDraft();
+        LoadModEditor(mod);
+        ModalCard.IsVisible = false;
+        ModEditorCard.IsVisible = true;
+        ModalLayer.IsVisible = true;
+        _dismissModal = HideModal;
+        Dispatcher.UIThread.Post(() => ModalLayer.Focus());
+    }
+
+    private void CloseInstalledModSettingsClicked(object? sender, RoutedEventArgs e) => HideModal();
+
+    private void LoadModEditor(ModRow mod)
+    {
         _modEditor = null;
         _modInputs.Clear();
         ModConfigurationFields.Children.Clear();
         ModEditorError.Text = "";
-        if (ModsList.SelectedItem is not ModRow mod)
-        {
-            _selectedModPath = null;
-            SelectedModTitle.Text = AppTranslations.Get("mod.select_title");
-            SelectedModPath.Text = "";
-            CoreModHint.IsVisible = false;
-            SaveModButton.IsEnabled = false;
-            ModJsonEditor.Text = "";
-            EnableModButton.IsVisible = false;
-            DisableModButton.IsVisible = false;
-            UninstallModButton.IsVisible = false;
-            InstalledModDocsButton.IsVisible = false;
-            InstalledModDiscordButton.IsVisible = false;
-            InstalledModHomepageButton.IsVisible = false;
-            return;
-        }
-        EnableModButton.IsVisible = mod.CanToggle && !mod.IsEnabled;
-        DisableModButton.IsVisible = mod.CanToggle && mod.IsEnabled;
-        UninstallModButton.IsVisible = mod.CanToggle;
-        InstalledModDocsButton.IsVisible = mod.HasDocumentation;
-        InstalledModDiscordButton.IsVisible = mod.HasDiscord;
-        InstalledModHomepageButton.IsVisible = !string.IsNullOrWhiteSpace(mod.HomepageUrl);
         _selectedModPath = mod.ConfigPath;
         CoreModHint.IsVisible = mod.IsCore;
         SelectedModTitle.Text = mod.Title;
@@ -813,7 +729,7 @@ public sealed partial class MainWindow : Window
                 BuildModForm(mod.ConfigPath, ModJsonEditor.Text);
                 if (_invalidFormDrafts.TryGetValue(mod.ConfigPath, out var pending))
                     foreach (var (entry, input) in _modInputs)
-                        if (pending.TryGetValue(entry.Label, out var raw) && input is TextBox text) text.Text = raw;
+                        if (pending.TryGetValue(entry.Path, out var raw) && input is TextBox text) text.Text = raw;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
@@ -860,7 +776,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
         {
-            _invalidFormDrafts[_selectedModPath] = _modInputs.ToDictionary(pair => pair.Key.Label,
+            _invalidFormDrafts[_selectedModPath] = _modInputs.ToDictionary(pair => pair.Key.Path,
                 pair => pair.Value is TextBox text ? text.Text ?? "" :
                     pair.Value is CheckBox box && box.IsChecked == true ? "true" : "false");
             ModEditorError.Text = ex.Message;
@@ -940,12 +856,12 @@ public sealed partial class MainWindow : Window
     private void OpenModDocumentationClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.DocumentationUrl);
     private void OpenModDiscordClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.DiscordUrl);
     private void OpenModHomepageClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.HomepageUrl);
-    private void OpenInstalledModDocsClicked(object? sender, RoutedEventArgs e) => OpenInstalledModLink(mod => mod.DocumentationUrl);
-    private void OpenInstalledModDiscordClicked(object? sender, RoutedEventArgs e) => OpenInstalledModLink(mod => mod.DiscordUrl);
-    private void OpenInstalledModHomepageClicked(object? sender, RoutedEventArgs e) => OpenInstalledModLink(mod => mod.HomepageUrl);
-    private void OpenInstalledModLink(Func<ModRow, string?> selector)
+    private void OpenInstalledModDocsClicked(object? sender, RoutedEventArgs e) => OpenInstalledModLink(sender, mod => mod.DocumentationUrl);
+    private void OpenInstalledModDiscordClicked(object? sender, RoutedEventArgs e) => OpenInstalledModLink(sender, mod => mod.DiscordUrl);
+    private void OpenInstalledModHomepageClicked(object? sender, RoutedEventArgs e) => OpenInstalledModLink(sender, mod => mod.HomepageUrl);
+    private void OpenInstalledModLink(object? sender, Func<ModRow, string?> selector)
     {
-        if (ModsList.SelectedItem is ModRow selected) OpenExternalUrl(selector(selected));
+        if (sender is Button { DataContext: ModRow mod }) OpenExternalUrl(selector(mod));
     }
     private void OpenModLink(object? sender, Func<MarketplaceMod, string?> selector)
     {
@@ -961,38 +877,78 @@ public sealed partial class MainWindow : Window
     }
     private async void InstallMarketplaceClicked(object? sender, RoutedEventArgs e)
     {
-        if (MarketplaceList.SelectedItem is MarketplaceMod mod)
+        if (sender is not Button { DataContext: MarketplaceMod mod } || !mod.CanApply) return;
+        if (!_model.CanManageMods)
         {
-            await _model.InstallMarketplaceModAsync(mod);
-            LoadSettings();
+            if (_model.IsRunning) _model.Report(AppTranslations.Get("mod.stop_to_manage"));
+            return;
         }
+        if (!ServerLocation.TryCreate(_model.SelectedServer, out var location, out var error))
+        { _model.Report(error); return; }
+        var selected = _model.SelectedServer;
+        if (!ModMarketplace.BriefcaseRuntimeInstalled(location!))
+        {
+            if (!await ConfirmBriefcaseForModAsync(mod)) return;
+            if (_model.SelectedServer != selected || !_model.CanManageMods) return;
+            await _model.InstallBriefcaseAsync();
+            if (!ModMarketplace.BriefcaseRuntimeInstalled(location!)) return;
+            await _model.RefreshBriefcaseUpdateAsync();
+        }
+        if (_model.SelectedServer != selected || !_model.CanManageMods) return;
+        await _model.InstallMarketplaceModAsync(mod);
+        LoadSettings();
     }
 
-    private async void EnableModClicked(object? sender, RoutedEventArgs e) => await ChangeModStateAsync(true);
-    private async void DisableModClicked(object? sender, RoutedEventArgs e) => await ChangeModStateAsync(false);
-
-    private async Task ChangeModStateAsync(bool enabled)
+    private async Task<bool> ConfirmBriefcaseForModAsync(MarketplaceMod mod)
     {
-        if (ModsList.SelectedItem is not ModRow mod || !_model.CanManageMods || !mod.CanToggle) return;
+        var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Finish(bool confirmed)
+        {
+            if (!result.TrySetResult(confirmed)) return;
+            HideModal();
+        }
+        var cancel = new Button { Content = AppTranslations.Get("dialog.cancel") };
+        var install = new Button { Content = AppTranslations.Get("updates.install_briefcase") };
+        install.Classes.Add("success");
+        cancel.Click += (_, _) => Finish(false);
+        install.Click += (_, _) => Finish(true);
+        var content = new StackPanel
+        {
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock { Text = AppTranslations.Get("mod.briefcase_required_title"), FontSize = 21,
+                    FontWeight = Avalonia.Media.FontWeight.Bold },
+                new TextBlock { Text = AppTranslations.Format("mod.briefcase_required_explanation",
+                    "Briefcase is required to install {0}. Install Briefcase on this server and then continue with the mod?",
+                    mod.Name), TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Children = { cancel, install } }
+            }
+        };
+        if (!ShowModal(content, 480, () => Finish(false))) return false;
+        return await result.Task;
+    }
+
+    private async void EnableModClicked(object? sender, RoutedEventArgs e) => await ChangeModStateAsync(sender, true);
+    private async void DisableModClicked(object? sender, RoutedEventArgs e) => await ChangeModStateAsync(sender, false);
+
+    private async Task ChangeModStateAsync(object? sender, bool enabled)
+    {
+        if (sender is not Button { DataContext: ModRow mod } || !_model.CanManageMods || !mod.CanToggle) return;
         await _model.SetModEnabledAsync(mod, enabled);
-        SelectMod(mod.Name);
         LoadSettings();
     }
 
     private async void UninstallModClicked(object? sender, RoutedEventArgs e)
     {
-        if (ModsList.SelectedItem is not ModRow mod || !_model.CanManageMods || !mod.CanToggle) return;
+        if (sender is not Button { DataContext: ModRow mod } || !_model.CanManageMods || !mod.CanToggle) return;
         if (!await ConfirmModUninstallAsync(mod)) return;
         _modDrafts.Remove(mod.ConfigPath);
         _invalidFormDrafts.Remove(mod.ConfigPath);
         await _model.UninstallModAsync(mod);
         LoadSettings();
-    }
-
-    private void SelectMod(string name)
-    {
-        var index = _model.Mods.ToList().FindIndex(mod => mod.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0) ModsList.SelectedIndex = index;
     }
 
     private async Task<bool> ConfirmModUninstallAsync(ModRow mod)
@@ -1032,7 +988,56 @@ public sealed partial class MainWindow : Window
         var panel = new SettingsPanel { DataContext = _model };
         panel.CloseRequested += (_, _) => HideModal();
         panel.ConfirmStopServersAsync = ConfirmDataMoveAsync;
+        panel.RestartRequired += ShowRestartConfirmation;
         ShowModal(panel, 840, HideModal, tall: true);
+    }
+
+    private void ShowRestartConfirmation(string reason)
+    {
+        if (ConfirmationLayer.IsVisible) return;
+        void Dismiss()
+        {
+            ConfirmationLayer.IsVisible = false;
+            ConfirmationContent.Content = null;
+            _dismissConfirmation = null;
+            if (ModalLayer.IsVisible) ModalLayer.Focus();
+        }
+        var later = new Button { Content = AppTranslations.Get("settings.restart_later") };
+        var now = new Button { Content = AppTranslations.Get("settings.restart_now") };
+        now.Classes.Add("primary");
+        later.Click += (_, _) => Dismiss();
+        now.Click += (_, _) =>
+        {
+            Dismiss();
+            try
+            {
+                if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
+                    throw new InvalidOperationException("The desktop application cannot be restarted.");
+                AppRestartService.StartLauncher();
+                desktop.Shutdown();
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+                                          InvalidOperationException or System.ComponentModel.Win32Exception)
+            { _model.Report(error.Message); }
+        };
+        ConfirmationContent.Content = new StackPanel
+        {
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock { Text = AppTranslations.Get("settings.restart_title"), FontSize = 21,
+                    FontWeight = FontWeight.Bold },
+                new TextBlock { Text = reason, TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Text = AppTranslations.Get("settings.restart_explanation"),
+                    TextWrapping = TextWrapping.Wrap, Foreground = Brush("#ADA3B6") },
+                new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Children = { later, now } }
+            }
+        };
+        _dismissConfirmation = Dismiss;
+        ConfirmationLayer.IsVisible = true;
+        Dispatcher.UIThread.Post(() => ConfirmationLayer.Focus());
     }
 
     private async Task<bool> ConfirmDataMoveAsync(string destination, IReadOnlyList<string> serverNames)
@@ -1114,6 +1119,8 @@ public sealed partial class MainWindow : Window
         bool expanded = false, bool tall = false)
     {
         if (ModalLayer.IsVisible) return false;
+        ModalCard.IsVisible = true;
+        ModEditorCard.IsVisible = false;
         ModalCard.Margin = expanded ? new Thickness(20) : tall ? new Thickness(0, 20) : new Thickness(0);
         ModalCard.HorizontalAlignment = expanded ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Center;
         ModalCard.VerticalAlignment = expanded || tall ? Avalonia.Layout.VerticalAlignment.Stretch : Avalonia.Layout.VerticalAlignment.Center;
@@ -1129,7 +1136,16 @@ public sealed partial class MainWindow : Window
     private void HideModal()
     {
         _dismissConfirmation?.Invoke();
+        if (ModEditorCard.IsVisible)
+        {
+            CaptureModDraft();
+            _selectedModPath = null;
+            _modEditor = null;
+            _modInputs.Clear();
+        }
         ModalLayer.IsVisible = false;
+        ModEditorCard.IsVisible = false;
+        ModalCard.IsVisible = true;
         ModalContent.Content = null;
         _dismissModal = null;
     }

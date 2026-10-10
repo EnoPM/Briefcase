@@ -5,7 +5,7 @@ using System.Text;
 
 namespace Briefcase.ServerApp;
 
-public sealed record ModConfigValue(string Label, JsonNode Parent, string? Key, int Index,
+public sealed record ModConfigValue(string Label, string Path, JsonNode Parent, string? Key, int Index,
     JsonValueKind Kind, string Value);
 
 public sealed class ModConfigEditor
@@ -22,36 +22,62 @@ public sealed class ModConfigEditor
         Root = JsonNode.Parse(draftJson ?? File.ReadAllText(file)) ??
             throw new InvalidDataException("The mod configuration is empty.");
         var fields = new List<ModConfigValue>();
-        Visit(Root, "", fields, 0);
+        Visit(Root, "", fields, 0, LoadTranslations(Path.GetDirectoryName(file)!));
         if (fields.Count == 0) throw new InvalidDataException("This mod has no editable settings.");
         Values = fields;
     }
 
-    private static void Visit(JsonNode node, string prefix, List<ModConfigValue> values, int depth)
+    private static Dictionary<string, string> LoadTranslations(string dataDirectory)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var language in AppTranslations.Language == "en"
+                     ? new[] { "en" } : new[] { "en", AppTranslations.Language })
+        {
+            var path = Path.Combine(dataDirectory, "FormTranslations", language + ".json");
+            if (!File.Exists(path)) continue;
+            if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint) || new FileInfo(path).Length > 65_536)
+                throw new InvalidDataException("Invalid mod translation file.");
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("Mod translations must be an object.");
+            foreach (var item in document.RootElement.EnumerateObject())
+                if (item.Value.ValueKind == JsonValueKind.String && item.Value.GetString() is { Length: > 0 and <= 256 } text)
+                    values[item.Name] = text;
+        }
+        return values;
+    }
+
+    private static void Visit(JsonNode node, string prefix, List<ModConfigValue> values, int depth,
+        IReadOnlyDictionary<string, string> translations)
     {
         if (depth > 12 || values.Count > 512) throw new InvalidDataException("The mod configuration is too complex for the visual editor.");
         if (node is JsonObject obj)
         {
             foreach (var pair in obj)
                 Add(pair.Value, obj, pair.Key, -1, string.IsNullOrEmpty(prefix) ? pair.Key : prefix + " · " + pair.Key,
-                    values, depth + 1);
+                    values, depth + 1, translations);
         }
         else if (node is JsonArray array)
         {
             for (var i = 0; i < array.Count; i++)
-                Add(array[i], array, null, i, prefix + " [" + (i + 1) + "]", values, depth + 1);
+                Add(array[i], array, null, i, prefix + " [" + (i + 1) + "]", values, depth + 1, translations);
         }
     }
 
     private static void Add(JsonNode? node, JsonNode parent, string? key, int index,
-        string label, List<ModConfigValue> values, int depth)
+        string label, List<ModConfigValue> values, int depth,
+        IReadOnlyDictionary<string, string> translations)
     {
         if (node is null) return;
-        if (node is JsonObject or JsonArray) { Visit(node, label, values, depth); return; }
+        if (node is JsonObject or JsonArray) { Visit(node, label, values, depth, translations); return; }
         var kind = node.GetValueKind();
         if (kind is JsonValueKind.String or JsonValueKind.True or JsonValueKind.False or JsonValueKind.Number)
-            values.Add(new ModConfigValue(label, parent, key, index, kind,
+        {
+            var path = label.Replace(" · ", ".", StringComparison.Ordinal);
+            var translated = translations.TryGetValue("mod.config." + path, out var text) ? text : label;
+            values.Add(new ModConfigValue(translated, path, parent, key, index, kind,
                 kind == JsonValueKind.String ? node.GetValue<string>() : node.ToJsonString()));
+        }
     }
 
     public string Render(IReadOnlyDictionary<ModConfigValue, string> changes)

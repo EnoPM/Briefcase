@@ -17,6 +17,9 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
     int CatalogSchema = 1, string? FormSchemaOverrideUrl = null, string? FormSchemaOverrideSha256 = null,
     IReadOnlyDictionary<string, ModFormAsset>? FormTranslations = null)
 {
+    public bool IsInstalled { get; init; }
+    public bool CanApply { get; init; }
+    public string ActionLabel => AppTranslations.Get(IsInstalled ? "market.update" : "market.install");
     public bool HasLogo => Logo is not null;
     public bool MissingLogo => Logo is null;
     public bool HasDocumentation => DocumentationUrl is not null;
@@ -349,12 +352,15 @@ public sealed class ModMarketplace
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 
+    public static bool BriefcaseRuntimeInstalled(ServerLocation location) =>
+        File.Exists(Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll"));
+
     public static void Install(ServerLocation location, MarketplaceMod mod, string archiveFile, byte[]? logoBytes = null,
         byte[]? formOverrideBytes = null, IReadOnlyDictionary<string, byte[]>? formTranslations = null)
     {
         using (var running = ServerProcess.Find(location))
             if (running is not null) throw new InvalidOperationException("Stop the server before installing or updating a mod.");
-        if (!File.Exists(Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll")))
+        if (!BriefcaseRuntimeInstalled(location))
             throw new InvalidOperationException("Install Briefcase before installing mods.");
         var modsRoot = location.ModsRoot;
         var target = Path.Combine(modsRoot, mod.Id);

@@ -110,5 +110,6 @@ public static class DemoData
 
     private static MarketplaceMod Market(string name, string description, string version, string status) =>
         new(name, name, description, version, new Uri("https://example.invalid/" + name + ".zip"),
-            new string('0', 64), "Briefcase community catalog", status);
+            new string('0', 64), "Briefcase community catalog", status)
+        { IsInstalled = true, CanApply = status == "Update available" };
 }

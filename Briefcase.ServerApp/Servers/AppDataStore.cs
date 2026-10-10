@@ -14,7 +14,7 @@ public static class AppDataStore
     public static string LocatorFile => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Briefcase", "ServerApp.location.json");
 
-    public static string Root => ResolveRoot(DefaultRoot, LocatorFile);
+    public static string Root => AppProfileStore.Current.Active.DataDirectory;
     public static string ServersRoot => Path.Combine(Root, "servers");
     public static string SteamCmdRoot => Path.Combine(Root, "SteamCMD");
     public static string DownloadsRoot => Path.Combine(Root, "Downloads");
@@ -99,7 +99,20 @@ public static class AppDataStore
             RewriteRegisteredServerPaths(Path.Combine(stage, "settings.json"), source, destination);
             if (Directory.Exists(destination)) Directory.Delete(destination);
             Directory.Move(stage, destination);
-            try { WriteLocator(locator, destination); }
+            try
+            {
+                if (Path.GetFullPath(locator).Equals(Path.GetFullPath(LocatorFile),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var isDefaultProfile = AppProfileStore.Current.Active.Id == "default";
+                    AppProfileStore.Current.UpdateActiveDataDirectory(destination);
+                    if (isDefaultProfile)
+                        try { WriteLocator(locator, destination); }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                        { /* The profile registry is authoritative; this is only the legacy fallback. */ }
+                }
+                else WriteLocator(locator, destination);
+            }
             catch
             {
                 Directory.Move(destination, stage);

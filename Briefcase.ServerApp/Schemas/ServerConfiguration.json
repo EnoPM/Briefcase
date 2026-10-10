@@ -62,7 +62,7 @@
       "label": "Server name",
       "group": "Identity",
       "kind": "text",
-      "default": "Deceive Inc. Server",
+      "default": "Player Server",
       "maxLength": 48
     },
     {
@@ -77,7 +77,7 @@
       "label": "Region",
       "group": "Identity",
       "kind": "choice",
-      "default": "eu",
+      "default": "",
       "choices": [
         { "value": "", "label": "Default" },
         { "value": "us-east", "label": "US East" },
@@ -95,7 +95,7 @@
       "label": "Game mode",
       "group": "Game",
       "kind": "choice",
-      "default": "Solo",
+      "default": "Trio",
       "choices": [
         "Solo",
         "Duo",
@@ -107,7 +107,7 @@
       "label": "Maximum players",
       "group": "Game",
       "kind": "integer",
-      "default": "8",
+      "default": "12",
       "min": 1,
       "max": 16,
       "maxByChoice": {
@@ -133,21 +133,21 @@
       "label": "Sandbox mode",
       "group": "Game",
       "kind": "boolean",
-      "default": "False"
+      "default": "True"
     },
     {
       "key": "bRandomizeMap",
       "label": "Random maps",
       "group": "Maps",
       "kind": "boolean",
-      "default": "False"
+      "default": "True"
     },
     {
       "key": "GamePort",
       "label": "Game port (UDP)",
       "group": "Network",
       "kind": "integer",
-      "default": "50000",
+      "default": "7777",
       "min": 1024,
       "max": 65535,
       "notEqualTo": "QueryPort"
@@ -157,7 +157,7 @@
       "label": "Query port (UDP)",
       "group": "Network",
       "kind": "integer",
-      "default": "50001",
+      "default": "7778",
       "min": 1024,
       "max": 65535
     },

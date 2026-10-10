@@ -20,6 +20,7 @@
     <AvaloniaResource Include="Assets/BriefcaseIcon.ico" />
     <Compile Include="../Briefcase.ServerApp/Localization/AppTranslations.cs" Link="Localization/AppTranslations.cs" />
     <Compile Include="../Briefcase.ServerApp/Servers/AppDataStore.cs" Link="Servers/AppDataStore.cs" />
+    <Compile Include="../Briefcase.ServerApp/Servers/AppProfileStore.cs" Link="Servers/AppProfileStore.cs" />
     <EmbeddedResource Include="../Briefcase.ServerApp/Translations/en.json" LogicalName="Briefcase.ServerApp.Fallback.en.json" />
   </ItemGroup>
 </Project>

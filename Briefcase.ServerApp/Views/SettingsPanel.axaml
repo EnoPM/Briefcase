@@ -18,6 +18,30 @@
       <StackPanel Spacing="14">
         <Border Background="#2D2735" CornerRadius="6" Padding="18">
           <StackPanel Spacing="12">
+            <TextBlock Text="{app:Tr Key=settings.profiles}" FontSize="17" FontWeight="Bold" />
+            <TextBlock Text="{app:Tr Key=settings.profiles_hint}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <ComboBox x:Name="ProfileChoice" SelectionChanged="ProfileSelectionChanged" />
+              <Button x:Name="SwitchProfileButton" Grid.Column="1" Classes="primary"
+                      Content="{app:Tr Key=settings.switch_profile}" Click="SwitchProfileClicked" IsEnabled="False" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBox x:Name="NewProfileName" MaxLength="48"
+                       PlaceholderText="{app:Tr Key=settings.profile_name}" />
+              <Button x:Name="CreateProfileButton" Grid.Column="1" Classes="success"
+                      Content="{app:Tr Key=settings.create_profile}" Click="CreateProfileClicked" />
+            </Grid>
+            <TextBlock Text="{app:Tr Key=settings.profile_restart_hint}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
+            <TextBlock x:Name="ProfilePendingNote" Text="{app:Tr Key=settings.profile_pending}"
+                       IsVisible="False" TextWrapping="Wrap" Foreground="#F0C57F" />
+            <TextBlock x:Name="ProfileWarning" IsVisible="False" TextWrapping="Wrap"
+                       Foreground="#F0C57F" />
+          </StackPanel>
+        </Border>
+        <Border Background="#2D2735" CornerRadius="6" Padding="18">
+          <StackPanel Spacing="12">
             <TextBlock Text="{app:Tr Key=settings.data_directory}" FontSize="17" FontWeight="Bold" />
             <TextBlock Text="{app:Tr Key=settings.data_directory_hint}" TextWrapping="Wrap"
                        Foreground="#ADA3B6" />
@@ -46,13 +70,13 @@
           <StackPanel Spacing="12">
             <TextBlock Text="{app:Tr Key=versions.title}" FontSize="17" FontWeight="Bold" />
             <TextBlock Text="{app:Tr Key=versions.description}" TextWrapping="Wrap" Foreground="#ADA3B6" />
-            <Grid ColumnDefinitions="180,*" ColumnSpacing="9">
+            <Grid ColumnDefinitions="2*,*" ColumnSpacing="9">
               <StackPanel Spacing="5">
-                <TextBlock Text="{app:Tr Key=versions.branch}" />
+                <TextBlock Text="{app:Tr Key=versions.branch}" TextWrapping="Wrap" />
                 <TextBox x:Name="BranchNameInput" Text="public" TextChanged="BranchChanged" />
               </StackPanel>
               <StackPanel Grid.Column="1" Spacing="5">
-                <TextBlock Text="{app:Tr Key=versions.beta_password}" />
+                <TextBlock Text="{app:Tr Key=versions.beta_password}" TextWrapping="Wrap" />
                 <TextBox x:Name="BetaPasswordInput" PasswordChar="●" />
               </StackPanel>
             </Grid>

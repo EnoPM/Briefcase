@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -31,15 +32,38 @@ if (args is ["--verify-catalog", var catalogPath])
     return;
 }
 
-if (args is ["--verify-update-archive", var archivePath, var installationPath])
+if (args is ["--verify-update-archive", var archivePath, var installationPath, var releaseVersion])
 {
-    var candidate = AppUpdateStore.Prepare(installationPath, archivePath, "0.1.0");
+    var candidate = AppUpdateStore.Prepare(installationPath, archivePath, releaseVersion);
     Check(File.Exists(candidate.Executable) && AppUpdateStore.Current(installationPath) is null,
         "release archive can be installed without activating an untested app");
+    var stagedLauncher = LauncherUpdateStore.Stage(installationPath, archivePath, releaseVersion);
+    Check(File.Exists(Path.Combine(stagedLauncher, "Briefcase.Launcher.exe")),
+        "release archive stages its verified launcher for replacement after startup");
     AppUpdateStore.Activate(installationPath, candidate);
-    Check(AppUpdateStore.Current(installationPath)?.Version == "0.1.0",
+    Check(AppUpdateStore.Current(installationPath)?.Version == releaseVersion,
         "installed release archive can be activated");
     Console.WriteLine("ServerApp release archive passed.");
+    return;
+}
+
+if (args is ["--verify-existing-update", var existingArchivePath, var existingInstallationPath,
+        var previousVersion, var nextVersion])
+{
+    Check(AppUpdateStore.Current(existingInstallationPath)?.Version == previousVersion,
+        "the previous installed version is active before updating");
+    var candidate = AppUpdateStore.Prepare(existingInstallationPath, existingArchivePath, nextVersion);
+    Check(File.Exists(candidate.Executable) &&
+          AppUpdateStore.Current(existingInstallationPath)?.Version == previousVersion,
+        "preparing a new version leaves the installed version active");
+    var stagedLauncher = LauncherUpdateStore.Stage(existingInstallationPath, existingArchivePath, nextVersion);
+    Check(LauncherUpdateStore.IsPending(existingInstallationPath, nextVersion) &&
+          File.Exists(Path.Combine(stagedLauncher, "Briefcase.Launcher.exe")),
+        "the new launcher is staged and verified");
+    AppUpdateStore.Activate(existingInstallationPath, candidate);
+    Check(AppUpdateStore.Current(existingInstallationPath)?.Version == nextVersion,
+        "the new version is active after the update");
+    Console.WriteLine("ServerApp existing installation update passed.");
     return;
 }
 
@@ -113,6 +137,44 @@ var win64 = Path.Combine(temp, "DeceiveInc", "Binaries", "Win64");
 Directory.CreateDirectory(win64);
 try
 {
+    var launcherInstallRoot = Path.Combine(temp, "launcher-install");
+    Directory.CreateDirectory(launcherInstallRoot);
+    var launcherFiles = new Dictionary<string, byte[]>
+    {
+        ["Briefcase.Launcher.exe"] = [21, 22],
+        ["libSkiaSharp.dll"] = [23],
+        ["libHarfBuzzSharp.dll"] = [24],
+        ["av_libglesv2.dll"] = [25]
+    };
+    var launcherArchive = Path.Combine(temp, "launcher-update.zip");
+    using (var zip = ZipFile.Open(launcherArchive, ZipArchiveMode.Create))
+    {
+        var launcherManifest = new
+        {
+            schemaVersion = 1, version = "0.1.1",
+            files = launcherFiles.Select(pair => new { path = pair.Key, bytes = pair.Value.Length,
+                sha256 = Convert.ToHexString(SHA256.HashData(pair.Value)).ToLowerInvariant() }).ToArray()
+        };
+        using (var writer = new StreamWriter(zip.CreateEntry("Launcher/manifest.json").Open()))
+            writer.Write(JsonSerializer.Serialize(launcherManifest));
+        foreach (var (name, bytes) in launcherFiles)
+        {
+            using var output = zip.CreateEntry(name).Open();
+            output.Write(bytes);
+            File.WriteAllBytes(Path.Combine(launcherInstallRoot, name), [1]);
+        }
+    }
+    LauncherUpdateStore.Stage(launcherInstallRoot, launcherArchive, "0.1.1");
+    Check(LauncherUpdateStore.IsPending(launcherInstallRoot, "0.1.1"),
+        "a staged launcher update remains available for retry");
+    AppLauncherUpdate.ApplyPrepared(launcherInstallRoot, "0.1.1");
+    Check(launcherFiles.All(pair => File.ReadAllBytes(Path.Combine(launcherInstallRoot, pair.Key))
+            .SequenceEqual(pair.Value)) &&
+          !Directory.Exists(Path.Combine(launcherInstallRoot, "App", "launcher-updates", "0.1.1")),
+        "launcher update stages verified files and replaces them after exit");
+    Check(!LauncherUpdateStore.IsPending(launcherInstallRoot, "0.1.1"),
+        "a completed launcher update is no longer pending");
+
     Check(!ServerLocation.TryCreate(win64, out _, out _), "missing Shipping rejected");
     File.WriteAllBytes(Path.Combine(win64, "DeceiveIncServer-Win64-Shipping.exe"), []);
     Check(ServerLocation.TryCreate(win64, out var location, out _), "valid Win64 accepted");
@@ -194,6 +256,86 @@ try
     Check(AppDataStore.ResolveRoot(oldData, dataLocator) == newData &&
           File.Exists(Path.Combine(occupiedData, "keep.txt")),
         "occupied destination does not replace current data");
+    var profilesFile = Path.Combine(temp, "profiles.json");
+    var profilesRoot = Path.Combine(temp, "profile-folders");
+    var profiles = new AppProfileStore(profilesFile, oldData, dataLocator, profilesRoot);
+    Check(profiles.Active.Id == "default" && profiles.Active.DataDirectory == newData &&
+          profiles.Profiles.Count == 1,
+        "the previous data-directory locator becomes the default profile without moving data");
+    var cleanProfile = profiles.CreateAndActivate("Clean slate");
+    Check(profiles.Active.Id == cleanProfile.Id && Directory.Exists(cleanProfile.DataDirectory) &&
+          !File.Exists(Path.Combine(cleanProfile.DataDirectory, "settings.json")) &&
+          !AppDataStore.IsInside(cleanProfile.DataDirectory, newData),
+        "a new profile starts in its own empty data directory");
+    var cleanRegistry = new ServerRegistry(Path.Combine(cleanProfile.DataDirectory, "settings.json"));
+    Check(cleanRegistry.Servers.Count == 0 && cleanRegistry.Installations.Count == 0 &&
+          cleanRegistry.CatalogUrls.Contains(ServerRegistry.OfficialCatalogUrl) &&
+          !cleanRegistry.OnboardingCompleted,
+        "a new profile has fresh servers and settings, the default catalog, and first-run welcome pending");
+    cleanRegistry.CompleteOnboarding();
+    Check(new ServerRegistry(cleanRegistry.FilePath).OnboardingCompleted &&
+          !new ServerRegistry(Path.Combine(newData, "settings.json")).OnboardingCompleted,
+        "first-run completion is saved only in the new profile");
+    var preWelcomeSettings = Path.Combine(temp, "pre-welcome-settings.json");
+    File.WriteAllText(preWelcomeSettings,
+        "{\"schemaVersion\":4,\"language\":\"en\",\"installations\":[],\"servers\":[],\"catalogUrls\":[]}");
+    Check(new ServerRegistry(preWelcomeSettings).OnboardingCompleted,
+        "an existing installation does not receive a retroactive first-run prompt");
+    var queuedProfiles = new AppProfileStore(Path.Combine(temp, "queued-profiles.json"),
+        oldData, dataLocator, Path.Combine(temp, "queued-profile-folders"));
+    var queuedProfile = queuedProfiles.CreateAndScheduleActivation("Next launch");
+    Check(queuedProfiles.Active.Id == "default" && queuedProfiles.NextActiveId == queuedProfile.Id &&
+          new AppProfileStore(Path.Combine(temp, "queued-profiles.json"), oldData, dataLocator,
+              Path.Combine(temp, "queued-profile-folders")).Active.Id == queuedProfile.Id,
+        "restart later leaves current data active but opens the selected profile next time");
+    queuedProfiles.UpdateActiveDataDirectory(Path.Combine(temp, "queued-current-moved"));
+    Check(queuedProfiles.Active.DataDirectory == Path.Combine(temp, "queued-current-moved") &&
+          new AppProfileStore(Path.Combine(temp, "queued-profiles.json"), oldData, dataLocator,
+              Path.Combine(temp, "queued-profile-folders")).Active.Id == queuedProfile.Id,
+        "moving current profile data does not cancel the profile queued for next launch");
+    queuedProfiles.ScheduleActivation("default");
+    Check(!queuedProfiles.HasPendingActivation &&
+          new AppProfileStore(Path.Combine(temp, "queued-profiles.json"), oldData, dataLocator,
+              Path.Combine(temp, "queued-profile-folders")).Active.Id == "default",
+        "choosing the current profile cancels a pending switch");
+    var reopenedNewProfile = new AppProfileStore(profilesFile, oldData, dataLocator, profilesRoot);
+    Check(reopenedNewProfile.Active.Id == cleanProfile.Id &&
+          reopenedNewProfile.Active.DataDirectory == cleanProfile.DataDirectory,
+        "the last active profile is restored after an application restart");
+    profiles.Activate("default");
+    var reopenedProfiles = new AppProfileStore(profilesFile, oldData, dataLocator, profilesRoot);
+    Check(reopenedProfiles.Active.Id == "default" && reopenedProfiles.Profiles.Count == 2 &&
+          new ServerRegistry(Path.Combine(reopenedProfiles.Active.DataDirectory, "settings.json")).Servers.Count == 3,
+        "switching back restores the existing servers and survives an application restart");
+    try { reopenedProfiles.UpdateActiveDataDirectory(cleanProfile.DataDirectory); throw new Exception("Overlapping profiles accepted."); }
+    catch (InvalidDataException) { }
+    var relocatedProfile = Path.Combine(temp, "relocated-default-profile");
+    reopenedProfiles.UpdateActiveDataDirectory(relocatedProfile);
+    Check(new AppProfileStore(profilesFile, oldData, dataLocator, profilesRoot).Active.DataDirectory == relocatedProfile &&
+          reopenedProfiles.Profiles.Single(profile => profile.Id == cleanProfile.Id).DataDirectory == cleanProfile.DataDirectory,
+        "moving one profile updates only that profile's registered data directory");
+    var packagedApp = Path.Combine(temp, "installed-app", "App", "versions", "1.0.0");
+    Directory.CreateDirectory(packagedApp);
+    var packagedLauncher = Path.Combine(temp, "installed-app", "Briefcase.Launcher.exe");
+    File.WriteAllBytes(packagedLauncher, []);
+    var restart = AppRestartService.CreateStartInfo(packagedApp, 1234);
+    Check(restart.FileName == packagedLauncher &&
+          restart.ArgumentList.SequenceEqual(["--restart-wait-pid=1234"]),
+        "application restarts through its launcher after the old process exits");
+    var sourceRoot = Path.Combine(temp, "source-solution");
+    Directory.CreateDirectory(sourceRoot);
+    File.WriteAllText(Path.Combine(sourceRoot, "Briefcase.ServerApp.slnx"), "");
+    var riderApp = Path.Combine(sourceRoot, "Briefcase.ServerApp", "bin", "Debug", "net10.0", "win-x64");
+    Directory.CreateDirectory(riderApp);
+    var riderLauncher = Path.Combine(sourceRoot, "Briefcase.ServerApp.Launcher", "bin", "Debug",
+        "net10.0", "win-x64", "Briefcase.Launcher.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(riderLauncher)!);
+    File.WriteAllBytes(riderLauncher, []);
+    var riderRestart = AppRestartService.CreateStartInfo(riderApp, 5678);
+    Check(riderRestart.FileName == riderLauncher &&
+          riderRestart.ArgumentList.SequenceEqual(["--restart-wait-pid=5678",
+              "--restart-app-directory=" + riderApp]),
+        "Rider restarts through its local launcher without checking release updates");
     Check(AppDataStore.ServerInstallRoot(newData, "My Server") ==
           Path.Combine(newData, "game", "dedicated"), "new instances reuse the shared game installation");
     foreach (var invalidName in new[] { "../escape", "CON", "name:", " " })
@@ -376,6 +518,11 @@ try
         """);
     Check(AppTranslations.AvailableLanguages(temp).Any(language => language.Code == "es" && language.Name == "Español"),
         "adding a JSON translation exposes its language in the selector");
+    Check(AppTranslations.MatchAvailableLanguage("fr-CA", temp) == "fr" &&
+          AppTranslations.MatchAvailableLanguage("ES-mx", temp) == "es" &&
+          AppTranslations.MatchAvailableLanguage("de-DE", temp) == "en" &&
+          AppTranslations.MatchAvailableLanguage(null, temp) == "en",
+        "system language uses an available regional or base translation, otherwise English");
     AppTranslations.Select("es", temp);
     Check(AppTranslations.Get("ui.servers") == "Servidores" &&
           GameMapNames.Display("Venta agresiva") == "Venta agresiva" &&
@@ -681,6 +828,24 @@ try
     }
 
     var defaultCatalogSettings = Path.Combine(temp, "default-catalog-settings.json");
+    var originalUiCulture = CultureInfo.CurrentUICulture;
+    try
+    {
+        CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+        var freshProfileSettings = Path.Combine(temp, "fresh-profile", "settings.json");
+        var freshProfile = new ServerRegistry(freshProfileSettings);
+        Check(freshProfile.Language == "fr" &&
+              ServerRegistry.ReadSavedLanguage(freshProfileSettings) == "fr",
+            "a profile without a saved language starts in the system language");
+        freshProfile.Language = "en";
+        freshProfile.Save();
+        Check(new ServerRegistry(freshProfileSettings).Language == "en" &&
+              ServerRegistry.ReadSavedLanguage(freshProfileSettings) == "en",
+            "an explicitly saved language overrides the system language");
+        freshProfile.ReloadFromDataDirectory(Path.Combine(temp, "second-fresh-profile"));
+        Check(freshProfile.Language == "fr", "switching to a new profile chooses the system language");
+    }
+    finally { CultureInfo.CurrentUICulture = originalUiCulture; }
     var defaultCatalogRegistry = new ServerRegistry(defaultCatalogSettings);
     Check(defaultCatalogRegistry.CatalogUrls.SequenceEqual([ServerRegistry.OfficialCatalogUrl]),
         "new installations include the official marketplace catalog");
@@ -852,6 +1017,18 @@ try
               "Default") == "Par défaut",
         "region dropdown labels follow the selected language");
     AppTranslations.Select("en", AppContext.BaseDirectory);
+    var freshRoot = ServerInstanceFiles.Provision(temp, Guid.NewGuid().ToString("N"), location!, "Fresh Server");
+    var freshIni = Path.Combine(freshRoot, "TripwireServer.ini");
+    var (freshValues, freshMaps) = ServerIniEditor.Read(freshIni);
+    Check(freshValues["ServerName"] == "Fresh Server" && freshValues["GameMode"] == "Trio" &&
+          freshValues["MaxPlayers"] == "12" && freshValues["ServerRegion"] == "" &&
+          freshValues["GamePort"] == "7777" && freshValues["QueryPort"] == "7778" &&
+          freshValues["bSandboxMode"] == "True" && freshValues["bRandomizeMap"] == "True" &&
+          freshMaps.SequenceEqual(["DI_Hardsell", "DI_SR", "DI_DS", "DI_FS", "DI_SE", "DI_HSD", "DI_FSN"]) &&
+          !File.ReadAllText(freshIni).Contains("TournamentMode") &&
+          !File.ReadAllText(freshIni).Contains("MinimumDeployedPlayersToStart") &&
+          !File.ReadAllText(freshIni).Contains("51000"),
+        "new managed servers use the fresh dedicated server defaults without smoketest options or copied settings");
     var playerField = vanillaSchema.Fields.Single(field => field.Key == "MaxPlayers");
     Check(new[] { (Mode: "Solo", Maximum: 8m), (Mode: "Duo", Maximum: 10m), (Mode: "Trio", Maximum: 12m) }
             .All(item => vanillaSchema.EffectiveMaximum(playerField,
@@ -951,7 +1128,19 @@ try
 
     var configPath = Path.Combine(modsRoot, "BriefcasePlayerCap", "Data", "config.json");
     File.WriteAllText(configPath, "{\"soloLimit\":12,\"enabled\":true,\"nested\":{\"rate\":1.5}}");
+    var modTranslationFolder = Path.Combine(Path.GetDirectoryName(configPath)!, "FormTranslations");
+    Directory.CreateDirectory(modTranslationFolder);
+    File.WriteAllText(Path.Combine(modTranslationFolder, "en.json"),
+        "{\"mod.config.soloLimit\":\"Solo player limit\"}");
+    File.WriteAllText(Path.Combine(modTranslationFolder, "fr.json"),
+        "{\"mod.config.soloLimit\":\"Limite de joueurs solo\"}");
+    AppTranslations.Select("fr");
+    Check(new ModConfigEditor(configPath).Values.Single(value => value.Path == "soloLimit").Label ==
+          "Limite de joueurs solo", "mod form uses its French translation");
+    AppTranslations.Select("en");
     var editor = new ModConfigEditor(configPath);
+    Check(editor.Values.Single(value => value.Path == "soloLimit").Label == "Solo player limit",
+        "mod form falls back to its English translation");
     var changes = editor.Values.ToDictionary(v => v, v => v.Value);
     changes[editor.Values.Single(v => v.Label == "nested · rate")] = "2.25";
     editor.Save(changes);
@@ -960,7 +1149,7 @@ try
         edited.RootElement.GetProperty("soloLimit").GetInt32() == 12,
         "mod editor preserves other JSON values while editing a nested number");
     var draftEditor = new ModConfigEditor(configPath, "{\"soloLimit\":15,\"enabled\":false}");
-    Check(draftEditor.Values.Single(value => value.Label == "soloLimit").Value == "15" &&
+    Check(draftEditor.Values.Single(value => value.Path == "soloLimit").Value == "15" &&
           JsonDocument.Parse(draftEditor.Render(draftEditor.Values.ToDictionary(value => value, value => value.Value)))
               .RootElement.GetProperty("enabled").GetBoolean() == false,
         "form editor can reopen an unsaved JSON draft without writing the file");

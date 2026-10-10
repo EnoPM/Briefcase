@@ -10,8 +10,8 @@ Briefcase ServerApp is a Windows application for installing and managing Deceive
 
 ## Getting started
 
-1. Download the Windows archive from this project's releases when one is available and extract the complete archive into one folder. Keep the `App` and `Translations` folders beside `Briefcase.Launcher.exe`.
-2. Run `Briefcase.Launcher.exe`. A small splash screen checks for an application update, shows download progress when needed, and opens Briefcase. It closes automatically when the main window appears. Automatic update checks will become active once this project's release repository is ready; until then the installed application opens normally.
+1. Once a release is available, use the Windows installer or extract the complete ZIP into one folder. Keep the `App`, `Launcher`, and `Translations` folders beside `Briefcase.Launcher.exe`.
+2. Run `Briefcase.Launcher.exe`. A small splash screen checks for an application update, shows download progress when needed, and opens Briefcase. It closes automatically when the main window appears. A verified newer launcher is then installed by the app after the old launcher exits.
 3. Select the **+** button beside **Servers**. In the dialog, choose **Install a new server** or **Open an existing server**. A new server uses the data directory's `servers` folder by default; check **Choose a different installation folder** to use another empty folder. For an existing server, select `DeceiveIncServer.exe` in the installation folder or `DeceiveIncServer-Win64-Shipping.exe` in `DeceiveInc\Binaries\Win64`.
 4. Select your server in the left column. Use **Configuration** to set its name, ports, player limit and map rotation.
 5. Use **Balancing** to choose **Characters**, **Gadgets**, or **Game**. For a character, choose their portrait, then **Weapons**, **Passives**, or **Expertises**, and finally the named variant. You can search by its game name, setting label, key, or value from any step. Save your changes when finished; the app keeps a backup of the previous profile.
@@ -36,8 +36,22 @@ You can edit the JSON files in `Translations` beside `Briefcase.Launcher.exe`; f
 
 ## Data directory
 
-Open the gear icon and choose **Briefcase data directory** to move the data stored there, including your settings, downloads, catalogs, and servers, to another empty folder. If a server in that directory is running, Briefcase warns you and asks for confirmation before stopping it and moving the data. The move is canceled if a server cannot be stopped cleanly. Servers added from other folders remain in place. New servers use the selected directory's `servers` folder unless you choose a different installation folder when creating one.
+Open the gear icon to create or switch application profiles. Your existing data becomes the **Default** profile. Each new profile starts with a separate, empty data directory under `%LOCALAPPDATA%\Briefcase\Profiles`; creating or switching a profile restarts the application. Servers already running under another profile continue to run and can be managed when you switch back. The profile list and active selection are stored outside the profiles' data directories.
+
+Within the active profile, choose **Briefcase data directory** to move its settings, downloads, catalogs, and servers to another empty folder. Other profiles keep their own locations. If a server in that directory is running, Briefcase warns you and asks for confirmation before stopping it and moving the data. The move is canceled if a server cannot be stopped cleanly. Servers added from other folders remain in place. New servers use the selected directory's `servers` folder unless you choose a different installation folder when creating one.
 
 ## Game artwork
 
-This repository includes selected Deceive Inc. interface artwork under `Briefcase.ServerApp/Assets/Game/UI`. The artwork remains the property of its respective rights holders. Its inclusion in a private development repository does not imply permission to redistribute it publicly.
+This repository includes selected Deceive Inc. interface artwork under `Briefcase.ServerApp/Assets/Game/UI`. The artwork remains the property of its respective rights holders. The publisher has allowed these images to be used for this community application.
+
+## Releases
+
+The Windows release workflow, installer layout, and validation requirements are described in [docs/InstallerPlan.md](docs/InstallerPlan.md). Releases are started manually from GitHub Actions and checked as drafts before publication.
+
+To test the launcher with the application in its installed layout, publish both as local Windows AOT builds:
+
+```powershell
+./scripts/Deploy-ServerAppLocal.ps1 -OutputDirectory 'D:\BriefcaseLocalTest'
+```
+
+Run `D:\BriefcaseLocalTest\Briefcase.Launcher.exe`. The script builds the native injection components, publishes the launcher and app, and deploys them in the same directory structure as a release. It does not create an archive. Network updates are disabled by default; pass `-EnableUpdates` if you explicitly want to test them. You can run the script again against the same folder after closing the app and launcher; it keeps previous app versions and selects the newly deployed version.

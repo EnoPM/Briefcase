@@ -122,6 +122,7 @@ public sealed class SteamCmdService
         {
             using var child = Process.Start(start) ?? throw new InvalidOperationException("SteamCMD did not start.");
             var succeeded = false;
+            var needsBootstrapRetry = false;
             string? failureLine = null;
             string? lastLine = null;
             void Record(string line)
@@ -129,6 +130,9 @@ public sealed class SteamCmdService
                 if (!string.IsNullOrEmpty(betaPassword))
                     line = line.Replace(betaPassword, "[redacted]", StringComparison.Ordinal);
                 lastLine = line;
+                if (line.Contains("Missing configuration", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("Localize::AddFile() failed to load file \"public/steambootstrapper_", StringComparison.OrdinalIgnoreCase))
+                    needsBootstrapRetry = true;
                 if (line.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
                     line.Contains("Failed", StringComparison.OrdinalIgnoreCase)) failureLine = line;
                 progress.Report(line);
@@ -145,7 +149,7 @@ public sealed class SteamCmdService
                 progress.Report("Dedicated server is installed and ready to add.");
                 return shipping;
             }
-            if (attempt == 0 && (failureLine ?? "").Contains("Missing configuration", StringComparison.OrdinalIgnoreCase))
+            if (attempt == 0 && needsBootstrapRetry)
             {
                 progress.Report("SteamCMD finished its first-time setup; retrying the server download…");
                 await Task.Delay(1500, cancellationToken);

@@ -1,0 +1,59 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="using:Briefcase.ServerApp"
+             x:Class="Briefcase.ServerApp.FirstRunPanel"
+             x:DataType="app:MainViewModel">
+  <StackPanel Spacing="16">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <TextBlock Text="{app:Tr Key=welcome.title}" FontSize="21" FontWeight="Bold"
+                 VerticalAlignment="Center" />
+      <app:IconButton x:Name="CloseButton" Grid.Column="1" Classes="icon-button"
+                      Width="32" Height="32" IconSize="17"
+                      IconData="M 4,4 L 16,16 M 16,4 L 4,16" IconStroke="#EDE9F4"
+                      ToolTip.Tip="{app:Tr Key=ui.close}" Click="LaterClicked" />
+    </Grid>
+
+    <StackPanel x:Name="OfferSection" Spacing="14">
+      <TextBlock Text="{app:Tr Key=welcome.install_question}" FontSize="16" FontWeight="SemiBold"
+                 TextWrapping="Wrap" />
+      <TextBlock Text="{app:Tr Key=welcome.install_explanation}" Foreground="#B6AABD"
+                 TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="{app:Tr Key=welcome.later}" Click="LaterClicked" />
+        <Button Classes="success" Content="{app:Tr Key=welcome.install_public}"
+                Click="InstallClicked" />
+      </StackPanel>
+    </StackPanel>
+
+    <StackPanel x:Name="InstallingSection" Spacing="12" IsVisible="False">
+      <TextBlock Text="{app:Tr Key=welcome.installing}" FontSize="16" FontWeight="SemiBold" />
+      <TextBlock Text="{Binding Message}" Foreground="#B6AABD" TextWrapping="Wrap"
+                 MaxHeight="72" />
+      <ProgressBar Height="7" Minimum="0" Maximum="100"
+                   IsIndeterminate="{Binding ProgressIndeterminate}" Value="{Binding ProgressPercent}" />
+      <TextBlock Text="{app:Tr Key=welcome.wait_install}" FontSize="11" Foreground="#A9A0B3"
+                 TextWrapping="Wrap" />
+    </StackPanel>
+
+    <StackPanel x:Name="FinishedSection" Spacing="14" IsVisible="False">
+      <TextBlock Text="{app:Tr Key=welcome.ready}" FontSize="16" FontWeight="SemiBold" />
+      <TextBlock Text="{app:Tr Key=welcome.next_step}" Foreground="#B6AABD" TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="{app:Tr Key=welcome.later}" Click="LaterClicked" />
+        <Button Content="{app:Tr Key=welcome.import_existing}" Click="ImportClicked" />
+        <Button Classes="success" Content="{app:Tr Key=welcome.create_server}" Click="CreateClicked" />
+      </StackPanel>
+    </StackPanel>
+
+    <StackPanel x:Name="FailedSection" Spacing="14" IsVisible="False">
+      <TextBlock Text="{app:Tr Key=welcome.failed}" FontSize="16" FontWeight="SemiBold"
+                 Foreground="#EDAFBA" />
+      <TextBlock Text="{Binding Message}" Foreground="#EDAFBA" TextWrapping="Wrap"
+                 MaxHeight="90" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="{app:Tr Key=welcome.later}" Click="LaterClicked" />
+        <Button Classes="primary" Content="{app:Tr Key=welcome.retry}" Click="InstallClicked" />
+      </StackPanel>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

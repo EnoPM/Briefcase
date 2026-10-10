@@ -94,20 +94,30 @@ public sealed class ServerRegistry
     public ObservableCollection<ServerRow> Servers { get; } = [];
     public ObservableCollection<ServerInstallation> Installations { get; } = [];
     public ObservableCollection<string> CatalogUrls { get; } = [];
-    public string Language { get; set; } = "en";
+    public string Language { get; set; } = AppTranslations.DefaultLanguage();
+    public bool OnboardingCompleted { get; private set; }
+
+    public void CompleteOnboarding()
+    {
+        if (OnboardingCompleted) return;
+        OnboardingCompleted = true;
+        try { Save(); }
+        catch { OnboardingCompleted = false; throw; }
+    }
 
     public static string ReadSavedLanguage(string? filePath = null)
     {
         var path = filePath ?? DefaultFilePath();
         try
         {
-            if (!File.Exists(path) || new FileInfo(path).Length > 1024 * 1024) return "en";
+            if (!File.Exists(path) || new FileInfo(path).Length > 1024 * 1024)
+                return AppTranslations.DefaultLanguage();
             using var json = JsonDocument.Parse(File.ReadAllText(path));
             return json.RootElement.TryGetProperty("language", out var value) && value.ValueKind == JsonValueKind.String
-                ? AppTranslations.NormalizeLanguage(value.GetString()) : "en";
+                ? AppTranslations.NormalizeLanguage(value.GetString()) : AppTranslations.DefaultLanguage();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
-        { return "en"; }
+        { return AppTranslations.DefaultLanguage(); }
     }
 
     public static string DefaultFilePath() => Path.Combine(AppDataStore.Root, "settings.json");
@@ -217,6 +227,8 @@ public sealed class ServerRegistry
         Installations.Clear();
         CatalogUrls.Clear();
         LoadError = "";
+        OnboardingCompleted = false;
+        Language = AppTranslations.DefaultLanguage();
         if (!_inMemory)
         {
             if (File.Exists(FilePath)) Load();
@@ -235,7 +247,10 @@ public sealed class ServerRegistry
             if (schema < 1 || schema > SchemaVersion)
                 throw new InvalidDataException("Unsupported ServerApp settings version.");
             Language = root.TryGetProperty("language", out var language) && language.ValueKind == JsonValueKind.String
-                ? AppTranslations.NormalizeLanguage(language.GetString()) : "en";
+                ? AppTranslations.NormalizeLanguage(language.GetString()) : AppTranslations.DefaultLanguage();
+            // Settings predating the welcome flow belong to existing users.
+            OnboardingCompleted = !root.TryGetProperty("onboardingCompleted", out var onboarding) ||
+                                  onboarding.ValueKind == JsonValueKind.True;
             foreach (var value in root.GetProperty("servers").EnumerateArray())
             {
                 var win64 = value.GetProperty("win64").GetString();
@@ -310,6 +325,7 @@ public sealed class ServerRegistry
             Installations.Clear();
             CatalogUrls.Clear();
             CatalogUrls.Add(OfficialCatalogUrl);
+            OnboardingCompleted = true;
             LoadError = "ServerApp settings could not be read. The original file will be backed up before new settings are saved.";
         }
     }
@@ -332,6 +348,7 @@ public sealed class ServerRegistry
             writer.WriteStartObject();
             writer.WriteNumber("schemaVersion", SchemaVersion);
             writer.WriteString("language", AppTranslations.NormalizeLanguage(Language));
+            writer.WriteBoolean("onboardingCompleted", OnboardingCompleted);
             writer.WriteStartArray("installations");
             foreach (var installation in Installations)
             {
