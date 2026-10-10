@@ -17,9 +17,15 @@ namespace Briefcase.ServerApp;
 public sealed partial class MainWindow : Window
 {
     private sealed record ServerAddChoice(string? Name, ServerInstallation? Installation, string? Executable);
+    private sealed record FormChoiceOption(string Value, string Label)
+    {
+        public override string ToString() => Label;
+    }
     private readonly MainViewModel _model;
     private readonly DispatcherTimer _reconciliationTimer = new() { Interval = TimeSpan.FromSeconds(10) };
     private readonly Dictionary<string, Control> _settingControls = new(StringComparer.OrdinalIgnoreCase);
+    private FormSchema? _configurationSchema;
+    private bool _updatingReferencedBounds;
     private List<string> _mapRotationDraft = [];
     private WrapPanel? _mapRotationPreview;
     private Action? _dismissModal;
@@ -414,17 +420,15 @@ public sealed partial class MainWindow : Window
     private void LoadSettingsClicked(object? sender, RoutedEventArgs e) => LoadSettings();
     private void ClearConfigurationFields()
     {
-        ConfigurationServerFields.Children.Clear();
-        ConfigurationGameModeFields.Children.Clear();
-        ConfigurationMapsFields.Children.Clear();
-        ConfigurationBotsFields.Children.Clear();
-        ConfigurationHeatFields.Children.Clear();
+        ConfigurationTabs.Items.Clear();
+        _configurationSchema = null;
         _mapRotationPreview = null;
         _mapRotationDraft = [];
     }
 
     private void LoadSettings()
     {
+        var selectedTabId = (ConfigurationTabs.SelectedItem as TabItem)?.Tag as string;
         ClearConfigurationFields();
         _settingControls.Clear();
         if (_model.SelectedServer is not { } row) return;
@@ -433,97 +437,107 @@ public sealed partial class MainWindow : Window
         { _model.Report(error); return; }
         try
         {
+            var schema = _model.IsDemo ? FormSchema.LoadBase() : FormSchema.LoadForServer(location!);
+            _configurationSchema = schema;
             var (values, maps) = _model.IsDemo
                 ? DemoData.Configuration(row.Id)
-                : ServerIniEditor.Read(location!.ConfigFile);
-            var maxPlayersMaximum = _model.IsDemo ? ServerConfigurationCapabilities.VanillaMaxPlayers :
-                ServerConfigurationCapabilities.MaxPlayersMaximum(location!);
+                : ServerIniEditor.Read(location!.ConfigFile, schema);
             _mapRotationDraft = maps.ToList();
-            Slider? botCountSlider = null;
-            foreach (var category in ServerIniEditor.Fields.Select(f => f.Category).Distinct())
+            foreach (var tab in schema.Tabs)
             {
-                var panel = new StackPanel { Spacing = 7 };
-                if (category is "Identity" or "Network") panel.Children.Add(new TextBlock
+                var tabPanel = new StackPanel { Spacing = 9, Margin = new Avalonia.Thickness(0, 12, 0, 0) };
+                foreach (var group in schema.Groups.Where(group => group.Tab == tab.Id))
                 {
-                    Text = AppTranslations.Get("config.category." + category, category), FontSize = 16, FontWeight = Avalonia.Media.FontWeight.Bold,
-                    Margin = new Avalonia.Thickness(0, 2, 0, 3)
-                });
-                foreach (var spec in ServerIniEditor.Fields.Where(f => f.Category == category))
-                {
-                    Control input;
-                    Control? inputDisplay = null;
-                    var value = values[spec.Key];
-                    if (spec.Kind == SettingKind.Boolean)
-                        input = new CheckBox { IsChecked = value.Equals("True", StringComparison.OrdinalIgnoreCase) || value == "1" };
-                    else if (spec.Kind == SettingKind.Choice)
-                        input = new ComboBox { ItemsSource = spec.Choices, SelectedItem = value };
-                    else if (spec.Key is "MaxPlayers" or "BotsAmount")
+                    var panel = new StackPanel { Spacing = 7 };
+                    if (schema.Groups.Count(item => item.Tab == tab.Id) > 1) panel.Children.Add(new TextBlock
                     {
-                        var maximum = spec.Key == "BotsAmount" &&
-                                      int.TryParse(values["MaxPlayers"], NumberStyles.Integer, CultureInfo.InvariantCulture,
-                                          out var configuredMaximum)
-                            ? Math.Clamp(configuredMaximum, 1, maxPlayersMaximum) : maxPlayersMaximum;
-                        var selected = int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture,
-                            out var configuredValue) ? Math.Clamp(configuredValue, spec.Minimum ?? 0, maximum) :
-                            int.Parse(spec.Default, CultureInfo.InvariantCulture);
-                        var slider = new Slider
+                        Text = schema.Text(group.LabelKey, group.Label), FontSize = 16,
+                        FontWeight = Avalonia.Media.FontWeight.Bold, Margin = new Avalonia.Thickness(0, 2, 0, 3)
+                    });
+                    foreach (var spec in schema.Fields.Where(field => field.Group == group.Id))
+                    {
+                        Control input;
+                        Control? inputDisplay = null;
+                        var value = values[spec.Key];
+                        if (spec.Kind == FormFieldKind.Boolean)
+                            input = new CheckBox { IsChecked = value.Equals("True", StringComparison.OrdinalIgnoreCase) || value == "1" };
+                        else if (spec.Kind == FormFieldKind.Choice)
                         {
-                            Minimum = spec.Minimum ?? 0, Maximum = maximum, Value = selected,
-                            TickFrequency = 1, IsSnapToTickEnabled = true,
-                            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-                        };
-                        var valueLabel = new TextBlock
+                            var options = spec.Choices!.Select(choice => new FormChoiceOption(choice.Value,
+                                schema.Text(choice.LabelKey, choice.Label))).ToArray();
+                            input = new ComboBox { ItemsSource = options,
+                                SelectedItem = options.FirstOrDefault(option => option.Value == value) };
+                        }
+                        else if (spec.Display == "slider")
                         {
-                            Text = selected.ToString(CultureInfo.InvariantCulture), MinWidth = 22,
-                            TextAlignment = Avalonia.Media.TextAlignment.Right,
-                            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-                        };
-                        slider.ValueChanged += (_, _) =>
-                        {
-                            valueLabel.Text = ((int)Math.Round(slider.Value)).ToString(CultureInfo.InvariantCulture);
-                            if (spec.Key == "MaxPlayers" && botCountSlider is not null)
+                            var maximum = (double)spec.SliderMaximum(schema.EffectiveMaximum(spec, values) ?? 100);
+                            var selected = decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                                out var configuredValue) ? Math.Clamp(configuredValue, spec.Minimum ?? 0, (decimal)maximum) :
+                                decimal.Parse(spec.Default, CultureInfo.InvariantCulture);
+                            var slider = new Slider
                             {
-                                botCountSlider.Maximum = slider.Value;
-                                if (botCountSlider.Value > slider.Value) botCountSlider.Value = slider.Value;
-                            }
-                        };
-                        if (spec.Key == "BotsAmount") botCountSlider = slider;
-                        var sliderDisplay = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
-                        sliderDisplay.Children.Add(slider);
-                        Grid.SetColumn(valueLabel, 1);
-                        sliderDisplay.Children.Add(valueLabel);
-                        input = slider;
-                        inputDisplay = sliderDisplay;
-                    }
-                    else if (spec.Kind is SettingKind.Integer or SettingKind.Decimal)
-                    {
-                        var parsed = decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
-                            out var number) ? number : decimal.Parse(spec.Default, CultureInfo.InvariantCulture);
-                        input = new NumericUpDown
+                                Minimum = (double)(spec.Minimum ?? 0), Maximum = maximum, Value = (double)selected,
+                                TickFrequency = (double)spec.Step, IsSnapToTickEnabled = true,
+                                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+                            };
+                            var valueLabel = new TextBlock
+                            {
+                                Text = selected.ToString(CultureInfo.InvariantCulture), MinWidth = 22,
+                                TextAlignment = Avalonia.Media.TextAlignment.Right,
+                                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+                            };
+                            slider.ValueChanged += (_, _) =>
+                            {
+                                valueLabel.Text = spec.FormatSliderValue(slider.Value);
+                                UpdateReferencedBounds(schema);
+                            };
+                            var sliderDisplay = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+                            sliderDisplay.Children.Add(slider);
+                            Grid.SetColumn(valueLabel, 1);
+                            sliderDisplay.Children.Add(valueLabel);
+                            input = slider;
+                            inputDisplay = sliderDisplay;
+                        }
+                        else if (spec.Kind is FormFieldKind.Integer or FormFieldKind.Decimal)
                         {
-                            Minimum = spec.Minimum ?? 0, Maximum = spec.Maximum ?? 0,
-                            Value = parsed, Increment = spec.Kind == SettingKind.Integer ? 1m : 0.1m,
-                            FormatString = spec.Kind == SettingKind.Integer ? "0" : "0.##",
-                            ParsingNumberStyle = spec.Kind == SettingKind.Integer ? NumberStyles.Integer : NumberStyles.Float,
-                            ClipValueToMinMax = true, ShowButtonSpinner = false
-                        };
+                            var parsed = decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                                out var number) ? number : decimal.Parse(spec.Default, CultureInfo.InvariantCulture);
+                            var numeric = new NumericUpDown
+                            {
+                                Minimum = spec.Minimum ?? -1000000, Maximum = schema.EffectiveMaximum(spec, values) ?? 1000000,
+                                Value = parsed, Increment = spec.Step,
+                                FormatString = spec.Kind == FormFieldKind.Integer ? "0" : "0.##",
+                                ParsingNumberStyle = spec.Kind == FormFieldKind.Integer ? NumberStyles.Integer : NumberStyles.Float,
+                                ClipValueToMinMax = true, ShowButtonSpinner = false
+                            };
+                            numeric.ValueChanged += (_, _) => UpdateReferencedBounds(schema);
+                            input = numeric;
+                        }
+                        else
+                            input = new TextBox { Text = value,
+                                MaxLength = spec.MaxLength ?? 0,
+                                PasswordChar = spec.Kind == FormFieldKind.Secret ? '●' : '\0' };
+                        inputDisplay ??= input;
+                        _settingControls[spec.Key] = input;
+                        var line = new Grid { ColumnDefinitions = new ColumnDefinitions("3*,2*"), ColumnSpacing = 10 };
+                        line.Children.Add(new TextBlock { Text = schema.Text(spec.LabelKey, spec.Label),
+                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+                        Grid.SetColumn(inputDisplay, 1);
+                        line.Children.Add(inputDisplay);
+                        panel.Children.Add(line);
                     }
-                    else
-                        input = new TextBox { Text = value,
-                            MaxLength = spec.Key == "ServerName" ? 48 : 0,
-                            PasswordChar = spec.Kind == SettingKind.Secret ? '●' : '\0' };
-                    inputDisplay ??= input;
-                    _settingControls[spec.Key] = input;
-                    var line = new Grid { ColumnDefinitions = new ColumnDefinitions("3*,2*"), ColumnSpacing = 10 };
-                    line.Children.Add(new TextBlock { Text = AppTranslations.Get("config.field." + spec.Key, spec.Label),
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                        VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
-                    Grid.SetColumn(inputDisplay, 1);
-                    line.Children.Add(inputDisplay);
-                    panel.Children.Add(line);
+                    tabPanel.Children.Add(new Border
+                    {
+                        Background = Avalonia.Media.Brushes.Transparent,
+                        BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#493A57")),
+                        BorderThickness = new Avalonia.Thickness(1), CornerRadius = new Avalonia.CornerRadius(6),
+                        Padding = new Avalonia.Thickness(12, 9), Child = panel
+                    });
                 }
-                if (category == "Maps")
+                if (tab.Feature == "mapRotation")
                 {
+                    var panel = new StackPanel { Spacing = 7 };
                     var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
                     heading.Children.Add(new TextBlock
                     {
@@ -548,24 +562,25 @@ public sealed partial class MainWindow : Window
                     });
                     _mapRotationPreview = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
                     panel.Children.Add(_mapRotationPreview);
+                    tabPanel.Children.Add(new Border
+                    {
+                        Background = Avalonia.Media.Brushes.Transparent,
+                        BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#493A57")),
+                        BorderThickness = new Avalonia.Thickness(1), CornerRadius = new Avalonia.CornerRadius(6),
+                        Padding = new Avalonia.Thickness(12, 9), Child = panel
+                    });
                     RenderMapRotationPreview();
                 }
-                var destination = category switch
+                ConfigurationTabs.Items.Add(new TabItem
                 {
-                    "Game" => ConfigurationGameModeFields,
-                    "Maps" => ConfigurationMapsFields,
-                    "Bots" => ConfigurationBotsFields,
-                    "Heat" => ConfigurationHeatFields,
-                    _ => ConfigurationServerFields
-                };
-                destination.Children.Add(new Border
-                {
-                    Background = Avalonia.Media.Brushes.Transparent,
-                    BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#493A57")),
-                    BorderThickness = new Avalonia.Thickness(1), CornerRadius = new Avalonia.CornerRadius(6),
-                    Padding = new Avalonia.Thickness(12, 9), Child = panel
+                    Header = schema.Text(tab.LabelKey, tab.Label),
+                    Tag = tab.Id,
+                    Content = new ScrollViewer { Content = tabPanel }
                 });
             }
+            ConfigurationTabs.SelectedItem = ConfigurationTabs.Items.OfType<TabItem>()
+                .FirstOrDefault(item => item.Tag as string == selectedTabId) ?? ConfigurationTabs.Items.OfType<TabItem>().First();
+            UpdateReferencedBounds(schema);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         { _model.Report(ex.Message); }
@@ -602,6 +617,42 @@ public sealed partial class MainWindow : Window
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
             _mapRotationPreview.Children.Add(item);
         }
+    }
+
+    private void UpdateReferencedBounds(FormSchema schema)
+    {
+        if (_updatingReferencedBounds) return;
+        _updatingReferencedBounds = true;
+        try
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, control) in _settingControls)
+            {
+                var field = schema.Fields.FirstOrDefault(candidate => candidate.Key == key);
+                values[key] = control switch
+                {
+                    Slider slider when field is not null => field.FormatSliderValue(slider.Value),
+                    NumericUpDown numeric => numeric.Value?.ToString(CultureInfo.InvariantCulture) ?? "",
+                    _ => ""
+                };
+            }
+            foreach (var field in schema.Fields.Where(field => field.MaximumReference is not null))
+            {
+                var bound = schema.EffectiveMaximum(field, values);
+                if (bound is null || !_settingControls.TryGetValue(field.Key, out var control)) continue;
+                if (control is Slider slider)
+                {
+                    slider.Maximum = (double)field.SliderMaximum(bound.Value);
+                    if (slider.Value > slider.Maximum) slider.Value = slider.Maximum;
+                }
+                else if (control is NumericUpDown numeric)
+                {
+                    numeric.Maximum = bound.Value;
+                    if (numeric.Value > numeric.Maximum) numeric.Value = numeric.Maximum;
+                }
+            }
+        }
+        finally { _updatingReferencedBounds = false; }
     }
 
     private void EditMapRotationClicked(object? sender, RoutedEventArgs e)
@@ -667,21 +718,21 @@ public sealed partial class MainWindow : Window
         try
         {
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var spec in ServerIniEditor.Fields)
+            foreach (var spec in (_configurationSchema ?? FormSchema.LoadBase()).Fields)
             {
                 var input = _settingControls[spec.Key];
                 values[spec.Key] = input switch
                 {
                     CheckBox box => box.IsChecked == true ? "True" : "False",
-                    ComboBox combo => combo.SelectedItem?.ToString() ?? "",
-                    Slider slider => ((int)Math.Round(slider.Value)).ToString(CultureInfo.InvariantCulture),
+                    ComboBox combo => combo.SelectedItem is FormChoiceOption choice ? choice.Value : "",
+                    Slider slider => spec.FormatSliderValue(slider.Value),
                     NumericUpDown number => number.Value?.ToString(CultureInfo.InvariantCulture) ?? "",
                     TextBox text => text.Text ?? "",
                     _ => ""
                 };
             }
             ServerIniEditor.Save(location!.ConfigFile, values, _mapRotationDraft,
-                ServerConfigurationCapabilities.MaxPlayersMaximum(location));
+                FormSchema.LoadForServer(location));
             _model.Report(AppTranslations.Get("status.config_saved"));
             await _model.RefreshAsync();
         }

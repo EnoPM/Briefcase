@@ -463,23 +463,8 @@
             </Grid>
             <TabControl x:Name="ConfigurationTabs" Grid.Row="1" Background="Transparent" TabStripPlacement="Top">
               <TabControl.ItemsPanel>
-                <ItemsPanelTemplate><UniformGrid Columns="5" /></ItemsPanelTemplate>
+                <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
               </TabControl.ItemsPanel>
-              <TabItem Header="{app:Tr Key=config.tab.Server}">
-                <ScrollViewer><StackPanel x:Name="ConfigurationServerFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
-              </TabItem>
-              <TabItem Header="{app:Tr Key=config.tab.GameMode}">
-                <ScrollViewer><StackPanel x:Name="ConfigurationGameModeFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
-              </TabItem>
-              <TabItem Header="{app:Tr Key=config.tab.Maps}">
-                <ScrollViewer><StackPanel x:Name="ConfigurationMapsFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
-              </TabItem>
-              <TabItem Header="{app:Tr Key=config.tab.Bots}">
-                <ScrollViewer><StackPanel x:Name="ConfigurationBotsFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
-              </TabItem>
-              <TabItem Header="{app:Tr Key=config.tab.Heat}">
-                <ScrollViewer><StackPanel x:Name="ConfigurationHeatFields" Spacing="9" Margin="0,12,0,0" /></ScrollViewer>
-              </TabItem>
             </TabControl>
         </Grid>
       </TabItem>

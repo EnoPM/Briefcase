@@ -13,8 +13,20 @@ if (args is ["--verify-catalog", var catalogPath])
     Check(mods.Count == 3 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 3,
         "published mod catalog contains three distinct installable entries");
     Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
-          mods.Single(mod => mod.Id == "briefcaseplayercap").MaxPlayersMaximum == 30,
-        "official mods use the Briefcase icon and PlayerCap declares the 30-player capability");
+          mods.Single(mod => mod.Id == "briefcaseplayercap") is { FormSchemaOverrideUrl: not null,
+              FormSchemaOverrideSha256: not null, FormTranslations.Count: 2 },
+        "official mods use the Briefcase icon and PlayerCap declares a translated form override");
+    var playerCap = mods.Single(mod => mod.Id == "briefcaseplayercap");
+    byte[] Asset(string url) => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(catalogPath)!, "assets",
+        Path.GetFileName(new Uri(url).AbsolutePath)));
+    bool HashMatches(string url, string hash) => Convert.ToHexString(SHA256.HashData(Asset(url)))
+        .Equals(hash, StringComparison.OrdinalIgnoreCase);
+    Check(mods.All(mod => HashMatches(mod.LogoUrl!, mod.LogoSha256!)) &&
+          HashMatches(playerCap.FormSchemaOverrideUrl!, playerCap.FormSchemaOverrideSha256!) &&
+          playerCap.FormTranslations!.Values.All(asset => HashMatches(asset.Url, asset.Sha256)) &&
+          FormSchema.LoadBase().ApplyOverride(Asset(playerCap.FormSchemaOverrideUrl!))
+              .Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
+        "published catalog hashes match the icon, form override and translations");
     Console.WriteLine("ServerApp mod catalog passed.");
     return;
 }
@@ -234,15 +246,15 @@ try
         "discordUrl":"https://discord.gg/example"}]}
         """;
     var catalogWithCapability = catalogV2.Replace("\"discordUrl\":\"https://discord.gg/example\"",
-        "\"discordUrl\":\"https://discord.gg/example\",\"serverConfiguration\":{\"maxPlayersMaximum\":30}");
+        "\"discordUrl\":\"https://discord.gg/example\",\"formSchemaOverrideUrl\":\"https://example.test/form.json\",\"formSchemaOverrideSha256\":\"" + new string('c', 64) + "\"");
     var parsedCatalog = ModMarketplace.ParseCatalog(System.Text.Encoding.UTF8.GetBytes(catalogWithCapability), catalogUrl);
     Check(parsedCatalog.Count == 1 && parsedCatalog[0].Id == "player-cap" &&
           parsedCatalog[0].Author == "EnoPM" && parsedCatalog[0].LogoSha256 == new string('b', 64) &&
-          parsedCatalog[0].MaxPlayersMaximum == 30,
+          parsedCatalog[0].FormSchemaOverrideSha256 == new string('c', 64),
         "marketplace schema v2 keeps identity, author and verified asset metadata");
     Check(RejectsInvalidData(() => ModMarketplace.ParseCatalog(
-              System.Text.Encoding.UTF8.GetBytes(catalogWithCapability.Replace("\"maxPlayersMaximum\":30", "\"maxPlayersMaximum\":33")),
-              catalogUrl)), "marketplace rejects unsupported player limits");
+              System.Text.Encoding.UTF8.GetBytes(catalogWithCapability.Replace(new string('c', 64), "bad")),
+              catalogUrl)), "marketplace rejects invalid form override checksums");
     try
     {
         ModMarketplace.ParseCatalog(System.Text.Encoding.UTF8.GetBytes(catalogV2.Replace("player-cap", "Player Cap")), catalogUrl);
@@ -838,15 +850,46 @@ try
           RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
               new Dictionary<string, string>(settings) { ["ServerName"] = new string('N', 49) }, ["DI_SR"])),
         "server configuration rejects more than 16 players, bots above player capacity and names over 48 characters");
+    var playerCapOverride = System.Text.Encoding.UTF8.GetBytes("""
+        {"schemaVersion":1,
+         "tabs":[{"id":"Custom","label":"Custom"}],
+         "groups":[{"id":"CustomGroup","tab":"Custom","label":"Custom settings"}],
+         "fields":[{"key":"MaxPlayers","max":30},
+                   {"key":"CustomThreshold","label":"Custom threshold","group":"CustomGroup",
+                    "kind":"integer","default":"5","min":0,"maxReference":"MaxPlayers",
+                    "section":"Custom.Server.Settings"},
+                   {"key":"CustomRatio","label":"Custom ratio","group":"CustomGroup",
+                    "kind":"decimal","default":"0.5","min":0,"max":1,
+                    "display":"slider","step":0.25,"section":"Custom.Server.Settings"},
+                   {"key":"CustomMode","label":"Custom mode","group":"CustomGroup",
+                    "kind":"choice","default":"A","choices":[{"value":"A","label":"Mode A"},
+                    {"value":"B","label":"Mode B","labelKey":"fixture.mode.b"}],
+                    "section":"Custom.Server.Settings"}]}
+        """);
+    var expandedSchema = FormSchema.LoadBase().ApplyOverride(playerCapOverride);
     var expandedSettings = new Dictionary<string, string>(settings)
     {
-        ["MaxPlayers"] = "30", ["BotsAmount"] = "30"
+        ["MaxPlayers"] = "30", ["BotsAmount"] = "30", ["CustomThreshold"] = "7",
+        ["CustomRatio"] = "0.75", ["CustomMode"] = "B"
     };
-    ServerIniEditor.Save(location.ConfigFile, expandedSettings, ["DI_SR"], 30);
-    Check(ServerIniEditor.Read(location.ConfigFile).Values["MaxPlayers"] == "30" &&
+    ServerIniEditor.Save(location.ConfigFile, expandedSettings, ["DI_SR"], expandedSchema);
+    var customRead = ServerIniEditor.Read(location.ConfigFile, expandedSchema).Values;
+    Check(customRead["MaxPlayers"] == "30" && customRead["CustomThreshold"] == "7" &&
+          customRead["CustomRatio"] == "0.75" && customRead["CustomMode"] == "B" &&
+          expandedSchema.Tabs.Any(tab => tab.Id == "Custom") &&
+          File.ReadAllText(location.ConfigFile).Contains("[Custom.Server.Settings]"),
+        "form override adds a tab and custom INI field in its own section");
+    Check(
           RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile, expandedSettings, ["DI_SR"])) &&
           RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
-              new Dictionary<string, string>(expandedSettings) { ["MaxPlayers"] = "31" }, ["DI_SR"], 30)),
+              new Dictionary<string, string>(expandedSettings) { ["MaxPlayers"] = "31" }, ["DI_SR"], expandedSchema)) &&
+          RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
+              new Dictionary<string, string>(expandedSettings) { ["CustomThreshold"] = "31" }, ["DI_SR"], expandedSchema)) &&
+          RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
+              new Dictionary<string, string>(expandedSettings) { ["CustomRatio"] = "0.7" }, ["DI_SR"], expandedSchema)) &&
+          RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
+              new Dictionary<string, string>(expandedSettings) { ["CustomMode"] = "C" }, ["DI_SR"], expandedSchema)) &&
+          expandedSchema.Fields.Single(field => field.Key == "CustomRatio").FormatSliderValue(0.74) == "0.75",
         "mod capability allows 30 players and bots while keeping vanilla and declared ceilings enforced");
     ServerIniEditor.Save(location.ConfigFile, settings, ["DI_SR", "DI_DS", "DI_SR"]);
     ServerIniEditor.SaveServerName(Path.Combine(recoveredRegistry.Servers.Single().InstanceRoot,
@@ -981,28 +1024,43 @@ try
         output.Write([42]);
     }
     var marketplaceEntry = new MarketplaceMod("FixtureMod", "Fixture", "Test", "1.0.0",
-        new Uri("https://example.test/mod.zip"), "", "https://example.test/catalog.json",
-        MaxPlayersMaximum: 30);
-    ModMarketplace.Install(location, marketplaceEntry, modZip);
+        new Uri("https://example.test/mod.zip"), "", "https://example.test/catalog.json");
+    var formTranslations = new Dictionary<string, byte[]>
+    {
+        ["en"] = System.Text.Encoding.UTF8.GetBytes("{\"config.field.MaxPlayers\":\"Player limit from mod\",\"fixture.mode.b\":\"Choice B\"}"),
+        ["fr"] = System.Text.Encoding.UTF8.GetBytes("{\"config.field.MaxPlayers\":\"Limite du mod\",\"fixture.mode.b\":\"Choix B\"}")
+    };
+    ModMarketplace.Install(location, marketplaceEntry, modZip, formOverrideBytes: playerCapOverride,
+        formTranslations: formTranslations);
     Check(File.Exists(Path.Combine(modsRoot, "FixtureMod", "dlls", "main.dll")) &&
         File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod : 1") &&
         ModMarketplace.InstalledVersion(location, "FixtureMod") == "1.0.0" &&
-        ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 30,
+        FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30 &&
+        FormSchema.LoadForServer(location).Text("config.field.MaxPlayers", "Maximum players") == "Player limit from mod",
         "marketplace archive stays inside its UE4SS mod directory and enables the mod");
+    AppTranslations.Select("fr");
+    Check(FormSchema.LoadForServer(location).Text("config.field.MaxPlayers", "Maximum players") == "Limite du mod" &&
+          FormSchema.LoadForServer(location).Text("config.field.CustomThreshold", "Custom threshold") == "Custom threshold" &&
+          FormSchema.LoadForServer(location).Text("fixture.mode.b", "Mode B") == "Choix B",
+        "mod form translations follow the selected language and fall back to schema labels");
+    File.Delete(Path.Combine(modsRoot, "FixtureMod", "Data", "FormTranslations", "fr.json"));
+    Check(FormSchema.LoadForServer(location).Text("config.field.MaxPlayers", "Maximum players") ==
+          "Player limit from mod", "missing mod language falls back to the mod's English translation");
+    AppTranslations.Select("en");
     ModCatalog.SetEnabled(location, "FixtureMod", false);
     Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Disabled" &&
         File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod : 0") &&
-        ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 16,
+        FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 16,
         "disabled mod stays installed and UE4SS selection changes");
     ModCatalog.SetEnabled(location, "FixtureMod", true);
     Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Enabled" &&
-          ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 30,
+          FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
         "installed mod can be enabled again");
     ModCatalog.Uninstall(location, "FixtureMod");
     Check(!Directory.Exists(Path.Combine(modsRoot, "FixtureMod")) &&
         !File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod :") &&
         Directory.Exists(Path.Combine(modsRoot, "BriefcasePlayerCap")) &&
-        ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 16,
+        FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 16,
         "uninstall removes only the selected mod and its UE4SS selection");
     var launcherRoot = Path.Combine(temp, "launcher");
     Directory.CreateDirectory(launcherRoot);

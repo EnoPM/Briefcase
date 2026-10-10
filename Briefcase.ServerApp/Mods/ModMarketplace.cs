@@ -7,11 +7,14 @@ using Avalonia.Media.Imaging;
 
 namespace Briefcase.ServerApp;
 
+public sealed record ModFormAsset(string Url, string Sha256);
+
 public sealed record MarketplaceMod(string Id, string Name, string Description, string Version,
     Uri DownloadUrl, string Sha256, string Catalog, string Status = "Not installed",
     string? LogoUrl = null, Bitmap? Logo = null, string Author = "", string? LogoSha256 = null,
     string? DocumentationUrl = null, string? DiscordUrl = null, string? HomepageUrl = null,
-    int CatalogSchema = 1, int? MaxPlayersMaximum = null)
+    int CatalogSchema = 1, string? FormSchemaOverrideUrl = null, string? FormSchemaOverrideSha256 = null,
+    IReadOnlyDictionary<string, ModFormAsset>? FormTranslations = null)
 {
     public bool HasLogo => Logo is not null;
     public bool MissingLogo => Logo is null;
@@ -23,8 +26,7 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
 }
 
 public sealed record InstalledModMetadata(string Id, string Version, string Name, string Author,
-    string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl,
-    int? MaxPlayersMaximum = null);
+    string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl);
 
 public sealed class ModMarketplace
 {
@@ -66,7 +68,9 @@ public sealed class ModMarketplace
             var documentation = OptionalUrl(item, "documentationUrl");
             var discord = OptionalUrl(item, "discordUrl");
             var homepage = OptionalUrl(item, "homepageUrl");
-            var maxPlayersMaximum = ReadMaxPlayersMaximum(item, "serverConfiguration");
+            var formUrl = OptionalUrl(item, "formSchemaOverrideUrl");
+            var formHash = schema == 2 ? RequiredOptionalString(item, "formSchemaOverrideSha256") : null;
+            var formTranslations = ReadFormTranslations(item);
             if (!ids.Add(id) || !Regex.IsMatch(id, schema == 2 ? ModIdPattern : LegacyIdPattern) ||
                 id.Length > 64 || name.Length is < 1 or > 128 ||
                 description.Length > 1024 || !Regex.IsMatch(version, "^\\d+\\.\\d+\\.\\d+$") ||
@@ -74,31 +78,23 @@ public sealed class ModMarketplace
                 !string.IsNullOrEmpty(asset.UserInfo) || !Regex.IsMatch(hash, "^[a-fA-F0-9]{64}$") ||
                 schema == 2 && (author.Length is < 1 or > 100 ||
                     (logoUrl is null) != (logoHash is null) ||
-                    logoHash is not null && !Regex.IsMatch(logoHash, "^[a-fA-F0-9]{64}$")) ||
+                    logoHash is not null && !Regex.IsMatch(logoHash, "^[a-fA-F0-9]{64}$") ||
+                    (formUrl is null) != (formHash is null) ||
+                    formHash is not null && !Regex.IsMatch(formHash, "^[a-fA-F0-9]{64}$")) ||
                 logoUrl is not null && (!Uri.TryCreate(logoUrl, UriKind.Absolute, out var logo) ||
                     logo.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(logo.UserInfo)))
                 throw new InvalidDataException("Catalog contains an invalid mod entry.");
             mods.Add(new MarketplaceMod(id, name, description, version, asset, hash.ToLowerInvariant(), url,
                 LogoUrl: logoUrl, Author: author, LogoSha256: logoHash?.ToLowerInvariant(),
                 DocumentationUrl: documentation, DiscordUrl: discord, HomepageUrl: homepage,
-                CatalogSchema: schema, MaxPlayersMaximum: maxPlayersMaximum));
+                CatalogSchema: schema, FormSchemaOverrideUrl: formUrl,
+                FormSchemaOverrideSha256: formHash?.ToLowerInvariant(), FormTranslations: formTranslations));
         }
         return mods;
     }
 
     private static string? RequiredOptionalString(JsonElement item, string key) =>
         item.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.GetString() : null;
-
-    private static int? ReadMaxPlayersMaximum(JsonElement item, string container)
-    {
-        if (!item.TryGetProperty(container, out var configuration)) return null;
-        if (configuration.ValueKind != JsonValueKind.Object ||
-            !configuration.TryGetProperty("maxPlayersMaximum", out var limit) ||
-            limit.ValueKind != JsonValueKind.Number ||
-            !limit.TryGetInt32(out var maximum) || maximum is < 17 or > 32)
-            throw new InvalidDataException("Invalid serverConfiguration.maxPlayersMaximum.");
-        return maximum;
-    }
 
     private static string? OptionalUrl(JsonElement item, string key)
     {
@@ -108,6 +104,25 @@ public sealed class ModMarketplace
             uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo))
             throw new InvalidDataException("Catalog contains an invalid " + key + ".");
         return uri.AbsoluteUri;
+    }
+
+    private static IReadOnlyDictionary<string, ModFormAsset>? ReadFormTranslations(JsonElement item)
+    {
+        if (!item.TryGetProperty("formTranslations", out var entries)) return null;
+        if (entries.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Invalid form translations.");
+        var result = new Dictionary<string, ModFormAsset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries.EnumerateObject())
+        {
+            if (result.Count >= 16 || !Regex.IsMatch(entry.Name, "^[a-z]{2}(?:-[A-Za-z0-9]{2,8})?$"))
+                throw new InvalidDataException("Invalid form translation language.");
+            if (entry.Value.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Invalid form translation.");
+            var url = OptionalUrl(entry.Value, "url") ?? throw new InvalidDataException("Missing form translation URL.");
+            var hash = RequiredOptionalString(entry.Value, "sha256") ?? "";
+            if (!Regex.IsMatch(hash, "^[a-fA-F0-9]{64}$") ||
+                !result.TryAdd(entry.Name, new ModFormAsset(url, hash.ToLowerInvariant())))
+                throw new InvalidDataException("Invalid form translation checksum.");
+        }
+        return result;
     }
 
     public async Task<string> DownloadAsync(MarketplaceMod mod, string folder, IProgress<string> progress,
@@ -146,6 +161,57 @@ public sealed class ModMarketplace
         catch { if (File.Exists(file)) File.Delete(file); throw; }
     }
 
+    public static async Task<byte[]?> DownloadFormOverrideAsync(MarketplaceMod mod, CancellationToken cancellationToken)
+    {
+        if (mod.FormSchemaOverrideUrl is null) return null;
+        var bytes = await DownloadFormAssetAsync(mod.FormSchemaOverrideUrl, mod.FormSchemaOverrideSha256!, cancellationToken);
+        FormSchema.LoadBase().ApplyOverride(bytes);
+        return bytes;
+    }
+
+    public static async Task<IReadOnlyDictionary<string, byte[]>> DownloadFormTranslationsAsync(MarketplaceMod mod,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        if (mod.FormTranslations is null) return result;
+        foreach (var (language, asset) in mod.FormTranslations)
+        {
+            var bytes = await DownloadFormAssetAsync(asset.Url, asset.Sha256, cancellationToken);
+            using var json = JsonDocument.Parse(bytes);
+            if (json.RootElement.ValueKind != JsonValueKind.Object ||
+                json.RootElement.EnumerateObject().Any(entry => entry.Name.Length is < 1 or > 128 ||
+                    entry.Value.ValueKind != JsonValueKind.String ||
+                    entry.Value.GetString() is not { Length: > 0 and <= 256 }))
+                throw new InvalidDataException("Invalid mod form translation: " + language);
+            result.Add(language, bytes);
+        }
+        return result;
+    }
+
+    private static async Task<byte[]> DownloadFormAssetAsync(string url, string sha256, CancellationToken cancellationToken)
+    {
+        using var response = await Http.GetAsync(url,
+            HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        if (response.RequestMessage?.RequestUri is not { Scheme: "https" } ||
+            response.Content.Headers.ContentLength is > 65536)
+            throw new InvalidDataException("Mod form override must be a small HTTPS JSON file.");
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > 65536) throw new InvalidDataException("Mod form override is too large.");
+            buffer.Write(chunk, 0, read);
+        }
+        var bytes = buffer.ToArray();
+        if (!Convert.ToHexString(SHA256.HashData(bytes)).Equals(sha256,
+                StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Mod form override checksum does not match the catalog.");
+        return bytes;
+    }
+
     public static InstalledModMetadata? InstalledMetadata(ServerLocation location, string modId)
     {
         var file = Path.Combine(location.ModsRoot, modId, ".serverapp-install.json");
@@ -161,7 +227,7 @@ public sealed class ModMarketplace
             string Read(string key) => root.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
             return new InstalledModMetadata(modId, Read("version"), Read("name"), Read("author"),
                 Read("description"), Read("catalog"), Read("documentationUrl"), Read("discordUrl"),
-                Read("homepageUrl"), ReadMaxPlayersMaximum(root, "serverConfiguration"));
+                Read("homepageUrl"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
                                    KeyNotFoundException or InvalidOperationException)
@@ -171,7 +237,8 @@ public sealed class ModMarketplace
     public static string InstalledVersion(ServerLocation location, string modId) =>
         InstalledMetadata(location, modId)?.Version ?? "";
 
-    public static void Install(ServerLocation location, MarketplaceMod mod, string archiveFile, byte[]? logoBytes = null)
+    public static void Install(ServerLocation location, MarketplaceMod mod, string archiveFile, byte[]? logoBytes = null,
+        byte[]? formOverrideBytes = null, IReadOnlyDictionary<string, byte[]>? formTranslations = null)
     {
         using (var running = ServerProcess.Find(location))
             if (running is not null) throw new InvalidOperationException("Stop the server before installing or updating a mod.");
@@ -230,6 +297,24 @@ public sealed class ModMarketplace
             if (!File.Exists(Path.Combine(newFolder, "dlls", "main.dll")))
                 throw new InvalidDataException("The package is missing its UE4SS main.dll.");
             if (logoBytes is not null) File.WriteAllBytes(Path.Combine(newFolder, "logo.png"), logoBytes);
+            if (formOverrideBytes is not null)
+            {
+                FormSchema.LoadBase().ApplyOverride(formOverrideBytes);
+                var formDirectory = Path.Combine(newFolder, "Data");
+                Directory.CreateDirectory(formDirectory);
+                File.WriteAllBytes(Path.Combine(formDirectory, "server-configuration.override.json"), formOverrideBytes);
+            }
+            if (formTranslations is not null && formTranslations.Count > 0)
+            {
+                var languageDirectory = Path.Combine(newFolder, "Data", "FormTranslations");
+                Directory.CreateDirectory(languageDirectory);
+                foreach (var (language, translationBytes) in formTranslations)
+                {
+                    if (!Regex.IsMatch(language, "^[a-z]{2}(?:-[A-Za-z0-9]{2,8})?$"))
+                        throw new InvalidDataException("Invalid form translation language.");
+                    File.WriteAllBytes(Path.Combine(languageDirectory, language + ".json"), translationBytes);
+                }
+            }
             using (var stream = File.Create(Path.Combine(newFolder, ".serverapp-install.json")))
             using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
             {
@@ -247,12 +332,8 @@ public sealed class ModMarketplace
                 if (mod.DocumentationUrl is not null) writer.WriteString("documentationUrl", mod.DocumentationUrl);
                 if (mod.DiscordUrl is not null) writer.WriteString("discordUrl", mod.DiscordUrl);
                 if (mod.HomepageUrl is not null) writer.WriteString("homepageUrl", mod.HomepageUrl);
-                if (mod.MaxPlayersMaximum is { } maximum)
-                {
-                    writer.WriteStartObject("serverConfiguration");
-                    writer.WriteNumber("maxPlayersMaximum", maximum);
-                    writer.WriteEndObject();
-                }
+                if (mod.FormSchemaOverrideUrl is not null) writer.WriteString("formSchemaOverrideUrl", mod.FormSchemaOverrideUrl);
+                if (mod.FormSchemaOverrideSha256 is not null) writer.WriteString("formSchemaOverrideSha256", mod.FormSchemaOverrideSha256);
                 writer.WriteEndObject();
             }
             var previousConfig = Path.Combine(target, "Data", "config.json");

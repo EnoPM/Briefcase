@@ -117,6 +117,13 @@ foreach ($language in @('en', 'fr')) {
     Copy-Item -LiteralPath $translation -Destination (Join-Path $translationDestination "$language.json")
     Copy-Item -LiteralPath $translation -Destination (Join-Path $destination "Translations/$language.json")
 }
+$formSchema = Join-Path $publishDirectory 'Schemas/ServerConfiguration.json'
+if (-not (Test-Path -LiteralPath $formSchema -PathType Leaf)) {
+    throw "Missing published server configuration schema: $formSchema"
+}
+$schemaDestination = Join-Path $appDirectory 'Schemas'
+New-Item -ItemType Directory -Path $schemaDestination -Force | Out-Null
+Copy-Item -LiteralPath $formSchema -Destination (Join-Path $schemaDestination 'ServerConfiguration.json')
 $manifestFiles = @(Get-ChildItem -LiteralPath $appDirectory -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($appDirectory.Length + 1).Replace([char]92, [char]47)
     [ordered]@{

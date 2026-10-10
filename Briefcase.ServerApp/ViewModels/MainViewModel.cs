@@ -751,7 +751,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 var logo = await ModLogo.VerifiedBytesAsync(mod.LogoUrl, mod.LogoSha256, CancellationToken.None);
                 if (mod.LogoSha256 is not null && logo is null)
                     throw new InvalidDataException("The mod logo could not be downloaded or verified.");
-                await Task.Run(() => ModMarketplace.Install(location!, mod, archive, logo));
+                var formOverride = await ModMarketplace.DownloadFormOverrideAsync(mod, CancellationToken.None);
+                var formTranslations = await ModMarketplace.DownloadFormTranslationsAsync(mod, CancellationToken.None);
+                await Task.Run(() => ModMarketplace.Install(location!, mod, archive, logo, formOverride, formTranslations));
             }
             finally { if (File.Exists(archive)) File.Delete(archive); }
         }
@@ -1313,7 +1315,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     var logo = await ModLogo.VerifiedBytesAsync(mod.LogoUrl, mod.LogoSha256, CancellationToken.None);
                     if (mod.LogoSha256 is not null && logo is null)
                         throw new InvalidDataException("The mod logo could not be downloaded or verified.");
-                    await Task.Run(() => ModMarketplace.Install(location, mod, archive, logo));
+                    var formOverride = await ModMarketplace.DownloadFormOverrideAsync(mod, CancellationToken.None);
+                    var formTranslations = await ModMarketplace.DownloadFormTranslationsAsync(mod, CancellationToken.None);
+                    await Task.Run(() => ModMarketplace.Install(location, mod, archive, logo, formOverride, formTranslations));
                 }
                 finally { if (File.Exists(archive)) File.Delete(archive); }
             }

@@ -12,6 +12,12 @@
       "logoUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/BriefcaseIcon.png",
       "logoSha256": "679e7268b30e7d90e0b1034d48143fc0e4ca65fc5f1f7df9dd78a6a7dd853acb",
       "serverConfiguration": { "maxPlayersMaximum": 30 },
+      "formSchemaOverrideUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/PlayerCapConfiguration.override.json",
+      "formSchemaOverrideSha256": "b6a50e60a8c1c5f0415da81bd548db7b4832a2f77cca208ffba6d454204578e4",
+      "formTranslations": {
+        "en": { "url": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/PlayerCap.en.json", "sha256": "c4bfdca24e41c973603ebab937df48fc54fc5026126dc9cb6696bfec3e05edef" },
+        "fr": { "url": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/PlayerCap.fr.json", "sha256": "b77f159acc4de35821d882459134045352d8e201f68143ca3dd0d654795260c4" }
+      },
       "documentationUrl": "https://github.com/EnoPM/Briefcase.PlayerCap#readme",
       "homepageUrl": "https://github.com/EnoPM/Briefcase.PlayerCap"
     },

@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "section": "/Script/DeceiveInc.TripwireServerSettings",
+  "tabs": [
+    {
+      "id": "Server",
+      "label": "Server"
+    },
+    {
+      "id": "GameMode",
+      "label": "Game mode"
+    },
+    {
+      "id": "Maps",
+      "label": "Maps",
+      "feature": "mapRotation"
+    },
+    {
+      "id": "Bots",
+      "label": "Bots"
+    },
+    {
+      "id": "Heat",
+      "label": "Heat"
+    }
+  ],
+  "groups": [
+    {
+      "id": "Identity",
+      "tab": "Server",
+      "label": "Identity"
+    },
+    {
+      "id": "Network",
+      "tab": "Server",
+      "label": "Network"
+    },
+    {
+      "id": "Game",
+      "tab": "GameMode",
+      "label": "Game"
+    },
+    {
+      "id": "Maps",
+      "tab": "Maps",
+      "label": "Maps"
+    },
+    {
+      "id": "Bots",
+      "tab": "Bots",
+      "label": "Bots"
+    },
+    {
+      "id": "Heat",
+      "tab": "Heat",
+      "label": "Heat"
+    }
+  ],
+  "fields": [
+    {
+      "key": "ServerName",
+      "label": "Server name",
+      "group": "Identity",
+      "kind": "text",
+      "default": "Deceive Inc. Server",
+      "maxLength": 48
+    },
+    {
+      "key": "Password",
+      "label": "Join password",
+      "group": "Identity",
+      "kind": "secret",
+      "default": ""
+    },
+    {
+      "key": "ServerRegion",
+      "label": "Region",
+      "group": "Identity",
+      "kind": "choice",
+      "default": "eu",
+      "choices": [
+        "",
+        "us-east",
+        "us-central",
+        "us-west",
+        "eu",
+        "oce",
+        "br",
+        "asia",
+        "me"
+      ]
+    },
+    {
+      "key": "GameMode",
+      "label": "Game mode",
+      "group": "Game",
+      "kind": "choice",
+      "default": "Solo",
+      "choices": [
+        "Solo",
+        "Duo",
+        "Trio"
+      ]
+    },
+    {
+      "key": "MaxPlayers",
+      "label": "Maximum players",
+      "group": "Game",
+      "kind": "integer",
+      "default": "8",
+      "min": 1,
+      "max": 16,
+      "display": "slider",
+      "step": 1
+    },
+    {
+      "key": "bIsPublic",
+      "label": "Public server",
+      "group": "Game",
+      "kind": "boolean",
+      "default": "True"
+    },
+    {
+      "key": "bSandboxMode",
+      "label": "Sandbox mode",
+      "group": "Game",
+      "kind": "boolean",
+      "default": "False"
+    },
+    {
+      "key": "bRandomizeMap",
+      "label": "Random maps",
+      "group": "Maps",
+      "kind": "boolean",
+      "default": "False"
+    },
+    {
+      "key": "GamePort",
+      "label": "Game port (UDP)",
+      "group": "Network",
+      "kind": "integer",
+      "default": "50000",
+      "min": 1024,
+      "max": 65535,
+      "notEqualTo": "QueryPort"
+    },
+    {
+      "key": "QueryPort",
+      "label": "Query port (UDP)",
+      "group": "Network",
+      "kind": "integer",
+      "default": "50001",
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "bCrossplay",
+      "label": "Crossplay",
+      "group": "Network",
+      "kind": "boolean",
+      "default": "True"
+    },
+    {
+      "key": "bEnableUPnP",
+      "label": "UPnP port mapping",
+      "group": "Network",
+      "kind": "boolean",
+      "default": "True"
+    },
+    {
+      "key": "AutoShutdownEmptyMinutes",
+      "label": "Auto shutdown when empty (minutes)",
+      "group": "Game",
+      "kind": "integer",
+      "default": "0",
+      "min": 0,
+      "max": 1440
+    },
+    {
+      "key": "bFillWithBots",
+      "label": "Fill with bots",
+      "group": "Bots",
+      "kind": "boolean",
+      "default": "True"
+    },
+    {
+      "key": "BotsDifficulty",
+      "label": "Bot difficulty",
+      "group": "Bots",
+      "kind": "choice",
+      "default": "Normal",
+      "choices": [
+        "Easy",
+        "Normal",
+        "Difficult"
+      ]
+    },
+    {
+      "key": "BotsAmount",
+      "label": "Bot count",
+      "group": "Bots",
+      "kind": "integer",
+      "default": "0",
+      "min": 0,
+      "display": "slider",
+      "step": 1,
+      "maxReference": "MaxPlayers"
+    },
+    {
+      "key": "HeatPercentDamagingCivilian",
+      "label": "Heat from damaging a civilian (%)",
+      "group": "Heat",
+      "kind": "integer",
+      "default": "34",
+      "min": -1,
+      "max": 100
+    },
+    {
+      "key": "HeatPercentDamagingStaff",
+      "label": "Heat from damaging staff (%)",
+      "group": "Heat",
+      "kind": "integer",
+      "default": "34",
+      "min": -1,
+      "max": 100
+    },
+    {
+      "key": "HeatPercentDamagingGuard",
+      "label": "Heat from damaging a guard (%)",
+      "group": "Heat",
+      "kind": "integer",
+      "default": "17",
+      "min": -1,
+      "max": 100
+    },
+    {
+      "key": "HeatPercentDamagingTechnician",
+      "label": "Heat from damaging a technician (%)",
+      "group": "Heat",
+      "kind": "integer",
+      "default": "34",
+      "min": -1,
+      "max": 100
+    },
+    {
+      "key": "HeatPercentDamagingVIP",
+      "label": "Heat from damaging a VIP (%)",
+      "group": "Heat",
+      "kind": "integer",
+      "default": "100",
+      "min": -1,
+      "max": 100
+    },
+    {
+      "key": "ScoldHeatPerSecond",
+      "label": "Heat per second",
+      "group": "Heat",
+      "kind": "decimal",
+      "default": "1.5",
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "HeatDelayForSpyHit",
+      "label": "Heat delay after hitting a spy",
+      "group": "Heat",
+      "kind": "decimal",
+      "default": "2.5",
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "HeatDelayPassiveGain",
+      "label": "Passive heat gain delay",
+      "group": "Heat",
+      "kind": "decimal",
+      "default": "5.0",
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "HeatDelayAggroPostCover",
+      "label": "Heat delay after cover",
+      "group": "Heat",
+      "kind": "decimal",
+      "default": "5.0",
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "HeatDelayToDecay",
+      "label": "Heat decay delay",
+      "group": "Heat",
+      "kind": "decimal",
+      "default": "1.0",
+      "min": 0,
+      "max": 30
+    },
+    {
+      "key": "HeatDecayRate",
+      "label": "Heat decay rate",
+      "group": "Heat",
+      "kind": "decimal",
+      "default": "1.35",
+      "min": 0,
+      "max": 10
+    }
+  ]
+}
