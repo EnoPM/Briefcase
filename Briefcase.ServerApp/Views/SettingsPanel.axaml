@@ -21,11 +21,15 @@
             <TextBlock Text="{app:Tr Key=settings.profiles}" FontSize="17" FontWeight="Bold" />
             <TextBlock Text="{app:Tr Key=settings.profiles_hint}" TextWrapping="Wrap"
                        Foreground="#ADA3B6" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
               <ComboBox x:Name="ProfileChoice" SelectionChanged="ProfileSelectionChanged" />
               <Button x:Name="SwitchProfileButton" Grid.Column="1" Classes="primary"
                       Content="{app:Tr Key=settings.switch_profile}" Click="SwitchProfileClicked" IsEnabled="False" />
+              <Button x:Name="DeleteProfileButton" Grid.Column="2" Classes="danger"
+                      Content="{app:Tr Key=settings.delete_profile}" Click="DeleteProfileClicked" IsEnabled="False" />
             </Grid>
+            <TextBlock Text="{app:Tr Key=settings.delete_profile_hint}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
               <TextBox x:Name="NewProfileName" MaxLength="48"
                        PlaceholderText="{app:Tr Key=settings.profile_name}" />
@@ -107,6 +111,15 @@
             <Button x:Name="UpdateVersionButton" HorizontalAlignment="Left"
                     Content="{app:Tr Key=versions.update_selected}" Click="UpdateVersionClicked"
                     IsEnabled="False" />
+          </StackPanel>
+        </Border>
+        <Border Background="#2D2735" CornerRadius="6" Padding="18">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{app:Tr Key=settings.briefcase_updates_title}" FontSize="17" FontWeight="Bold" />
+            <CheckBox x:Name="BriefcaseUpdatesChoice" Click="BriefcaseUpdatesChanged" IsEnabled="{Binding CanInstall}"
+                      Content="{app:Tr Key=settings.briefcase_updates_enabled}" />
+            <TextBlock Text="{app:Tr Key=settings.briefcase_updates_hint}" TextWrapping="Wrap"
+                       Foreground="#ADA3B6" />
           </StackPanel>
         </Border>
         <Border Background="#2D2735" CornerRadius="6" Padding="18">

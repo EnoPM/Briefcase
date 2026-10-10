@@ -4,6 +4,8 @@ using Avalonia.Platform.Storage;
 
 namespace Briefcase.ServerApp;
 
+public enum ProfileRemovalChoice { Cancel, KeepFiles, DeleteFiles }
+
 public sealed partial class SettingsPanel : UserControl
 {
     private bool _customVersionPath;
@@ -24,6 +26,10 @@ public sealed partial class SettingsPanel : UserControl
         Loaded += (_, _) => DataDirectoryPath.Text =
             DataContext is MainViewModel model ? model.Registry.DataDirectory : AppDataStore.Root;
         Loaded += (_, _) => LoadProfiles();
+        Loaded += (_, _) =>
+        {
+            BriefcaseUpdatesChoice.IsChecked = DataContext is MainViewModel model && model.Registry.BriefcaseUpdatesEnabled;
+        };
         Loaded += (_, _) => UpdateVersionPath();
         Loaded += (_, _) =>
         {
@@ -34,6 +40,7 @@ public sealed partial class SettingsPanel : UserControl
     public event EventHandler? CloseRequested;
     public event Action<string>? RestartRequired;
     public Func<string, IReadOnlyList<string>, Task<bool>>? ConfirmStopServersAsync { get; set; }
+    public Func<AppProfile, Task<ProfileRemovalChoice>>? ConfirmDeleteProfileAsync { get; set; }
 
     private void CloseClicked(object? sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
@@ -55,6 +62,7 @@ public sealed partial class SettingsPanel : UserControl
         CreateProfileButton.IsEnabled = editable;
         SwitchProfileButton.IsEnabled = editable &&
             ProfileChoice.SelectedItem is ComboBoxItem { Tag: string id } && id != store.NextActiveId;
+        UpdateDeleteProfileButton();
         ProfilePendingNote.IsVisible = store.HasPendingActivation;
         ProfileWarning.Text = store.LoadError;
         ProfileWarning.IsVisible = store.LoadError.Length > 0;
@@ -66,6 +74,44 @@ public sealed partial class SettingsPanel : UserControl
         SwitchProfileButton.IsEnabled = DataContext is MainViewModel { IsDemo: false, IsBusy: false } &&
             ProfileChoice.SelectedItem is ComboBoxItem { Tag: string id } &&
             id != AppProfileStore.Current.NextActiveId;
+        UpdateDeleteProfileButton();
+    }
+
+    private void UpdateDeleteProfileButton()
+    {
+        if (DeleteProfileButton is null) return;
+        DeleteProfileButton.IsEnabled = DataContext is MainViewModel { IsDemo: false, IsBusy: false } &&
+            ProfileChoice.SelectedItem is ComboBoxItem { Tag: string id } &&
+            id != "default" && id != AppProfileStore.Current.Active.Id;
+    }
+
+    private async void DeleteProfileClicked(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsDemo: false, IsBusy: false } model ||
+            ProfileChoice.SelectedItem is not ComboBoxItem { Tag: string id } ||
+            ConfirmDeleteProfileAsync is null) return;
+        var profile = AppProfileStore.Current.Profiles.FirstOrDefault(item => item.Id == id);
+        if (profile is null) return;
+        var choice = await ConfirmDeleteProfileAsync(profile);
+        if (choice == ProfileRemovalChoice.Cancel) return;
+        try
+        {
+            var result = AppProfileStore.Current.Remove(id, choice == ProfileRemovalChoice.DeleteFiles,
+                ProfileRemovalSafety.EnsureNoRunningServers);
+            LoadProfiles();
+            if (!result.FilesDeleted)
+                model.Report(AppTranslations.Format("settings.profile_files_retained_after_error",
+                    "Profile removed, but its files remain at {0}.", result.RetainedDirectory ?? ""));
+            else
+                model.ReportTransient(AppTranslations.Get(choice == ProfileRemovalChoice.DeleteFiles
+                    ? "settings.profile_deleted_with_files" : "settings.profile_deleted_keep_files"));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or
+                                      ArgumentException or InvalidOperationException)
+        {
+            model.Report(error.Message);
+            LoadProfiles();
+        }
     }
 
     private void CreateProfileClicked(object? sender, RoutedEventArgs e)
@@ -240,6 +286,26 @@ public sealed partial class SettingsPanel : UserControl
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { model.Report(ex.Message); }
+    }
+
+    private async void BriefcaseUpdatesChanged(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsDemo: false, IsBusy: false } model) return;
+        var enabled = BriefcaseUpdatesChoice.IsChecked == true;
+        var previous = model.Registry.BriefcaseUpdatesEnabled;
+        if (enabled == previous) return;
+        model.Registry.BriefcaseUpdatesEnabled = enabled;
+        try { model.Registry.Save(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            model.Registry.BriefcaseUpdatesEnabled = previous;
+            BriefcaseUpdatesChoice.IsChecked = previous;
+            model.Report(error.Message);
+            return;
+        }
+        await model.BriefcaseUpdatePreferenceChangedAsync();
+        model.ReportTransient(AppTranslations.Get(enabled
+            ? "settings.briefcase_updates_enabled_saved" : "settings.briefcase_updates_disabled_saved"));
     }
 
     private void AddCatalogClicked(object? sender, RoutedEventArgs e)

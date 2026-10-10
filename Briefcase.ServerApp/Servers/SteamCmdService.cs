@@ -40,7 +40,7 @@ public sealed class SteamCmdService
         Directory.CreateDirectory(_toolsFolder);
         var executable = Path.Combine(_toolsFolder, "steamcmd.exe");
         if (File.Exists(executable)) return executable;
-        progress.Report("Downloading SteamCMD from Valve…");
+        progress.Report(AppTranslations.Get("status.preparing_download", "Preparing the download…"));
         using var response = await Http.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > 100_000_000)
@@ -60,7 +60,8 @@ public sealed class SteamCmdService
                     if (total > 100_000_000) throw new InvalidDataException("SteamCMD download is unexpectedly large.");
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                     if (response.Content.Headers.ContentLength is > 0 and var expected)
-                        progress.Report($"Downloading SteamCMD: {total * 100 / expected}%");
+                        progress.Report(AppTranslations.Format("status.downloading_tools", "Preparing download: {0}%",
+                            total * 100 / expected));
                 }
             }
             using var archive = ZipFile.OpenRead(archiveFile);
@@ -107,7 +108,8 @@ public sealed class SteamCmdService
         var steamcmd = await EnsureInstalledAsync(progress, cancellationToken);
         Directory.CreateDirectory(root);
         if (!updating && !resume) File.WriteAllText(marker, branch);
-        progress.Report(updating ? "SteamCMD is checking the dedicated server…" : "Installing the dedicated server…");
+        progress.Report(AppTranslations.Get(updating ? "status.updating_server" : "status.installing_server",
+            updating ? "Updating the dedicated server…" : "Installing the dedicated server…"));
         var start = new ProcessStartInfo(steamcmd)
         {
             WorkingDirectory = _toolsFolder,
@@ -135,7 +137,8 @@ public sealed class SteamCmdService
                     needsBootstrapRetry = true;
                 if (line.Contains("ERROR", StringComparison.OrdinalIgnoreCase) ||
                     line.Contains("Failed", StringComparison.OrdinalIgnoreCase)) failureLine = line;
-                progress.Report(line);
+                if (Regex.IsMatch(line, @"progress:\s*\d", RegexOptions.IgnoreCase))
+                    progress.Report(line);
             }
             var output = ConsumeAsync(child.StandardOutput, line =>
             {
@@ -146,12 +149,12 @@ public sealed class SteamCmdService
             await Task.WhenAll(output, error, child.WaitForExitAsync(cancellationToken));
             if (child.ExitCode == 0 && succeeded && File.Exists(shipping))
             {
-                progress.Report("Dedicated server is installed and ready to add.");
+                progress.Report(AppTranslations.Get("status.server_files_ready", "Dedicated server files are ready."));
                 return shipping;
             }
             if (attempt == 0 && needsBootstrapRetry)
             {
-                progress.Report("SteamCMD finished its first-time setup; retrying the server download…");
+                progress.Report(AppTranslations.Get("status.retrying_server_download", "Retrying the server download…"));
                 await Task.Delay(1500, cancellationToken);
                 continue;
             }

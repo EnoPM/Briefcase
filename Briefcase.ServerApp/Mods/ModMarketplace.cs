@@ -15,7 +15,8 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
     string? LogoUrl = null, Bitmap? Logo = null, string Author = "", string? LogoSha256 = null,
     string? DocumentationUrl = null, string? DiscordUrl = null, string? HomepageUrl = null,
     int CatalogSchema = 1, string? FormSchemaOverrideUrl = null, string? FormSchemaOverrideSha256 = null,
-    IReadOnlyDictionary<string, ModFormAsset>? FormTranslations = null)
+    IReadOnlyDictionary<string, ModFormAsset>? FormTranslations = null,
+    string? ConfigSchemaUrl = null, string? ConfigSchemaSha256 = null)
 {
     public bool IsInstalled { get; init; }
     public bool CanApply { get; init; }
@@ -31,7 +32,8 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
 
 public sealed record InstalledModMetadata(string Id, string Version, string Name, string Author,
     string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl,
-    int? LegacyMaxPlayersMaximum = null, string Sha256 = "", string FormSchemaOverrideSha256 = "");
+    int? LegacyMaxPlayersMaximum = null, string Sha256 = "", string FormSchemaOverrideSha256 = "",
+    string ConfigSchemaSha256 = "");
 
 public sealed class ModMarketplace
 {
@@ -75,6 +77,8 @@ public sealed class ModMarketplace
             var homepage = OptionalUrl(item, "homepageUrl");
             var formUrl = OptionalUrl(item, "formSchemaOverrideUrl");
             var formHash = schema == 2 ? RequiredOptionalString(item, "formSchemaOverrideSha256") : null;
+            var configSchemaUrl = OptionalUrl(item, "configSchemaUrl");
+            var configSchemaHash = RequiredOptionalString(item, "configSchemaSha256");
             var formTranslations = ReadFormTranslations(item);
             if (!ids.Add(id) || !Regex.IsMatch(id, schema == 2 ? ModIdPattern : LegacyIdPattern) ||
                 id.Length > 64 || name.Length is < 1 or > 128 ||
@@ -86,6 +90,8 @@ public sealed class ModMarketplace
                     logoHash is not null && !Regex.IsMatch(logoHash, "^[a-fA-F0-9]{64}$") ||
                     (formUrl is null) != (formHash is null) ||
                     formHash is not null && !Regex.IsMatch(formHash, "^[a-fA-F0-9]{64}$")) ||
+                (configSchemaUrl is null) != (configSchemaHash is null) ||
+                configSchemaHash is not null && !Regex.IsMatch(configSchemaHash, "^[a-fA-F0-9]{64}$") ||
                 logoUrl is not null && (!Uri.TryCreate(logoUrl, UriKind.Absolute, out var logo) ||
                     logo.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(logo.UserInfo)))
                 throw new InvalidDataException("Catalog contains an invalid mod entry.");
@@ -93,7 +99,8 @@ public sealed class ModMarketplace
                 LogoUrl: logoUrl, Author: author, LogoSha256: logoHash?.ToLowerInvariant(),
                 DocumentationUrl: documentation, DiscordUrl: discord, HomepageUrl: homepage,
                 CatalogSchema: schema, FormSchemaOverrideUrl: formUrl,
-                FormSchemaOverrideSha256: formHash?.ToLowerInvariant(), FormTranslations: formTranslations));
+                FormSchemaOverrideSha256: formHash?.ToLowerInvariant(), FormTranslations: formTranslations,
+                ConfigSchemaUrl: configSchemaUrl, ConfigSchemaSha256: configSchemaHash?.ToLowerInvariant()));
         }
         return mods;
     }
@@ -156,7 +163,8 @@ public sealed class ModMarketplace
                 await output.WriteAsync(bytes.AsMemory(0, read), cancellationToken);
                 sha.TransformBlock(bytes, 0, read, null, 0);
                 if (response.Content.Headers.ContentLength is > 0 and var size)
-                    progress.Report($"Downloading {mod.Name}: {copied * 100 / size}%");
+                    progress.Report(AppTranslations.Format("status.downloading_mod", "Downloading {0}: {1}%",
+                        mod.Name, copied * 100 / size));
             }
             sha.TransformFinalBlock([], 0, 0);
             if (!Convert.ToHexString(sha.Hash!).Equals(mod.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -171,6 +179,14 @@ public sealed class ModMarketplace
         if (mod.FormSchemaOverrideUrl is null) return null;
         var bytes = await DownloadFormAssetAsync(mod.FormSchemaOverrideUrl, mod.FormSchemaOverrideSha256!, cancellationToken);
         FormSchema.LoadBase().ApplyOverride(bytes);
+        return bytes;
+    }
+
+    public static async Task<byte[]?> DownloadConfigSchemaAsync(MarketplaceMod mod, CancellationToken cancellationToken)
+    {
+        if (mod.ConfigSchemaUrl is null) return null;
+        var bytes = await DownloadFormAssetAsync(mod.ConfigSchemaUrl, mod.ConfigSchemaSha256!, cancellationToken);
+        ModConfigEditor.ValidateSchema(bytes);
         return bytes;
     }
 
@@ -239,7 +255,8 @@ public sealed class ModMarketplace
                 legacyMaximum = oldMaximum;
             return new InstalledModMetadata(modId, Read("version"), Read("name"), Read("author"),
                 Read("description"), Read("catalog"), Read("documentationUrl"), Read("discordUrl"),
-                Read("homepageUrl"), legacyMaximum, Read("sha256"), Read("formSchemaOverrideSha256"));
+                Read("homepageUrl"), legacyMaximum, Read("sha256"), Read("formSchemaOverrideSha256"),
+                Read("configSchemaSha256"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
                                    KeyNotFoundException or InvalidOperationException)
@@ -261,23 +278,30 @@ public sealed class ModMarketplace
         var modRoot = Path.Combine(location.ModsRoot, mod.Id);
         var dataRoot = Path.Combine(modRoot, "Data");
         var formPath = Path.Combine(dataRoot, "server-configuration.override.json");
+        var configSchemaPath = Path.Combine(dataRoot, "config.schema.json");
         var translationsRoot = Path.Combine(dataRoot, "FormTranslations");
         var needsForm = mod.FormSchemaOverrideUrl is not null &&
             (!File.Exists(formPath) || installed.FormSchemaOverrideSha256.Length == 64 &&
                 !installed.FormSchemaOverrideSha256.Equals(mod.FormSchemaOverrideSha256,
                     StringComparison.OrdinalIgnoreCase) &&
                 ExistingFormHashMatches(formPath, installed.FormSchemaOverrideSha256));
+        var needsConfigSchema = mod.ConfigSchemaUrl is not null &&
+            (!File.Exists(configSchemaPath) || installed.ConfigSchemaSha256.Length == 64 &&
+                !installed.ConfigSchemaSha256.Equals(mod.ConfigSchemaSha256,
+                    StringComparison.OrdinalIgnoreCase) &&
+                ExistingFormHashMatches(configSchemaPath, installed.ConfigSchemaSha256));
         var missingTranslations = mod.FormTranslations?.Where(item =>
             !File.Exists(Path.Combine(translationsRoot, item.Key + ".json"))).ToArray() ?? [];
-        if (!needsForm && missingTranslations.Length == 0) return false;
+        if (!needsForm && !needsConfigSchema && missingTranslations.Length == 0) return false;
         var form = needsForm ? await DownloadFormOverrideAsync(mod, cancellationToken) : null;
+        var configSchema = needsConfigSchema ? await DownloadConfigSchemaAsync(mod, cancellationToken) : null;
         var translations = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var (language, asset) in missingTranslations)
             translations.Add(language, await DownloadFormAssetAsync(asset.Url, asset.Sha256, cancellationToken));
-        return RestoreFormAssets(location, mod, form, translations);
+        return RestoreFormAssets(location, mod, form, translations, configSchema);
     }
     public static bool RestoreFormAssets(ServerLocation location, MarketplaceMod mod, byte[]? form,
-        IReadOnlyDictionary<string, byte[]> translations)
+        IReadOnlyDictionary<string, byte[]> translations, byte[]? configSchema = null)
     {
         var installed = InstalledMetadata(location, mod.Id);
         if (installed is null || !installed.Catalog.Equals(mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
@@ -294,13 +318,28 @@ public sealed class ModMarketplace
         if (form is not null && mod.FormSchemaOverrideSha256 is { Length: 64 } expectedHash &&
             !Convert.ToHexString(SHA256.HashData(form)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Mod form override checksum does not match the catalog.");
-        if (form is null && translations.Count == 0) return false;
+        if (configSchema is not null)
+        {
+            ModConfigEditor.ValidateSchema(configSchema);
+            if (mod.ConfigSchemaSha256 is not { Length: 64 } schemaHash ||
+                !Convert.ToHexString(SHA256.HashData(configSchema)).Equals(schemaHash,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Mod configuration schema checksum does not match the catalog.");
+        }
+        if (form is null && configSchema is null && translations.Count == 0) return false;
         Directory.CreateDirectory(dataRoot);
         var formChanged = form is not null && WriteFormFile(Path.Combine(dataRoot,
             "server-configuration.override.json"), form, installed.FormSchemaOverrideSha256);
         if (formChanged && mod.FormSchemaOverrideSha256 is { Length: 64 } newHash)
-            UpdateInstalledFormHash(Path.Combine(modRoot, ".serverapp-install.json"), newHash);
+            UpdateInstalledFormHash(Path.Combine(modRoot, ".serverapp-install.json"),
+                "formSchemaOverrideSha256", newHash);
         var changed = formChanged;
+        var configSchemaChanged = configSchema is not null && WriteFormFile(Path.Combine(dataRoot,
+            "config.schema.json"), configSchema, installed.ConfigSchemaSha256);
+        if (configSchemaChanged && mod.ConfigSchemaSha256 is { Length: 64 } newSchemaHash)
+            UpdateInstalledFormHash(Path.Combine(modRoot, ".serverapp-install.json"),
+                "configSchemaSha256", newSchemaHash);
+        changed |= configSchemaChanged;
         if (translations.Count > 0) Directory.CreateDirectory(translationsRoot);
         foreach (var (language, bytes) in translations)
         {
@@ -340,13 +379,13 @@ public sealed class ModMarketplace
             .Equals(expectedHash, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void UpdateInstalledFormHash(string path, string hash)
+    private static void UpdateInstalledFormHash(string path, string key, string hash)
     {
         if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
             throw new InvalidDataException("The mod installation metadata is a link.");
         var metadata = JsonNode.Parse(File.ReadAllBytes(path))?.AsObject()
             ?? throw new InvalidDataException("Invalid mod installation metadata.");
-        metadata["formSchemaOverrideSha256"] = hash;
+        metadata[key] = hash;
         var temp = path + ".serverapp-" + Guid.NewGuid().ToString("N") + ".tmp";
         try { File.WriteAllText(temp, metadata.ToJsonString()); File.Move(temp, path, true); }
         finally { if (File.Exists(temp)) File.Delete(temp); }
@@ -356,7 +395,8 @@ public sealed class ModMarketplace
         File.Exists(Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll"));
 
     public static void Install(ServerLocation location, MarketplaceMod mod, string archiveFile, byte[]? logoBytes = null,
-        byte[]? formOverrideBytes = null, IReadOnlyDictionary<string, byte[]>? formTranslations = null)
+        byte[]? formOverrideBytes = null, IReadOnlyDictionary<string, byte[]>? formTranslations = null,
+        byte[]? configSchemaBytes = null)
     {
         using (var running = ServerProcess.Find(location))
             if (running is not null) throw new InvalidOperationException("Stop the server before installing or updating a mod.");
@@ -422,6 +462,17 @@ public sealed class ModMarketplace
                 Directory.CreateDirectory(formDirectory);
                 File.WriteAllBytes(Path.Combine(formDirectory, "server-configuration.override.json"), formOverrideBytes);
             }
+            if (configSchemaBytes is not null)
+            {
+                ModConfigEditor.ValidateSchema(configSchemaBytes);
+                if (mod.ConfigSchemaSha256 is not { Length: 64 } schemaHash ||
+                    !Convert.ToHexString(SHA256.HashData(configSchemaBytes)).Equals(schemaHash,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Mod configuration schema checksum does not match the catalog.");
+                var formDirectory = Path.Combine(newFolder, "Data");
+                Directory.CreateDirectory(formDirectory);
+                File.WriteAllBytes(Path.Combine(formDirectory, "config.schema.json"), configSchemaBytes);
+            }
             if (formTranslations is not null && formTranslations.Count > 0)
             {
                 var languageDirectory = Path.Combine(newFolder, "Data", "FormTranslations");
@@ -452,6 +503,8 @@ public sealed class ModMarketplace
                 if (mod.HomepageUrl is not null) writer.WriteString("homepageUrl", mod.HomepageUrl);
                 if (mod.FormSchemaOverrideUrl is not null) writer.WriteString("formSchemaOverrideUrl", mod.FormSchemaOverrideUrl);
                 if (mod.FormSchemaOverrideSha256 is not null) writer.WriteString("formSchemaOverrideSha256", mod.FormSchemaOverrideSha256);
+                if (mod.ConfigSchemaUrl is not null) writer.WriteString("configSchemaUrl", mod.ConfigSchemaUrl);
+                if (mod.ConfigSchemaSha256 is not null) writer.WriteString("configSchemaSha256", mod.ConfigSchemaSha256);
                 writer.WriteEndObject();
             }
             var previousConfig = Path.Combine(target, "Data", "config.json");

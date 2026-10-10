@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Avalonia.Media;
+using Avalonia.Threading;
 
 namespace Briefcase.ServerApp;
 
@@ -90,6 +91,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public void Dispose()
     {
         _disposed = true;
+        _messageClearTimer.Stop();
         _updateRevision++;
         lock (_connectionGate)
         {
@@ -102,12 +104,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
     private string _win64Path = "";
-    private string _message = AppTranslations.Get("status.choose_server");
+    private string _message = "";
     private string _serverName = "—";
     private string _serverState = "Offline";
     private string _mapName = "—";
     private string _gameMode = "—";
     private string _playerCountText = "—";
+    private ServerNetworkStatus _networkStatus = ServerNetworkStatus.Unknown;
     private string _dataSource = "No server selected";
     private bool _isRunning;
     private bool _isBusy;
@@ -122,6 +125,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly SemaphoreSlim _teamGate = new(1, 1);
     private readonly SemaphoreSlim _updateGate = new(1, 1);
+    private readonly DispatcherTimer _messageClearTimer = new() { Interval = TimeSpan.FromSeconds(12) };
     private readonly Dictionary<string, UpdateCacheEntry> _updateCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _runtimeChecked;
     private sealed record UpdateCacheEntry(string GameStatus, string BriefcaseStatus,
@@ -169,6 +173,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(NoInstalledMods));
         };
         IsDemo = demo;
+        _messageClearTimer.Tick += (_, _) =>
+        {
+            if (!IsBusy) Message = IsDemo ? AppTranslations.Get("status.demo_data") : "";
+        };
         Registry = registry ?? new ServerRegistry(inMemory: demo);
         if (demo)
         {
@@ -189,6 +197,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (Set(ref _selectedServer, value))
             {
+                Message = IsDemo ? AppTranslations.Get("status.demo_data") : "";
                 _selectionRevision++;
                 _updateRevision++;
                 IsCheckingUpdates = false;
@@ -213,6 +222,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 MapName = "—";
                 GameMode = "—";
                 PlayerCountText = "—";
+                NetworkStatus = ServerNetworkStatus.Unknown;
                 DataSource = "No server selected";
                 OnPropertyChanged(nameof(RosterMessage));
                 Win64Path = value?.Win64 ?? "";
@@ -245,7 +255,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool BriefcaseActionVisible { get => _briefcaseActionVisible; private set { if (Set(ref _briefcaseActionVisible, value)) UpdateActions(); } }
     public bool RuntimeInstallVisible { get => _runtimeInstallVisible; private set { if (Set(ref _runtimeInstallVisible, value)) UpdateActions(); } }
     public bool CanUpdateGame => GameUpdateAvailable && !IsRunning && !IsBusy;
-    public bool CanInstallBriefcase => BriefcaseActionVisible && !IsRunning && !IsBusy;
+    public bool CanInstallBriefcase => BriefcaseActionVisible && !IsRunning && !IsBusy &&
+        (Registry.BriefcaseUpdatesEnabled || BriefcaseInstalledVersion == "—");
     public bool CanInstallRuntime => RuntimeInstallVisible && !IsBusy;
     public string GameUpdateStatus { get => _gameUpdateStatus; private set => Set(ref _gameUpdateStatus, value); }
     public string BriefcaseUpdateStatus { get => _briefcaseUpdateStatus; private set => Set(ref _briefcaseUpdateStatus, value); }
@@ -288,7 +299,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ServerPathHint => string.IsNullOrWhiteSpace(Win64Path)
         ? AppTranslations.Get("status.server_path_hint")
         : Win64Path;
-    public string Message { get => _message; private set => Set(ref _message, value); }
+    public string Message
+    {
+        get => _message;
+        private set
+        {
+            _messageClearTimer.Stop();
+            if (Set(ref _message, value)) OnPropertyChanged(nameof(HasMessage));
+        }
+    }
+    public bool HasMessage => !string.IsNullOrWhiteSpace(Message);
     public double ProgressPercent { get => _progressPercent; private set => Set(ref _progressPercent, value); }
     public bool ProgressIndeterminate { get => _progressIndeterminate; private set => Set(ref _progressIndeterminate, value); }
     public string ServerName { get => _serverName; private set => Set(ref _serverName, value); }
@@ -297,6 +317,46 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string MapName { get => _mapName; private set => Set(ref _mapName, value); }
     public string GameMode { get => _gameMode; private set { if (Set(ref _gameMode, value)) OnPropertyChanged(nameof(TeamSize)); } }
     public string PlayerCountText { get => _playerCountText; private set => Set(ref _playerCountText, value); }
+    public ServerNetworkStatus NetworkStatus
+    {
+        get => _networkStatus;
+        private set
+        {
+            if (!Set(ref _networkStatus, value)) return;
+            OnPropertyChanged(nameof(NetworkAddress));
+            OnPropertyChanged(nameof(CanCopyNetworkAddress));
+            OnPropertyChanged(nameof(NetworkFirewall));
+            OnPropertyChanged(nameof(NetworkUpnp));
+            OnPropertyChanged(nameof(NetworkEos));
+            OnPropertyChanged(nameof(NetworkFirewallColor));
+            OnPropertyChanged(nameof(NetworkUpnpColor));
+            OnPropertyChanged(nameof(NetworkEosColor));
+        }
+    }
+    public string NetworkAddress => CanCopyNetworkAddress ? NetworkStatus.Address : "—";
+    public bool CanCopyNetworkAddress => NetworkStatus.Address.Length > 0;
+    public string NetworkFirewall => NetworkLabel(NetworkStatus.Firewall, "network.allowed", "network.blocked");
+    public string NetworkUpnp => NetworkLabel(NetworkStatus.Upnp, "network.mapped", "network.failed");
+    public string NetworkEos => NetworkLabel(NetworkStatus.Eos, "network.connected", "network.failed");
+    public IBrush NetworkFirewallColor => NetworkColor(NetworkStatus.Firewall);
+    public IBrush NetworkUpnpColor => NetworkColor(NetworkStatus.Upnp);
+    public IBrush NetworkEosColor => NetworkColor(NetworkStatus.Eos);
+
+    private static string NetworkLabel(NetworkCheck check, string readyKey, string failedKey) => check switch
+    {
+        NetworkCheck.Ready => AppTranslations.Get(readyKey),
+        NetworkCheck.Failed => AppTranslations.Get(failedKey),
+        NetworkCheck.Disabled => AppTranslations.Get("network.disabled"),
+        _ => AppTranslations.Get("network.unknown")
+    };
+
+    private static IBrush NetworkColor(NetworkCheck check) => check switch
+    {
+        NetworkCheck.Ready => new SolidColorBrush(Color.Parse("#67C99B")),
+        NetworkCheck.Failed => new SolidColorBrush(Color.Parse("#E78391")),
+        NetworkCheck.Disabled => new SolidColorBrush(Color.Parse("#BAA5D0")),
+        _ => new SolidColorBrush(Color.Parse("#8F859B"))
+    };
     public string DataSource { get => _dataSource; private set { if (Set(ref _dataSource, value)) OnPropertyChanged(nameof(DataSourceDisplay)); } }
     public string DataSourceDisplay => AppTranslations.Get("source." + DataSource, DataSource);
     public bool IsRunning
@@ -334,7 +394,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (IsDemo) throw new InvalidOperationException("The screenshot preview cannot add servers.");
         var row = Registry.Add(executable, managed, serverName);
         SelectedServer = row;
-        Message = AppTranslations.Get("status.server_added");
+        ReportTransient(AppTranslations.Get("status.server_added"));
         return row;
     }
 
@@ -386,7 +446,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             if (existing is null) Registry.AddInstallation(branch, root);
             else Registry.RefreshInstallation(existing);
-            Message = AppTranslations.Format("versions.installed", "Steam branch {0} is ready.", branch);
+            ReportTransient(AppTranslations.Format("versions.installed", "Steam branch {0} is ready.", branch));
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
@@ -407,8 +467,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             Registry.Migrate(row, target);
             Win64Path = row.Win64;
             _updateCache.Clear();
-            Message = AppTranslations.Format("versions.migrated",
-                "Server configuration moved to the {0} installation; original game files were kept.", target.Branch);
+            ReportTransient(AppTranslations.Format("versions.migrated",
+                "Server configuration moved to the {0} installation; original game files were kept.", target.Branch));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or
             InvalidOperationException or ArgumentException)
@@ -426,7 +486,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (IsDemo) { ReportPreviewOnly(); return; }
         Registry.Remove(row);
         if (SelectedServer == row) SelectedServer = Servers.FirstOrDefault();
-        Message = AppTranslations.Get("status.server_removed");
+        ReportTransient(AppTranslations.Get("status.server_removed"));
     }
 
     public async Task RemoveServerAsync(ServerRow row, bool deleteFiles)
@@ -444,13 +504,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 await ServerRemoval.DeleteFilesAsync(location!);
             }
             ForgetServer(row);
-            if (deleteFiles) Message = AppTranslations.Get("status.server_deleted");
+            if (deleteFiles) ReportTransient(AppTranslations.Get("status.server_deleted"));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Message = ex.Message; }
         finally { IsBusy = false; await RefreshAsync(); }
     }
 
     public void Report(string text) => Message = text;
+
+    public void ReportTransient(string text)
+    {
+        Message = text;
+        if (HasMessage) _messageClearTimer.Start();
+    }
 
     public IReadOnlyList<ServerRow> RunningDataServers()
     {
@@ -506,8 +572,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var oldDataRetained = await Task.Run(() => AppDataStore.Move(source, target, AppDataStore.LocatorFile));
             Registry.ReloadFromDataDirectory(target);
             SelectedServer = Servers.FirstOrDefault(row => row.Id == selectedId) ?? Servers.FirstOrDefault();
-            Message = AppTranslations.Get(oldDataRetained
-                ? "settings.data_moved_old_retained" : "settings.data_moved");
+            ReportTransient(AppTranslations.Get(oldDataRetained
+                ? "settings.data_moved_old_retained" : "settings.data_moved"));
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or
@@ -539,7 +605,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
         var result = await connection.KickAsync(player.Token, CancellationToken.None);
-        Message = result.Ok ? $"{player.Name}: {result.Message}" : AppTranslations.Format("status.kick_failed", "Kick failed: {0}", result.Message);
+        if (result.Ok)
+            ReportTransient(AppTranslations.Format("status.player_kicked", "{0} was removed from the server.", player.Name));
+        else
+            Message = AppTranslations.Format("status.kick_failed", "Kick failed: {0}", result.Message);
         await RefreshAsync();
     }
 
@@ -610,9 +679,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var result = swapWith is null
                 ? await connection!.MoveTeamAsync(player.Token, targetTeam, size, CancellationToken.None)
                 : await connection!.SwapTeamAsync(player.Token, swapWith.Token, size, CancellationToken.None);
-            Message = result.Ok
-                ? AppTranslations.Get(swapWith is null ? "player.move_success" : "player.swap_success")
-                : AppTranslations.Format("player.team_failed", "Team change failed: {0}", result.Message);
+            if (result.Ok)
+                ReportTransient(AppTranslations.Get(swapWith is null ? "player.move_success" : "player.swap_success"));
+            else
+                Message = AppTranslations.Format("player.team_failed", "Team change failed: {0}", result.Message);
             if (result.Ok) await RefreshAsync();
         }
         finally { _teamGate.Release(); }
@@ -632,7 +702,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (File.Exists(existingShipping) && File.Exists(Path.Combine(folder, "steamapps", "appmanifest_5007710.acf")))
             {
                 AddServer(existingShipping, managed: true, serverName: serverName);
-                Message = AppTranslations.Get("status.existing_server_added");
+                ReportTransient(AppTranslations.Get("status.existing_server_added"));
                 return;
             }
             var sharedInstall = serverName is not null && string.Equals(Path.GetFullPath(folder),
@@ -665,7 +735,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             if (!File.Exists(shipping)) throw new IOException("The dedicated server installation is incomplete.");
             AddServer(shipping, managed: true, serverName: serverName);
-            Message = AppTranslations.Get("status.server_installed");
+            ReportTransient(AppTranslations.Get("status.server_installed"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
             InvalidDataException or System.Net.Http.HttpRequestException or Win32Exception)
@@ -701,7 +771,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var installation = Installations.FirstOrDefault(item =>
                 item.Win64.Equals(location!.Win64, StringComparison.OrdinalIgnoreCase));
             if (installation is not null) Registry.RefreshInstallation(installation);
-            Message = AppTranslations.Get("status.server_current");
+            ReportTransient(AppTranslations.Get("status.server_current"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
             InvalidDataException or System.Net.Http.HttpRequestException or Win32Exception)
@@ -714,7 +784,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public void AddCatalog()
     {
         if (IsDemo) { ReportPreviewOnly(); return; }
-        try { Registry.AddCatalog(CatalogUrlDraft.Trim()); CatalogUrlDraft = ""; Message = AppTranslations.Get("status.catalog_saved"); }
+        try { Registry.AddCatalog(CatalogUrlDraft.Trim()); CatalogUrlDraft = ""; ReportTransient(AppTranslations.Get("status.catalog_saved")); }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException) { Message = ex.Message; }
     }
 
@@ -722,10 +792,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         if (IsDemo) { ReportPreviewOnly(); return; }
         Registry.RemoveCatalog(url);
-        Message = AppTranslations.Get("status.catalog_removed");
+        ReportTransient(AppTranslations.Get("status.catalog_removed"));
     }
 
-    public async Task RefreshMarketplaceAsync() => await RunBusyAsync(async _ =>
+    public async Task RefreshMarketplaceAsync(bool announce = false) => await RunBusyAsync(async _ =>
     {
         var marketplace = new ModMarketplace();
         var list = new List<MarketplaceMod>();
@@ -759,15 +829,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var withLogos = await Task.WhenAll(list.Select(async mod =>
         {
             await logoGate.WaitAsync();
-            try { return mod with { Logo = await ModLogo.FromUrlAsync(mod.LogoUrl, mod.LogoSha256, CancellationToken.None) }; }
+            try { return mod with { Logo = ModLogo.ForMarketplaceMod(mod) ??
+                await ModLogo.FromUrlAsync(mod.LogoUrl, mod.LogoSha256, CancellationToken.None) }; }
             finally { logoGate.Release(); }
         }));
         MarketplaceMods.Clear();
         foreach (var mod in withLogos.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)) MarketplaceMods.Add(mod);
-        var summary = AppTranslations.Format("status.catalog_loaded", "Loaded {0} mods from {1} catalogs.",
-            list.Count, sources.Count);
-        return formError is null ? summary : summary + " Mod form update failed: " + formError;
-    });
+        var updatedRows = ModCatalog.WithAvailableUpdates(Mods.ToArray(), MarketplaceMods);
+        for (var index = 0; index < updatedRows.Count; index++)
+            if (!Equals(Mods[index], updatedRows[index])) Mods[index] = updatedRows[index];
+        if (formError is not null)
+            throw new InvalidDataException(AppTranslations.Format("status.mod_form_update_failed",
+                "A mod configuration form could not be updated: {0}", formError));
+        return AppTranslations.Get("status.catalog_refreshed", "Mod catalog refreshed.");
+    }, announce);
 
     private static MarketplaceMod WithMarketplaceStatus(ServerLocation location, MarketplaceMod mod)
     {
@@ -812,7 +887,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     throw new InvalidDataException("The mod logo could not be downloaded or verified.");
                 var formOverride = await ModMarketplace.DownloadFormOverrideAsync(mod, CancellationToken.None);
                 var formTranslations = await ModMarketplace.DownloadFormTranslationsAsync(mod, CancellationToken.None);
-                await Task.Run(() => ModMarketplace.Install(location!, mod, archive, logo, formOverride, formTranslations));
+                var configSchema = await ModMarketplace.DownloadConfigSchemaAsync(mod, CancellationToken.None);
+                await Task.Run(() => ModMarketplace.Install(location!, mod, archive, logo, formOverride,
+                    formTranslations, configSchema));
             }
             finally { if (File.Exists(archive)) File.Delete(archive); }
         }
@@ -920,7 +997,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     AppTranslations.Get("versions.beta_updates_in_settings",
                         "Update this beta branch from application settings.")))
                 : CheckGameAsync(location!, tools);
-            var briefcaseTask = CheckBriefcaseAsync(location!);
+            var skipBriefcaseRelease = !Registry.BriefcaseUpdatesEnabled && BriefcaseInstalledVersion != "—";
+            var briefcaseTask = skipBriefcaseRelease
+                ? Task.FromResult<(BriefcaseInstallService.VersionCheck? Check, string? Error)>((null, null))
+                : CheckBriefcaseAsync(location!);
             await Task.WhenAll(gameTask, briefcaseTask);
             if (_disposed || revision != _updateRevision) return;
             var game = gameTask.Result;
@@ -936,6 +1016,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 (game.Check?.UpdateAvailable == true
                     ? AppTranslations.Format("updates.game_available", "Installed build {0}; public build {1}.", game.Check.Installed!, game.Check.Public!)
                     : AppTranslations.Format("updates.game_current", "Up to date (build {0}).", game.Check?.Installed ?? "?"));
+            if (skipBriefcaseRelease)
+            {
+                ShowBriefcaseUpdatesDisabled();
+                RememberCurrentUpdates(key);
+                return;
+            }
             var developmentBuild = BriefcaseInstallService.IsDevelopmentBuild(BriefcaseInstalledVersion);
             BriefcaseActionVisible = !developmentBuild &&
                 (briefcase.Check is { InstallNeeded: true } or { UpdateAvailable: true });
@@ -971,6 +1057,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public Task RefreshGameUpdateAsync() => RefreshComponentAsync(UpdateComponent.Game);
     public Task RefreshBriefcaseUpdateAsync() => RefreshComponentAsync(UpdateComponent.Briefcase);
     public Task RefreshRuntimeUpdateAsync() => RefreshComponentAsync(UpdateComponent.Runtime);
+
+    public async Task BriefcaseUpdatePreferenceChangedAsync()
+    {
+        _updateCache.Clear();
+        UpdateActions();
+        if (SelectedServer is not null) await RefreshBriefcaseUpdateAsync();
+    }
+
+    private void ShowBriefcaseUpdatesDisabled()
+    {
+        BriefcaseActionVisible = false;
+        BriefcaseAppearance = BriefcaseInstallService.IsDevelopmentBuild(BriefcaseInstalledVersion)
+            ? UpdatePanelAppearance.Development : UpdatePanelAppearance.Neutral;
+        BriefcaseUpdateStatus = AppTranslations.Get("updates.briefcase_disabled");
+    }
 
     private async Task RefreshComponentAsync(UpdateComponent component)
     {
@@ -1047,6 +1148,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 try { BriefcaseInstalledVersion = GitHubReleaseService.InstalledBriefcaseVersion(location!) ?? "—"; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
                 { BriefcaseInstalledVersion = "—"; }
+                if (!Registry.BriefcaseUpdatesEnabled && BriefcaseInstalledVersion != "—")
+                {
+                    ShowBriefcaseUpdatesDisabled();
+                    RememberCurrentUpdates(key);
+                    return;
+                }
                 var result = await CheckBriefcaseAsync(location!);
                 if (_disposed || revision != _updateRevision) return;
                 BriefcaseInstalledVersion = result.Check?.Installed ?? BriefcaseInstalledVersion;
@@ -1109,6 +1216,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public async Task InstallBriefcaseAsync() => await RunBusyAsync(async progress =>
     {
         if (!ServerLocation.TryCreate(SelectedServer, out var location, out var error)) throw new InvalidDataException(error);
+        if (!Registry.BriefcaseUpdatesEnabled &&
+            GitHubReleaseService.InstalledBriefcaseVersion(location!) is not null)
+            throw new InvalidOperationException(AppTranslations.Get("updates.briefcase_disabled"));
         if (ElevatedUpdateService.NeedsElevation(location!.Win64) ||
             ElevatedUpdateService.NeedsElevation(location.BriefcaseRoot))
         {
@@ -1129,7 +1239,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return await new VisualCppInstaller().InstallAsync(folder, progress, CancellationToken.None);
     });
 
-    private async Task RunBusyAsync(Func<IProgress<string>, Task<string>> action)
+    private async Task RunBusyAsync(Func<IProgress<string>, Task<string>> action, bool reportSuccess = true)
     {
         if (IsDemo) { ReportPreviewOnly(); return; }
         if (IsBusy) return;
@@ -1138,7 +1248,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             using var progress = new OperationProgress(ReportProgress);
-            Message = await action(progress);
+            var result = await action(progress);
+            if (reportSuccess) ReportTransient(result);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Message = ex.Message; }
         finally { IsBusy = false; await RefreshAsync(); }
@@ -1193,6 +1304,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 IsRunning = false;
                 ServerState = "Offline";
+                NetworkStatus = ServerNetworkStatus.Unknown;
                 DataSource = "No server selected";
                 if (SelectedServer is not null) Message = error;
                 Players.Clear();
@@ -1204,10 +1316,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 OnPropertyChanged(nameof(RosterMessage));
                 return;
             }
-            var (pid, snapshot, mods) = await Task.Run(() =>
+            var (pid, snapshot, mods, network) = await Task.Run(() =>
             {
                 using var process = ServerProcess.Find(location!);
-                return (process?.Id, SnapshotFor(location!, process?.Id, ProcessUptime(process)), ModCatalog.Read(location!));
+                var status = ServerNetworkStatus.Unknown;
+                if (process is not null)
+                {
+                    try { status = ServerNetworkStatusReader.Read(location!, process.StartTime.ToUniversalTime()); }
+                    catch (Exception ex) when (ex is Win32Exception or InvalidOperationException) { }
+                }
+                return (process?.Id, SnapshotFor(location!, process?.Id, ProcessUptime(process)),
+                    ModCatalog.Read(location!), status);
             });
             if (revision != _selectionRevision) return;
             IsRunning = pid is not null;
@@ -1215,6 +1334,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             ServerState = snapshot.State;
             MapName = GameMapNames.Display(snapshot.Map);
             GameMode = snapshot.GameMode;
+            NetworkStatus = network;
             PlayerCountText = snapshot.PlayerCount is { } count
                 ? $"{count} / {snapshot.MaxPlayers?.ToString() ?? "?"}"
                 : "—";
@@ -1226,19 +1346,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 foreach (var player in snapshot.Players) Players.Add(player);
             }
             RebuildPlayerTeams(snapshot);
-            if (!Mods.SequenceEqual(mods))
+            var displayedMods = ModCatalog.WithAvailableUpdates(mods, MarketplaceMods);
+            if (!Mods.SequenceEqual(displayedMods))
             {
                 Mods.Clear();
-                foreach (var mod in mods) Mods.Add(mod);
+                foreach (var mod in displayedMods) Mods.Add(mod);
             }
             RefreshMarketplaceStatuses(location!);
             OnPropertyChanged(nameof(RosterMessage));
-            if (Message == AppTranslations.Get("status.choose_server") ||
-                Message.StartsWith("Select DeceiveInc", StringComparison.Ordinal) ||
-                Message.StartsWith("The dedicated server Shipping", StringComparison.Ordinal))
-                Message = pid is null
-                    ? AppTranslations.Get("status.files_found")
-                    : AppTranslations.Get("status.server_running");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -1268,8 +1383,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 await InstallKnownUpdatesBeforeStartAsync(location!);
             EnsurePortsAvailable(location!);
             using var process = await Task.Run(() => ServerProcess.Start(location!));
-            Message = AppTranslations.Format("status.started", "Started headless from Win64 (PID {0}).", process.Id) +
-                " " + AppTranslations.Get("status.proxy_disabled_notice");
+            ReportTransient(AppTranslations.Get("status.started", "Server started."));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
             System.ComponentModel.Win32Exception or ArgumentException or HttpRequestException or TimeoutException or
@@ -1297,7 +1411,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             await ServerProcess.StopAsync(location!, CancellationToken.None);
-            Message = AppTranslations.Get("status.stopped");
+            ReportTransient(AppTranslations.Get("status.stopped"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
             System.ComponentModel.Win32Exception or TimeoutException)
@@ -1329,8 +1443,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (autoUpdateBeforeStart)
                 await InstallKnownUpdatesBeforeStartAsync(location!);
             using var process = await Task.Run(() => ServerProcess.Start(location!));
-            Message = AppTranslations.Format("status.restarted", "Server restarted headless (PID {0}).", process.Id) +
-                " " + AppTranslations.Get("status.proxy_disabled_notice");
+            ReportTransient(AppTranslations.Get("status.restarted", "Server restarted."));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
             System.ComponentModel.Win32Exception or TimeoutException or ArgumentException or HttpRequestException or
@@ -1348,9 +1461,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private async Task InstallKnownUpdatesBeforeStartAsync(ServerLocation location)
     {
         using var progress = new OperationProgress(ReportProgress);
-        if (BriefcaseActionVisible && GitHubReleaseService.InstalledBriefcaseVersion(location) is not null)
+        if (Registry.BriefcaseUpdatesEnabled && BriefcaseActionVisible &&
+            GitHubReleaseService.InstalledBriefcaseVersion(location) is not null)
         {
-            Message = "Updating Briefcase before server startup…";
+            Message = AppTranslations.Get("status.updating_briefcase_before_start", "Updating Briefcase before server startup…");
             if (ElevatedUpdateService.NeedsElevation(location.Win64) ||
                 ElevatedUpdateService.NeedsElevation(location.BriefcaseRoot))
                 await ElevatedUpdateService.RunAsync("briefcase", location.Win64, progress, CancellationToken.None);
@@ -1367,7 +1481,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var installed = ModMarketplace.InstalledMetadata(location, mod.Id);
             if (installed is null || !string.Equals(installed.Catalog, mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
                 !GitHubReleaseService.IsNewer(mod.Version, installed.Version)) continue;
-            Message = $"Updating {mod.Name} before server startup…";
+            Message = AppTranslations.Format("status.updating_mod_before_start", "Updating {0} before server startup…", mod.Name);
             async Task InstallNormallyAsync()
             {
                 var downloads = AppDataStore.DownloadsRoot;
@@ -1379,7 +1493,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         throw new InvalidDataException("The mod logo could not be downloaded or verified.");
                     var formOverride = await ModMarketplace.DownloadFormOverrideAsync(mod, CancellationToken.None);
                     var formTranslations = await ModMarketplace.DownloadFormTranslationsAsync(mod, CancellationToken.None);
-                    await Task.Run(() => ModMarketplace.Install(location, mod, archive, logo, formOverride, formTranslations));
+                    var configSchema = await ModMarketplace.DownloadConfigSchemaAsync(mod, CancellationToken.None);
+                    await Task.Run(() => ModMarketplace.Install(location, mod, archive, logo, formOverride,
+                        formTranslations, configSchema));
                 }
                 finally { if (File.Exists(archive)) File.Delete(archive); }
             }
@@ -1422,11 +1538,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void ReportProgress(string line)
     {
-        Message = line;
         var match = Regex.Match(line, @"progress:\s*(?<percent>\d{1,3}(?:\.\d+)?)",
             RegexOptions.IgnoreCase);
+        var steamProgress = match.Success;
         if (!match.Success)
             match = Regex.Match(line, @"(?<percent>\d{1,3}(?:\.\d+)?)\s*%");
+        Message = steamProgress
+            ? AppTranslations.Format("status.server_download_progress", "Installing server: {0}%",
+                match.Groups["percent"].Value)
+            : line;
         if (!line.Contains('%') && !line.Contains("progress:", StringComparison.OrdinalIgnoreCase))
         {
             ProgressIndeterminate = true;
@@ -1469,6 +1589,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ServerState = snapshot.State;
         MapName = GameMapNames.Display(snapshot.Map);
         GameMode = snapshot.GameMode;
+        NetworkStatus = ServerNetworkStatus.Unknown;
         PlayerCountText = snapshot.PlayerCount is { } count ? $"{count} / {snapshot.MaxPlayers}" : "—";
         DataSource = snapshot.Source;
         HasPlayerRoster = snapshot.HasPlayerRoster;

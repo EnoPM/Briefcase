@@ -431,6 +431,19 @@ public sealed partial class MainWindow : Window
     }
 
     private void LoadSettingsClicked(object? sender, RoutedEventArgs e) => LoadSettings();
+    private void OpenServerConfigurationClicked(object? sender, RoutedEventArgs e) => OpenConfigurationTab("Server");
+    private void OpenPlayersClicked(object? sender, RoutedEventArgs e) => ServerTabs.SelectedItem = PlayersTab;
+    private void OpenMapsConfigurationClicked(object? sender, RoutedEventArgs e) => OpenConfigurationTab("Maps");
+    private void OpenGameModeConfigurationClicked(object? sender, RoutedEventArgs e) => OpenConfigurationTab("GameMode");
+
+    private void OpenConfigurationTab(string id)
+    {
+        ConfigurationTabs.SelectedItem = ConfigurationTabs.Items.OfType<TabItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, id, StringComparison.OrdinalIgnoreCase))
+            ?? ConfigurationTabs.Items.OfType<TabItem>().FirstOrDefault();
+        ServerTabs.SelectedItem = ConfigurationTab;
+    }
+
     private void ClearConfigurationFields()
     {
         ConfigurationTabs.Items.Clear();
@@ -611,7 +624,7 @@ public sealed partial class MainWindow : Window
                 _mapRotationDraft = rotation.ToList();
                 RenderMapRotationPreview();
                 if (_model.IsRunning) row.NeedsRestart = true;
-                _model.Report(AppTranslations.Get(_model.IsDemo ? "status.demo_preview_only" : "status.rotation_saved"));
+                _model.ReportTransient(AppTranslations.Get(_model.IsDemo ? "status.demo_preview_only" : "status.rotation_saved"));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
             {
@@ -662,7 +675,7 @@ public sealed partial class MainWindow : Window
                 values[spec.Key] = _settingControls[spec.Key].Value;
             ServerIniEditor.Save(location!.ConfigFile, values, _mapRotationDraft,
                 FormSchema.LoadForServer(location));
-            _model.Report(AppTranslations.Get("status.config_saved"));
+            _model.ReportTransient(AppTranslations.Get("status.config_saved"));
             await _model.RefreshAsync();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or KeyNotFoundException)
@@ -744,15 +757,44 @@ public sealed partial class MainWindow : Window
         ModConfigurationFields.Children.Clear();
         foreach (var entry in editor.Values)
         {
-            Control input = entry.Kind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
-                ? new CheckBox { IsChecked = entry.Value == "true" }
-                : new TextBox { Text = entry.Value };
+            Control input;
+            Control display;
+            if (entry.Slider is { } range)
+            {
+                var value = decimal.TryParse(entry.Value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                    out var parsed) ? parsed : range.Maximum;
+                var slider = new Slider
+                {
+                    Minimum = (double)range.Minimum, Maximum = (double)range.Maximum,
+                    TickFrequency = (double)range.Step, IsSnapToTickEnabled = true,
+                    Value = (double)range.Snap(value),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+                };
+                var current = new TextBlock
+                {
+                    Text = range.Snap((decimal)slider.Value).ToString(CultureInfo.InvariantCulture),
+                    MinWidth = 28, TextAlignment = Avalonia.Media.TextAlignment.Right,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+                };
+                slider.ValueChanged += (_, _) => current.Text =
+                    range.Snap((decimal)slider.Value).ToString(CultureInfo.InvariantCulture);
+                var sliderLayout = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+                sliderLayout.Children.Add(slider);
+                Grid.SetColumn(current, 1);
+                sliderLayout.Children.Add(current);
+                input = slider;
+                display = sliderLayout;
+            }
+            else
+                input = display = entry.Kind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                    ? new CheckBox { IsChecked = entry.Value == "true" }
+                    : new TextBox { Text = entry.Value };
             _modInputs[entry] = input;
             var line = new Grid { ColumnDefinitions = new ColumnDefinitions("3*,2*"), ColumnSpacing = 16 };
             line.Children.Add(new TextBlock { Text = entry.Label, TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
-            Grid.SetColumn(input, 1);
-            line.Children.Add(input);
+            Grid.SetColumn(display, 1);
+            line.Children.Add(display);
             ModConfigurationFields.Children.Add(line);
         }
     }
@@ -761,6 +803,8 @@ public sealed partial class MainWindow : Window
         pair => pair.Value switch
         {
             CheckBox box => box.IsChecked == true ? "true" : "false",
+            Slider slider when pair.Key.Slider is { } range =>
+                range.Snap((decimal)slider.Value).ToString(CultureInfo.InvariantCulture),
             TextBox text => text.Text ?? "",
             _ => ""
         });
@@ -827,10 +871,11 @@ public sealed partial class MainWindow : Window
             if (_jsonMode) ModConfigEditor.SaveRaw(_selectedModPath, ModJsonEditor.Text ?? "");
             else if (_modEditor is not null) _modEditor.Save(FormValues());
             else return;
-            _modDrafts.Remove(_selectedModPath);
-            _invalidFormDrafts.Remove(_selectedModPath);
-            ModEditorError.Text = "";
-            _model.Report(AppTranslations.Get("status.mod_saved"));
+            var savedPath = _selectedModPath;
+            HideModal();
+            _modDrafts.Remove(savedPath);
+            _invalidFormDrafts.Remove(savedPath);
+            _model.ReportTransient(AppTranslations.Get("status.mod_saved"));
             await _model.RefreshAsync();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
@@ -843,16 +888,16 @@ public sealed partial class MainWindow : Window
     private async void UpdateGameClicked(object? sender, RoutedEventArgs e) { await _model.UpdateGameAsync(); await _model.RefreshGameUpdateAsync(); }
     private async void InstallBriefcaseClicked(object? sender, RoutedEventArgs e) { await _model.InstallBriefcaseAsync(); await _model.RefreshBriefcaseUpdateAsync(); }
     private async void InstallCppClicked(object? sender, RoutedEventArgs e) { await _model.InstallCppRuntimeAsync(); await _model.RefreshRuntimeUpdateAsync(); }
-    private async Task RefreshMarketplaceAndSettingsAsync()
+    private async Task RefreshMarketplaceAndSettingsAsync(bool announce = false)
     {
         var selected = _model.SelectedServer;
         var revision = _model.FormAssetsRevision;
-        await _model.RefreshMarketplaceAsync();
+        await _model.RefreshMarketplaceAsync(announce);
         if (_model.FormAssetsRevision != revision && _model.SelectedServer == selected)
             LoadSettings();
     }
     private async void RefreshMarketplaceClicked(object? sender, RoutedEventArgs e) =>
-        await RefreshMarketplaceAndSettingsAsync();
+        await RefreshMarketplaceAndSettingsAsync(announce: true);
     private void OpenModDocumentationClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.DocumentationUrl);
     private void OpenModDiscordClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.DiscordUrl);
     private void OpenModHomepageClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.HomepageUrl);
@@ -878,6 +923,18 @@ public sealed partial class MainWindow : Window
     private async void InstallMarketplaceClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: MarketplaceMod mod } || !mod.CanApply) return;
+        await ApplyMarketplaceModAsync(mod);
+    }
+
+    private async void UpdateInstalledModClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: ModRow { UpdateCandidate: { } candidate } installed } ||
+            !_model.Mods.Contains(installed) || !_model.CanManageMods) return;
+        await ApplyMarketplaceModAsync(candidate);
+    }
+
+    private async Task ApplyMarketplaceModAsync(MarketplaceMod mod)
+    {
         if (!_model.CanManageMods)
         {
             if (_model.IsRunning) _model.Report(AppTranslations.Get("mod.stop_to_manage"));
@@ -988,6 +1045,7 @@ public sealed partial class MainWindow : Window
         var panel = new SettingsPanel { DataContext = _model };
         panel.CloseRequested += (_, _) => HideModal();
         panel.ConfirmStopServersAsync = ConfirmDataMoveAsync;
+        panel.ConfirmDeleteProfileAsync = ConfirmProfileRemovalAsync;
         panel.RestartRequired += ShowRestartConfirmation;
         ShowModal(panel, 840, HideModal, tall: true);
     }
@@ -1084,6 +1142,49 @@ public sealed partial class MainWindow : Window
         return await result.Task;
     }
 
+    private async Task<ProfileRemovalChoice> ConfirmProfileRemovalAsync(AppProfile profile)
+    {
+        if (ConfirmationLayer.IsVisible) return ProfileRemovalChoice.Cancel;
+        var result = new TaskCompletionSource<ProfileRemovalChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Finish(ProfileRemovalChoice choice)
+        {
+            if (!result.TrySetResult(choice)) return;
+            ConfirmationLayer.IsVisible = false;
+            ConfirmationContent.Content = null;
+            _dismissConfirmation = null;
+            if (ModalLayer.IsVisible) ModalLayer.Focus();
+        }
+
+        var cancel = new Button { Content = AppTranslations.Get("dialog.cancel") };
+        var keep = new Button { Content = AppTranslations.Get("settings.keep_profile_files") };
+        var delete = new Button { Content = AppTranslations.Get("settings.delete_profile_files") };
+        delete.Classes.Add("danger");
+        cancel.Click += (_, _) => Finish(ProfileRemovalChoice.Cancel);
+        keep.Click += (_, _) => Finish(ProfileRemovalChoice.KeepFiles);
+        delete.Click += (_, _) => Finish(ProfileRemovalChoice.DeleteFiles);
+        ConfirmationContent.Content = new StackPanel
+        {
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock { Text = AppTranslations.Get("settings.delete_profile_title"), FontSize = 21,
+                    FontWeight = FontWeight.Bold },
+                new TextBlock { Text = AppTranslations.Format("settings.delete_profile_explanation",
+                    "Remove profile {0} from Briefcase? Choose whether to keep its data folder.", profile.Name),
+                    TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Text = profile.DataDirectory, TextWrapping = TextWrapping.Wrap,
+                    Foreground = Brush("#ADA3B6") },
+                new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Children = { cancel, keep, delete } }
+            }
+        };
+        _dismissConfirmation = () => Finish(ProfileRemovalChoice.Cancel);
+        ConfirmationLayer.IsVisible = true;
+        Dispatcher.UIThread.Post(() => ConfirmationLayer.Focus());
+        return await result.Task;
+    }
+
     private async void KickClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: PlayerRow player } || !_model.IsRunning) return;
@@ -1156,7 +1257,14 @@ public sealed partial class MainWindow : Window
         if (Clipboard is { } clipboard)
         {
             await clipboard.SetTextAsync(player.NetworkId);
-            _model.Report(AppTranslations.Get("status.network_copied"));
+            _model.ReportTransient(AppTranslations.Get("status.network_copied"));
         }
+    }
+
+    private async void CopyNetworkAddressClicked(object? sender, RoutedEventArgs e)
+    {
+        if (!_model.CanCopyNetworkAddress || Clipboard is not { } clipboard) return;
+        await clipboard.SetTextAsync(_model.NetworkStatus.Address);
+        _model.ReportTransient(AppTranslations.Get("network.address_copied"));
     }
 }

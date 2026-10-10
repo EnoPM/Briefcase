@@ -80,7 +80,8 @@ public sealed class GitHubReleaseService
                 if (copied > asset.Size) throw new InvalidDataException("Release exceeds the advertised size.");
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 sha.TransformBlock(buffer, 0, read, null, 0);
-                progress.Report($"Downloading Briefcase: {copied * 100 / asset.Size}%");
+                progress.Report(AppTranslations.Format("status.downloading_briefcase", "Downloading Briefcase: {0}%",
+                    copied * 100 / asset.Size));
             }
             sha.TransformFinalBlock([], 0, 0);
             if (copied != asset.Size || !Convert.ToHexString(sha.Hash!).Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase))

@@ -37,7 +37,8 @@ public sealed partial class App : Application
                                                   OperationCanceledException or System.Text.Json.JsonException)
                     {
                         if (window.DataContext is MainViewModel model)
-                            model.Report("Launcher update failed: " + error.Message);
+                            model.Report(AppTranslations.Format("status.launcher_update_failed",
+                                "Unable to update the launcher: {0}", error.Message));
                     }
                 };
             desktop.MainWindow = window;

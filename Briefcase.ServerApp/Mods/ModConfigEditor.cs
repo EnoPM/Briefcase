@@ -5,8 +5,15 @@ using System.Text;
 
 namespace Briefcase.ServerApp;
 
+public sealed record ModSliderRange(decimal Minimum, decimal Maximum, decimal Step)
+{
+    public decimal Snap(decimal value) => Minimum +
+        Math.Clamp(decimal.Round((value - Minimum) / Step, 0, MidpointRounding.AwayFromZero) * Step,
+            0, Maximum - Minimum);
+}
+
 public sealed record ModConfigValue(string Label, string Path, JsonNode Parent, string? Key, int Index,
-    JsonValueKind Kind, string Value);
+    JsonValueKind Kind, string Value, ModSliderRange? Slider = null);
 
 public sealed class ModConfigEditor
 {
@@ -23,8 +30,73 @@ public sealed class ModConfigEditor
             throw new InvalidDataException("The mod configuration is empty.");
         var fields = new List<ModConfigValue>();
         Visit(Root, "", fields, 0, LoadTranslations(Path.GetDirectoryName(file)!));
+        var sliders = LoadSliders(Path.GetDirectoryName(file)!);
+        for (var index = 0; index < fields.Count; index++)
+            if (fields[index].Kind == JsonValueKind.Number &&
+                sliders.TryGetValue(fields[index].Path, out var range))
+                fields[index] = fields[index] with { Slider = range };
         if (fields.Count == 0) throw new InvalidDataException("This mod has no editable settings.");
         Values = fields;
+    }
+
+    public static void ValidateSchema(byte[] bytes)
+    {
+        if (bytes.Length is <= 0 or > 65_536)
+            throw new InvalidDataException("Invalid mod configuration schema size.");
+        using var document = JsonDocument.Parse(bytes);
+        _ = ParseSliders(document.RootElement);
+    }
+
+    private static IReadOnlyDictionary<string, ModSliderRange> LoadSliders(string dataDirectory)
+    {
+        var path = Path.Combine(dataDirectory, "config.schema.json");
+        if (!File.Exists(path)) return new Dictionary<string, ModSliderRange>();
+        if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint) || new FileInfo(path).Length > 65_536)
+            throw new InvalidDataException("Invalid mod configuration schema file.");
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return ParseSliders(document.RootElement);
+    }
+
+    private static IReadOnlyDictionary<string, ModSliderRange> ParseSliders(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("Invalid mod configuration schema.");
+        var sliders = new Dictionary<string, ModSliderRange>(StringComparer.Ordinal);
+        ReadProperties(properties, "", sliders, 0);
+        return sliders;
+    }
+
+    private static void ReadProperties(JsonElement properties, string prefix,
+        Dictionary<string, ModSliderRange> sliders, int depth)
+    {
+        if (depth > 12 || sliders.Count > 512) throw new InvalidDataException("Mod configuration schema is too complex.");
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("Invalid mod configuration field schema.");
+            var path = prefix.Length == 0 ? property.Name : prefix + "." + property.Name;
+            if (property.Value.TryGetProperty("properties", out var children))
+            {
+                if (children.ValueKind != JsonValueKind.Object)
+                    throw new InvalidDataException("Invalid nested mod configuration schema.");
+                ReadProperties(children, path, sliders, depth + 1);
+            }
+            if (!property.Value.TryGetProperty("display", out var display) ||
+                display.ValueKind != JsonValueKind.String || display.GetString() != "slider") continue;
+            if (!property.Value.TryGetProperty("type", out var type) ||
+                type.ValueKind != JsonValueKind.String || type.GetString() is not ("number" or "integer") ||
+                !property.Value.TryGetProperty("minimum", out var minimum) ||
+                !property.Value.TryGetProperty("maximum", out var maximum) ||
+                !property.Value.TryGetProperty("step", out var step) ||
+                minimum.ValueKind != JsonValueKind.Number || maximum.ValueKind != JsonValueKind.Number ||
+                step.ValueKind != JsonValueKind.Number ||
+                !minimum.TryGetDecimal(out var min) || !maximum.TryGetDecimal(out var max) ||
+                !step.TryGetDecimal(out var increment) || min >= max || increment <= 0 ||
+                increment > max - min || (max - min) % increment != 0 ||
+                !sliders.TryAdd(path, new ModSliderRange(min, max, increment)))
+                throw new InvalidDataException("Invalid mod slider schema: " + path);
+        }
     }
 
     private static Dictionary<string, string> LoadTranslations(string dataDirectory)
@@ -85,6 +157,11 @@ public sealed class ModConfigEditor
         foreach (var (entry, raw) in changes)
         {
             if (raw.Length > 4096) throw new InvalidDataException($"Value too long: {entry.Label}.");
+            if (entry.Slider is { } slider &&
+                (!decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var sliderValue) ||
+                 sliderValue < slider.Minimum || sliderValue > slider.Maximum ||
+                 slider.Snap(sliderValue) != sliderValue))
+                throw new InvalidDataException($"Invalid value for {entry.Label}.");
             JsonNode replacement = entry.Kind switch
             {
                 JsonValueKind.String => JsonValue.Create(raw)!,

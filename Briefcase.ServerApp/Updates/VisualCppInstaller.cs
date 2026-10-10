@@ -27,7 +27,7 @@ public sealed class VisualCppInstaller
     {
         Directory.CreateDirectory(downloadFolder);
         var file = Path.Combine(downloadFolder, "vc_redist.x64.exe");
-        progress.Report("Downloading the Microsoft Visual C++ x64 runtime…");
+        progress.Report(AppTranslations.Get("status.downloading_runtime", "Downloading Visual C++ runtime…"));
         using (var response = await Http.GetAsync(Source, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
         {
             response.EnsureSuccessStatusCode();
@@ -47,10 +47,12 @@ public sealed class VisualCppInstaller
                 if (count > 100_000_000) throw new InvalidDataException("The C++ installer is unexpectedly large.");
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 if (response.Content.Headers.ContentLength is > 0 and var size)
-                    progress.Report($"Downloading C++ runtime: {count * 100 / size}%");
+                    progress.Report(AppTranslations.Format("status.downloading_runtime_progress",
+                        "Downloading Visual C++ runtime: {0}%", count * 100 / size));
             }
         }
-        progress.Report("Installing Microsoft Visual C++ x64 (Windows may request administrator approval)…");
+        progress.Report(AppTranslations.Get("status.installing_runtime",
+            "Installing Visual C++ runtime (Windows may request administrator approval)…"));
         var start = new ProcessStartInfo(file)
         {
             UseShellExecute = true, Verb = "runas", Arguments = "/install /passive /norestart",
@@ -59,9 +61,9 @@ public sealed class VisualCppInstaller
         await installer.WaitForExitAsync(cancellationToken);
         var result = installer.ExitCode switch
         {
-            0 => "Microsoft Visual C++ x64 is installed.",
-            3010 => "Microsoft Visual C++ x64 is installed. Restart Windows before starting the server.",
-            1638 => "A newer Microsoft Visual C++ x64 runtime is already installed.",
+            0 => AppTranslations.Get("status.runtime_ready", "Visual C++ runtime is ready."),
+            3010 => AppTranslations.Get("status.runtime_restart_windows", "Restart Windows to finish installing Visual C++ runtime."),
+            1638 => AppTranslations.Get("status.runtime_newer", "A newer Visual C++ runtime is already installed."),
             _ => $"Microsoft Visual C++ installer exited with code {installer.ExitCode}."
         };
         File.Delete(file);

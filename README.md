@@ -1,6 +1,6 @@
 # Briefcase ServerApp
 
-Briefcase ServerApp is a Windows application for installing and managing Deceive Inc. dedicated servers. It provides a visual way to install the game server, add an existing installation, start and stop servers, edit server settings and map rotation, install Briefcase, manage mods, and view connected players.
+Briefcase ServerApp is a Windows application for installing and managing Deceive Inc. dedicated servers. It provides a visual way to install the game server, add an existing installation, start and stop servers, edit server settings and map rotation, install Briefcase, manage mods, and view connected players. Overview also displays the public address and the game's firewall, UPnP, and EOS-session checks while a server is running. These values come from the current server log; unavailable results remain unknown, and UPnP failure alone does not establish that the server is unreachable.
 
 ## Requirements
 

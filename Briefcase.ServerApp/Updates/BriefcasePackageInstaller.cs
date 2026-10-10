@@ -112,7 +112,7 @@ public static class BriefcasePackageInstaller
                 if (!Convert.ToHexString(sha.ComputeHash(verify)).Equals(item.Hash, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Package file checksum mismatch: " + item.Path);
             }
-            progress.Report("Briefcase package validated; installing…");
+            progress.Report(AppTranslations.Get("status.installing_briefcase", "Installing Briefcase…"));
             var transaction = items.Where(i => !i.Preserve || !File.Exists(SafeChild(location.Win64, i.Path)))
                 .Select(i => new TransactionItem(i.Path, File.Exists(SafeChild(location.Win64, i.Path))))
                 .Append(new TransactionItem("Package.json", File.Exists(SafeChild(location.Win64, "Package.json"))))
@@ -139,7 +139,7 @@ public static class BriefcasePackageInstaller
             using (var input = manifestEntry.Open())
             using (var output = File.Create(packageTarget)) input.CopyTo(output);
             Copy(items.Single(i => i.Path == "version.dll"));
-            progress.Report("Briefcase installed. The runtime will load on the next start.");
+            progress.Report(AppTranslations.Get("status.briefcase_ready", "Briefcase is ready."));
         }
         catch (Exception failure)
         {

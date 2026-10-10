@@ -33,6 +33,13 @@
     <Style Selector="Button.success:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="#2E8564" />
     </Style>
+    <Style Selector="Button.mod-update">
+      <Setter Property="Background" Value="#2C5F99" />
+      <Setter Property="Foreground" Value="#EFF6FF" />
+    </Style>
+    <Style Selector="Button.mod-update:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3975B6" />
+    </Style>
     <Style Selector="Button.danger">
       <Setter Property="Background" Value="#843C4F" />
     </Style>
@@ -97,6 +104,21 @@
       <Setter Property="Padding" Value="9,4" />
       <Setter Property="MinHeight" Value="30" />
       <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.overview-card">
+      <Setter Property="Background" Value="#2A2432" />
+      <Setter Property="BorderBrush" Value="#3D3446" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="12,9" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.overview-card:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#382D44" />
+    </Style>
+    <Style Selector="Button.overview-card:pointerover">
+      <Setter Property="BorderBrush" Value="#80679B" />
     </Style>
     <Style Selector="Button.update-action">
       <Setter Property="Padding" Value="9,4" />

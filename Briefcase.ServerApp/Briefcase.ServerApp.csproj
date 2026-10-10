@@ -20,6 +20,10 @@
     <Content Include="$(BriefcaseNativeBuildDirectory)\Briefcase.ServerBootstrap.dll" Link="Native\Briefcase.ServerBootstrap.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(BriefcaseNativeBuildDirectory)\Briefcase.ServerBootstrap.dll')" />
     <AvaloniaResource Include="Assets/Game/UI/**/*.png" />
     <AvaloniaResource Include="Assets/BriefcaseIcon.png" />
+    <EmbeddedResource Include="Assets/BriefcaseServerBridgeIcon.png" LogicalName="Briefcase.ServerApp.BridgeLogo.png" />
+    <EmbeddedResource Include="../marketplace/assets/PlayerCapIcon.png" LogicalName="Briefcase.ServerApp.PlayerCapLogo.png" />
+    <EmbeddedResource Include="../marketplace/assets/PregameTimerIcon.png" LogicalName="Briefcase.ServerApp.PregameTimerLogo.png" />
+    <EmbeddedResource Include="../marketplace/assets/SuspicionControlIcon.png" LogicalName="Briefcase.ServerApp.SuspicionControlLogo.png" />
     <AvaloniaResource Include="Assets/BriefcaseIcon.ico" />
     <AvaloniaResource Include="Assets/Game/IconCatalog.json" />
     <EmbeddedResource Include="Translations/en.json" LogicalName="Briefcase.ServerApp.Fallback.en.json" />

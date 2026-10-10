@@ -95,6 +95,7 @@ public sealed class ServerRegistry
     public ObservableCollection<ServerInstallation> Installations { get; } = [];
     public ObservableCollection<string> CatalogUrls { get; } = [];
     public string Language { get; set; } = AppTranslations.DefaultLanguage();
+    public bool BriefcaseUpdatesEnabled { get; set; } = true;
     public bool OnboardingCompleted { get; private set; }
 
     public void CompleteOnboarding()
@@ -229,6 +230,7 @@ public sealed class ServerRegistry
         LoadError = "";
         OnboardingCompleted = false;
         Language = AppTranslations.DefaultLanguage();
+        BriefcaseUpdatesEnabled = true;
         if (!_inMemory)
         {
             if (File.Exists(FilePath)) Load();
@@ -248,6 +250,8 @@ public sealed class ServerRegistry
                 throw new InvalidDataException("Unsupported ServerApp settings version.");
             Language = root.TryGetProperty("language", out var language) && language.ValueKind == JsonValueKind.String
                 ? AppTranslations.NormalizeLanguage(language.GetString()) : AppTranslations.DefaultLanguage();
+            BriefcaseUpdatesEnabled = !root.TryGetProperty("briefcaseUpdatesEnabled", out var briefcaseUpdates) ||
+                                      briefcaseUpdates.ValueKind != JsonValueKind.False;
             // Settings predating the welcome flow belong to existing users.
             OnboardingCompleted = !root.TryGetProperty("onboardingCompleted", out var onboarding) ||
                                   onboarding.ValueKind == JsonValueKind.True;
@@ -326,6 +330,7 @@ public sealed class ServerRegistry
             CatalogUrls.Clear();
             CatalogUrls.Add(OfficialCatalogUrl);
             OnboardingCompleted = true;
+            BriefcaseUpdatesEnabled = true;
             LoadError = "ServerApp settings could not be read. The original file will be backed up before new settings are saved.";
         }
     }
@@ -348,6 +353,7 @@ public sealed class ServerRegistry
             writer.WriteStartObject();
             writer.WriteNumber("schemaVersion", SchemaVersion);
             writer.WriteString("language", AppTranslations.NormalizeLanguage(Language));
+            writer.WriteBoolean("briefcaseUpdatesEnabled", BriefcaseUpdatesEnabled);
             writer.WriteBoolean("onboardingCompleted", OnboardingCompleted);
             writer.WriteStartArray("installations");
             foreach (var installation in Installations)

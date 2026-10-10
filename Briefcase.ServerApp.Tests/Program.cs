@@ -16,7 +16,7 @@ if (args is ["--verify-catalog", var catalogPath])
     Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
           mods.Single(mod => mod.Id == "briefcaseplayercap") is { FormSchemaOverrideUrl: not null,
               FormSchemaOverrideSha256: not null, FormTranslations.Count: 2 },
-        "official mods use the Briefcase icon and PlayerCap declares a translated form override");
+        "official mods have verified logos and PlayerCap declares a translated form override");
     var playerCap = mods.Single(mod => mod.Id == "briefcaseplayercap");
     byte[] Asset(string url) => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(catalogPath)!, "assets",
         Path.GetFileName(new Uri(url).AbsolutePath)));
@@ -28,6 +28,10 @@ if (args is ["--verify-catalog", var catalogPath])
         "published catalog form override hash matches");
     Check(playerCap.FormTranslations!.Values.All(asset => HashMatches(asset.Url, asset.Sha256)),
         "published catalog form translation hashes match");
+    var suspicion = mods.Single(mod => mod.Id == "briefcasesuspicioncontrol");
+    Check(suspicion.ConfigSchemaUrl is not null && suspicion.ConfigSchemaSha256 is not null &&
+          HashMatches(suspicion.ConfigSchemaUrl, suspicion.ConfigSchemaSha256),
+        "SuspicionControl catalog configuration schema hash matches");
     Check(FormSchema.LoadBase().ApplyOverride(Asset(playerCap.FormSchemaOverrideUrl!))
               .Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
         "published catalog override raises the maximum player limit");
@@ -144,6 +148,36 @@ if (args is ["--verify-shared-install", var serverExecutable])
 var temp = Path.Combine(Path.GetTempPath(), "Briefcase.ServerApp.Tests", Guid.NewGuid().ToString("N"));
 var win64 = Path.Combine(temp, "DeceiveInc", "Binaries", "Win64");
 Directory.CreateDirectory(win64);
+var networkLogs = Path.Combine(temp, "network-logs");
+Directory.CreateDirectory(networkLogs);
+var firstIni = Path.Combine(temp, "servers", "first", "TripwireServer.ini");
+var secondIni = Path.Combine(temp, "servers", "second", "TripwireServer.ini");
+var firstLog = "LogInit: Command Line:  -Port=48672 -QueryPort=48673 -TripwireServerIni=\"" + firstIni + "\"\n" +
+    "[NetPosture] Windows Firewall (server UDP ports): Blocked (0x80070005)\n" +
+    "[NetPosture] UPnP: Failed (IGD status=1)\n" +
+    "[NetPosture] Public IP (ipify): 203.0.113.42:48672\n" +
+    "UEOSServerSession::OnCreateSessionComplete: SessionName:GameSession Success:1\n" +
+    "[NetPosture] Windows Firewall (server UDP ports): Allowed\n" +
+    "[NetPosture] UPnP: Mapped (UDP 48672 + 48673)\n";
+File.WriteAllText(Path.Combine(networkLogs, "DeceiveInc.log"), firstLog);
+File.WriteAllText(Path.Combine(networkLogs, "DeceiveInc_2.log"),
+    "LogInit: Command Line:  -Port=48672 -QueryPort=48673 -TripwireServerIni=" + secondIni + "\n" +
+    "[NetPosture] Windows Firewall (server UDP ports): Blocked\n" +
+    "[NetPosture] UPnP: disabled by bEnableUPnP.\n" +
+    "UEOSServerSession::OnCreateSessionComplete: SessionName:GameSession Success:0\n");
+var firstNetwork = ServerNetworkStatusReader.ReadFromDirectory(networkLogs,
+    DateTime.UtcNow.AddMinutes(-1), 48672, 48673, firstIni);
+var secondNetwork = ServerNetworkStatusReader.ReadFromDirectory(networkLogs,
+    DateTime.UtcNow.AddMinutes(-1), 48672, 48673, secondIni);
+Check(firstNetwork.Address == "203.0.113.42:48672" &&
+      firstNetwork.Firewall == NetworkCheck.Ready && firstNetwork.Upnp == NetworkCheck.Ready &&
+      firstNetwork.Eos == NetworkCheck.Ready &&
+      secondNetwork.Address == "" && secondNetwork.Firewall == NetworkCheck.Failed &&
+      secondNetwork.Upnp == NetworkCheck.Disabled && secondNetwork.Eos == NetworkCheck.Failed,
+    "network checks follow the game log and stay isolated between shared-install instances");
+Check(ServerNetworkStatusReader.ReadFromDirectory(networkLogs, DateTime.UtcNow.AddMinutes(1),
+          48672, 48673, firstIni) == ServerNetworkStatus.Unknown,
+    "old game logs do not present stale network results for a new process");
 try
 {
     var launcherInstallRoot = Path.Combine(temp, "launcher-install");
@@ -290,6 +324,8 @@ try
         "{\"schemaVersion\":4,\"language\":\"en\",\"installations\":[],\"servers\":[],\"catalogUrls\":[]}");
     Check(new ServerRegistry(preWelcomeSettings).OnboardingCompleted,
         "an existing installation does not receive a retroactive first-run prompt");
+    Check(new ServerRegistry(preWelcomeSettings).BriefcaseUpdatesEnabled,
+        "existing profiles allow Briefcase runtime updates until the user disables them");
     var queuedProfiles = new AppProfileStore(Path.Combine(temp, "queued-profiles.json"),
         oldData, dataLocator, Path.Combine(temp, "queued-profile-folders"));
     var queuedProfile = queuedProfiles.CreateAndScheduleActivation("Next launch");
@@ -307,6 +343,43 @@ try
           new AppProfileStore(Path.Combine(temp, "queued-profiles.json"), oldData, dataLocator,
               Path.Combine(temp, "queued-profile-folders")).Active.Id == "default",
         "choosing the current profile cancels a pending switch");
+    var keptProfile = profiles.CreateAndScheduleActivation("Keep my files");
+    File.WriteAllText(Path.Combine(keptProfile.DataDirectory, "keep.txt"), "preserved");
+    var keptRemoval = profiles.Remove(keptProfile.Id, deleteFiles: false);
+    Check(keptRemoval.FilesDeleted && File.Exists(Path.Combine(keptProfile.DataDirectory, "keep.txt")) &&
+          !profiles.Profiles.Any(item => item.Id == keptProfile.Id) && !profiles.HasPendingActivation,
+        "removing a profile can keep its files and cancels a pending switch");
+    var deletedProfile = profiles.CreateAndScheduleActivation("Delete my files");
+    File.WriteAllText(Path.Combine(deletedProfile.DataDirectory, "delete.txt"), "temporary");
+    var deletedRemoval = profiles.Remove(deletedProfile.Id, deleteFiles: true,
+        ProfileRemovalSafety.EnsureNoRunningServers);
+    Check(deletedRemoval.FilesDeleted && !Directory.Exists(deletedProfile.DataDirectory) &&
+          !profiles.Profiles.Any(item => item.Id == deletedProfile.Id) &&
+          new AppProfileStore(profilesFile, oldData, dataLocator, profilesRoot).Active.Id == cleanProfile.Id,
+        "removing a profile can delete its data and preserves the active profile");
+    var referencedProfile = profiles.CreateAndScheduleActivation("Referenced files");
+    var activeSettings = File.ReadAllText(cleanRegistry.FilePath);
+    try
+    {
+        File.WriteAllText(cleanRegistry.FilePath, JsonSerializer.Serialize(new
+        {
+            servers = new[] { new { win64 = Path.Combine(referencedProfile.DataDirectory, "game", "server") } },
+            installations = Array.Empty<object>()
+        }));
+        try { profiles.Remove(referencedProfile.Id, deleteFiles: true,
+            ProfileRemovalSafety.EnsureNoRunningServers); throw new Exception("Referenced profile files deleted."); }
+        catch (InvalidOperationException) { }
+        Check(Directory.Exists(referencedProfile.DataDirectory) &&
+              profiles.Profiles.Any(item => item.Id == referencedProfile.Id),
+            "profile data referenced by another profile cannot be deleted");
+    }
+    finally { File.WriteAllText(cleanRegistry.FilePath, activeSettings); }
+    profiles.Remove(referencedProfile.Id, deleteFiles: true, ProfileRemovalSafety.EnsureNoRunningServers);
+    try { profiles.Remove(cleanProfile.Id, deleteFiles: true,
+        ProfileRemovalSafety.EnsureNoRunningServers); throw new Exception("Active profile deleted."); }
+    catch (InvalidOperationException) { }
+    try { profiles.Remove("default", deleteFiles: false); throw new Exception("Default profile deleted."); }
+    catch (InvalidOperationException) { }
     var reopenedNewProfile = new AppProfileStore(profilesFile, oldData, dataLocator, profilesRoot);
     Check(reopenedNewProfile.Active.Id == cleanProfile.Id &&
           reopenedNewProfile.Active.DataDirectory == cleanProfile.DataDirectory,
@@ -808,12 +881,25 @@ try
     File.WriteAllText(Path.Combine(modsRoot, "BriefcasePlayerCap", "Data", "config.json"), "{}");
     Directory.CreateDirectory(Path.Combine(modsRoot, "BriefcasePlayerCap", "dlls"));
     File.WriteAllBytes(Path.Combine(modsRoot, "BriefcasePlayerCap", "dlls", "main.dll"), [1]);
-    File.WriteAllText(Path.Combine(modsRoot, "BriefcasePlayerCap", ".serverapp-install.json"), "{\"version\":\"1.2.3\"}");
+    const string installedCatalog = "https://example.invalid/briefcase-catalog.json";
+    File.WriteAllText(Path.Combine(modsRoot, "BriefcasePlayerCap", ".serverapp-install.json"),
+        JsonSerializer.Serialize(new { version = "1.2.3", catalog = installedCatalog }));
     var mods = ModCatalog.Read(location);
     Check(mods.Count == 2 && mods[0].State == "Enabled" &&
         mods[0].Configuration == "Has configuration" && mods[0].Version == "1.2.3" &&
         mods[0].HasNativeBinary && mods[0].IsCatalogManaged && mods[1].State == "Disabled" && !mods[1].HasVersion && !mods[1].IsCatalogManaged,
         "local UE4SS mod selection, config, binary and known version read without admin endpoint");
+    var newerCatalogMod = new MarketplaceMod("BriefcasePlayerCap", "PlayerCap", "", "1.2.4",
+        new Uri("https://example.invalid/briefcase-playercap.zip"), new string('a', 64), installedCatalog);
+    var installedWithUpdate = ModCatalog.WithAvailableUpdates(mods, [newerCatalogMod]);
+    Check(installedWithUpdate[0].HasUpdateAvailable && installedWithUpdate[0].UpdateCandidate == newerCatalogMod &&
+          !installedWithUpdate[1].HasUpdateAvailable,
+        "an installed catalog mod offers its newer release directly in the installed list");
+    Check(!ModCatalog.WithAvailableUpdates(mods,
+              [newerCatalogMod with { Catalog = "https://example.invalid/other-catalog.json" }])[0].HasUpdateAvailable &&
+          !ModCatalog.WithAvailableUpdates(mods,
+              [newerCatalogMod with { Version = "1.2.3" }])[0].HasUpdateAvailable,
+        "installed mod updates require the same catalog source and a strictly newer version");
 
     var selectionRegistry = new ServerRegistry(Path.Combine(temp, "selection-settings.json"), inMemory: true);
     var selectedFirst = new ServerRow("first", win64, true);
@@ -872,6 +958,20 @@ try
     Check(ServerRegistry.ReadSavedLanguage(registry.FilePath) == "es" &&
           new ServerRegistry(registry.FilePath).Language == "es",
         "custom translation language persists in application settings");
+    var runtimeUpdateRegistry = new ServerRegistry(Path.Combine(temp, "runtime-update-settings.json"));
+    Check(runtimeUpdateRegistry.BriefcaseUpdatesEnabled,
+        "Briefcase runtime updates are enabled by default");
+    runtimeUpdateRegistry.BriefcaseUpdatesEnabled = false;
+    runtimeUpdateRegistry.Save();
+    Check(!new ServerRegistry(runtimeUpdateRegistry.FilePath).BriefcaseUpdatesEnabled,
+        "the disabled runtime-update preference survives a restart");
+    runtimeUpdateRegistry.BriefcaseUpdatesEnabled = true;
+    runtimeUpdateRegistry.Save();
+    Check(new ServerRegistry(runtimeUpdateRegistry.FilePath).BriefcaseUpdatesEnabled,
+        "Briefcase runtime updates can be enabled again");
+    runtimeUpdateRegistry.ReloadFromDataDirectory(Path.Combine(temp, "new-runtime-update-profile"));
+    Check(runtimeUpdateRegistry.BriefcaseUpdatesEnabled,
+        "a new profile starts with Briefcase runtime updates enabled");
     var sentinel = Path.Combine(temp, "demo-settings.json");
     File.WriteAllText(sentinel, "do not replace");
     var inMemory = new ServerRegistry(sentinel, inMemory: true);
@@ -1172,6 +1272,24 @@ try
           File.Exists(configPath + ".briefcase-backup"),
         "JSON editor saves nested values and keeps a backup");
 
+    var suspicionConfig = Path.Combine(modsRoot, "briefcasesuspicioncontrol", "Data", "config.json");
+    Directory.CreateDirectory(Path.GetDirectoryName(suspicionConfig)!);
+    File.WriteAllText(suspicionConfig, "{\"multiplier\":0.5,\"diagnostics\":false}");
+    Check(new ModConfigEditor(suspicionConfig).Values.Single(value => value.Path == "multiplier").Slider is null,
+        "mod editor does not hardcode a slider by mod identity");
+    var suspicionSchema = System.Text.Encoding.UTF8.GetBytes(
+        "{\"type\":\"object\",\"properties\":{\"multiplier\":{\"type\":\"number\",\"display\":\"slider\",\"minimum\":0,\"maximum\":1,\"step\":0.05}}}");
+    File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(suspicionConfig)!, "config.schema.json"), suspicionSchema);
+    var suspicionEditor = new ModConfigEditor(suspicionConfig);
+    var multiplier = suspicionEditor.Values.Single(value => value.Path == "multiplier");
+    Check(multiplier.Slider is { Minimum: 0, Maximum: 1, Step: 0.05m } &&
+          multiplier.Slider.Snap(0.73m) == 0.75m,
+        "SuspicionControl multiplier uses a 0–1 slider with 0.05 steps");
+    var suspicionValues = suspicionEditor.Values.ToDictionary(value => value, value => value.Value);
+    suspicionValues[multiplier] = "1.05";
+    try { suspicionEditor.Render(suspicionValues); throw new Exception("Out-of-range multiplier was accepted."); }
+    catch (InvalidDataException) { }
+
     var package = Path.Combine(temp, "framework.zip");
     var packageFiles = new Dictionary<string, byte[]>
     {
@@ -1206,6 +1324,12 @@ try
         File.Exists(Path.Combine(win64, "ue4ss", "Mods", "BriefcaseServerBridge", "dlls", "main.dll")) &&
         File.Exists(Path.Combine(win64, "ue4ss", "Mods", "BriefcaseServerBridge", "enabled.txt")),
         "validated initial framework archive installs the live server bridge into Win64");
+    var installedWithBridge = ModCatalog.Read(location);
+    using var bridgeIcon = typeof(ModLogo).Assembly.GetManifestResourceStream("Briefcase.ServerApp.BridgeLogo.png");
+    Check(installedWithBridge[0].IsCore && bridgeIcon is { Length: > 24 } &&
+          installedWithBridge[0].InstallSourceSummary == "Briefcase" &&
+          !installedWithBridge[0].CanToggle,
+        "BriefcaseServerBridge appears first with its bundled icon and internal origin");
     var legacyInjector = Path.Combine(win64, "Briefcase", "Core", "Tools", "Briefcase.ServerInjector.exe");
     var legacyBootstrap = Path.Combine(win64, "Briefcase", "Core", "Briefcase.ServerBootstrap.dll");
     Directory.CreateDirectory(Path.GetDirectoryName(legacyInjector)!);
@@ -1284,6 +1408,18 @@ try
           FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
         "installed mod can be enabled again");
     var installedMetadataPath = Path.Combine(modsRoot, "FixtureMod", ".serverapp-install.json");
+    var fixtureSchemaPath = Path.Combine(modsRoot, "FixtureMod", "Data", "config.schema.json");
+    var fixtureSchemaHash = Convert.ToHexString(SHA256.HashData(suspicionSchema)).ToLowerInvariant();
+    var fixtureSchemaEntry = marketplaceEntry with
+    {
+        ConfigSchemaUrl = "https://example.test/config.schema.json",
+        ConfigSchemaSha256 = fixtureSchemaHash
+    };
+    Check(ModMarketplace.RestoreFormAssets(location, fixtureSchemaEntry, null,
+              new Dictionary<string, byte[]>(), suspicionSchema) &&
+          File.ReadAllBytes(fixtureSchemaPath).SequenceEqual(suspicionSchema) &&
+          ModMarketplace.InstalledMetadata(location, "FixtureMod")?.ConfigSchemaSha256 == fixtureSchemaHash,
+        "catalog adds a verified mod configuration schema to an existing installation");
     var formPath = Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json");
     var previousForm = System.Text.Encoding.UTF8.GetBytes(
         "{\"schemaVersion\":1,\"fields\":[{\"key\":\"MaxPlayers\",\"max\":30}]}");

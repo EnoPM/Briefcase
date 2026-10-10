@@ -3,6 +3,7 @@ using System.Text.Json;
 namespace Briefcase.ServerApp;
 
 public sealed record AppProfile(string Id, string Name, string DataDirectory);
+public sealed record ProfileRemovalResult(bool FilesDeleted, string? RetainedDirectory = null);
 
 /// <summary>Keeps profile selection outside every profile's own data directory.</summary>
 public sealed class AppProfileStore
@@ -91,6 +92,112 @@ public sealed class AppProfileStore
         Save(_profiles, id);
         _activeId = id;
         _nextActiveId = id;
+    }
+
+    public ProfileRemovalResult Remove(string id, bool deleteFiles, Action<AppProfile>? validateDeletion = null)
+    {
+        var profile = _profiles.SingleOrDefault(item => item.Id == id)
+            ?? throw new InvalidDataException(AppTranslations.Get("settings.profile_missing"));
+        if (id == "default")
+            throw new InvalidOperationException(AppTranslations.Get("settings.default_profile_cannot_delete"));
+        if (id == _activeId)
+            throw new InvalidOperationException(AppTranslations.Get("settings.active_profile_cannot_delete"));
+
+        var next = _profiles.Where(item => item.Id != id).ToArray();
+        var nextActiveId = _nextActiveId == id ? _activeId : _nextActiveId;
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(profile.DataDirectory));
+        string? stagedDirectory = null;
+        if (deleteFiles && Directory.Exists(directory))
+        {
+            if (validateDeletion is null)
+                throw new InvalidOperationException(AppTranslations.Get("settings.profile_delete_check_required"));
+            ValidateDirectoryForDeletion(directory);
+            validateDeletion(profile);
+            EnsureNoOtherProfileUses(directory, id);
+            stagedDirectory = directory + ".briefcase-delete-" + Guid.NewGuid().ToString("N");
+            Directory.Move(directory, stagedDirectory);
+        }
+
+        try { Save(next, nextActiveId); }
+        catch
+        {
+            if (stagedDirectory is not null && Directory.Exists(stagedDirectory))
+                Directory.Move(stagedDirectory, directory);
+            throw;
+        }
+        _profiles.Remove(profile);
+        _nextActiveId = nextActiveId;
+        if (stagedDirectory is null) return new ProfileRemovalResult(true);
+        try
+        {
+            Directory.Delete(stagedDirectory, recursive: true);
+            return new ProfileRemovalResult(true);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return new ProfileRemovalResult(false, stagedDirectory);
+        }
+    }
+
+    private void ValidateDirectoryForDeletion(string directory)
+    {
+        if (directory.Equals(Path.GetPathRoot(directory), StringComparison.OrdinalIgnoreCase) ||
+            AppDataStore.IsInside(_filePath, directory) ||
+            AppDataStore.IsInside(_profilesRoot, directory) ||
+            AppDataStore.IsInside(AppDataStore.LocatorFile, directory) ||
+            AppDataStore.IsInside(AppContext.BaseDirectory, directory))
+            throw new InvalidDataException(AppTranslations.Get("settings.profile_delete_unsafe_directory"));
+
+        for (var ancestor = directory; ancestor is not null; ancestor = Path.GetDirectoryName(ancestor))
+            if (Directory.Exists(ancestor) && File.GetAttributes(ancestor).HasFlag(FileAttributes.ReparsePoint))
+                throw new InvalidDataException(AppTranslations.Get("settings.profile_delete_linked_directory"));
+        var remaining = new Stack<string>();
+        remaining.Push(directory);
+        while (remaining.Count > 0)
+            foreach (var entry in Directory.EnumerateFileSystemEntries(remaining.Pop()))
+            {
+                var attributes = File.GetAttributes(entry);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                    throw new InvalidDataException(AppTranslations.Get("settings.profile_delete_linked_directory"));
+                if (attributes.HasFlag(FileAttributes.Directory)) remaining.Push(entry);
+            }
+    }
+
+    private void EnsureNoOtherProfileUses(string directory, string removedId)
+    {
+        foreach (var other in _profiles.Where(item => item.Id != removedId))
+        {
+            var settings = Path.Combine(other.DataDirectory, "settings.json");
+            if (!File.Exists(settings)) continue;
+            JsonDocument document;
+            try { document = JsonDocument.Parse(File.ReadAllBytes(settings)); }
+            catch (JsonException error)
+            {
+                throw new InvalidDataException(AppTranslations.Get("settings.profile_other_settings_unreadable"), error);
+            }
+            using (document)
+            {
+                var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                    throw new InvalidDataException(AppTranslations.Get("settings.profile_other_settings_unreadable"));
+                foreach (var section in new[] { "servers", "installations" })
+                {
+                    if (!root.TryGetProperty(section, out var entries) || entries.ValueKind != JsonValueKind.Array)
+                        continue;
+                    foreach (var entry in entries.EnumerateArray())
+                    {
+                        if (entry.ValueKind != JsonValueKind.Object) continue;
+                        foreach (var key in section == "servers"
+                                     ? new[] { "win64", "instanceRoot" }
+                                     : new[] { "installRoot" })
+                            if (entry.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String &&
+                                value.GetString() is { Length: > 0 } path && Path.IsPathFullyQualified(path) &&
+                                AppDataStore.IsInside(path, directory))
+                                throw new InvalidOperationException(AppTranslations.Get("settings.profile_in_use_elsewhere"));
+                    }
+                }
+            }
+        }
     }
 
     public void UpdateActiveDataDirectory(string directory)

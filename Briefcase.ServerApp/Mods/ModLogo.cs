@@ -15,6 +15,73 @@ public static class ModLogo
     private static readonly Dictionary<string, (long Length, DateTime Modified, Bitmap? Image)> Local =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, (byte[] Bytes, Bitmap Image)> Remote = new(StringComparer.Ordinal);
+    private static Bitmap? _serverBridge;
+    private const string LegacySharedLogoUrl =
+        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/BriefcaseIcon.png";
+    private const string LegacySharedLogoSha256 =
+        "679e7268b30e7d90e0b1034d48143fc0e4ca65fc5f1f7df9dd78a6a7dd853acb";
+    private static readonly IReadOnlyDictionary<string, Lazy<Bitmap?>> OfficialLogos =
+        new Dictionary<string, Lazy<Bitmap?>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["briefcaseplayercap"] = new(() => LoadEmbedded("Briefcase.ServerApp.PlayerCapLogo.png")),
+            ["briefcasepregametimer"] = new(() => LoadEmbedded("Briefcase.ServerApp.PregameTimerLogo.png")),
+            ["briefcasesuspicioncontrol"] = new(() => LoadEmbedded("Briefcase.ServerApp.SuspicionControlLogo.png"))
+        };
+
+    private static Bitmap? LoadEmbedded(string resourceName)
+    {
+        try
+        {
+            using var stream = typeof(ModLogo).Assembly.GetManifestResourceStream(resourceName);
+            return stream is null ? null : Bitmap.DecodeToWidth(stream, 96, BitmapInterpolationMode.HighQuality);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
+    }
+
+    private static Bitmap? LoadServerBridge()
+    {
+        try
+        {
+            using var stream = typeof(ModLogo).Assembly.GetManifestResourceStream(
+                "Briefcase.ServerApp.BridgeLogo.png");
+            if (stream is null) return null;
+            return Bitmap.DecodeToWidth(stream, 96, BitmapInterpolationMode.HighQuality);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
+    }
+
+    private static Bitmap? OfficialLogo(string id, string? catalog) =>
+        catalog is not null && catalog.Equals(ServerRegistry.OfficialCatalogUrl, StringComparison.OrdinalIgnoreCase) &&
+        OfficialLogos.TryGetValue(id, out var logo) ? logo.Value : null;
+
+    public static Bitmap? ForMarketplaceMod(MarketplaceMod mod) =>
+        mod.LogoUrl?.Equals(LegacySharedLogoUrl, StringComparison.OrdinalIgnoreCase) == true
+            ? OfficialLogo(mod.Id, mod.Catalog) : null;
+
+    public static Bitmap? ForInstalledMod(string directory, string? catalog = null)
+    {
+        var id = Path.GetFileName(directory);
+        if (id.Equals("BriefcaseServerBridge", StringComparison.OrdinalIgnoreCase))
+            return _serverBridge ??= LoadServerBridge();
+        var image = FromDirectory(directory);
+        var bundled = OfficialLogo(id, catalog);
+        return bundled is not null && (image is null || HasLegacySharedLogo(directory)) ? bundled : image;
+    }
+
+    private static bool HasLegacySharedLogo(string directory)
+    {
+        try
+        {
+            var file = Path.Combine(directory, "logo.png");
+            var info = new FileInfo(file);
+            if (!info.Exists || info.Length is < 24 or > MaximumBytes ||
+                info.Attributes.HasFlag(FileAttributes.ReparsePoint)) return false;
+            using var stream = File.OpenRead(file);
+            return Convert.ToHexString(SHA256.HashData(stream)).Equals(
+                LegacySharedLogoSha256, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
 
     public static Bitmap? FromDirectory(string directory)
     {

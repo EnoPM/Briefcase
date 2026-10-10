@@ -6,8 +6,13 @@ namespace Briefcase.ServerApp;
 public sealed record ModRow(string Name, string State, string Configuration, string ConfigPath,
     string Version = "", bool HasNativeBinary = false, bool IsCatalogManaged = false, Bitmap? Logo = null,
     string DisplayName = "", string Author = "", string Description = "",
-    string? DocumentationUrl = null, string? DiscordUrl = null, string? HomepageUrl = null)
+    string? DocumentationUrl = null, string? DiscordUrl = null, string? HomepageUrl = null,
+    string CatalogUrl = "")
 {
+    public MarketplaceMod? UpdateCandidate { get; init; }
+    public bool HasUpdateAvailable => UpdateCandidate is not null;
+    public string AvailableVersionSummary => UpdateCandidate is { } candidate
+        ? AppTranslations.Format("mod.update_to_version", "v{0} available", candidate.Version) : "";
     public string Title => DisplayName.Length > 0 ? DisplayName : Name;
     public bool HasDistinctId => DisplayName.Length > 0 && !DisplayName.Equals(Name, StringComparison.OrdinalIgnoreCase);
     public bool HasAuthor => Author.Length > 0;
@@ -30,6 +35,7 @@ public sealed record ModRow(string Name, string State, string Configuration, str
     public string NativeBinarySummary => AppTranslations.Get("mod.native_binary", "Native DLL");
     public string InstallSourceSummary => IsCatalogManaged
         ? AppTranslations.Get("mod.catalog_source", "Catalog")
+        : IsCore ? AppTranslations.Get("mod.briefcase_source", "Briefcase")
         : AppTranslations.Get("mod.local_source", "Local");
     public IBrush StateForeground => State == "Enabled" ? Brushes.LightGreen :
         State == "Disabled" ? Brushes.LightGray : Brushes.Khaki;
@@ -76,12 +82,29 @@ public static class ModCatalog
                     metadata?.Version ?? "",
                     File.Exists(Path.Combine(path, "dlls", "main.dll")),
                     File.Exists(Path.Combine(path, ".serverapp-install.json")),
-                    ModLogo.FromDirectory(path), metadata?.Name ?? "", metadata?.Author ?? "",
+                    ModLogo.ForInstalledMod(path, metadata?.Catalog), metadata?.Name ?? "", metadata?.Author ?? "",
                     metadata?.Description ?? "", metadata?.DocumentationUrl, metadata?.DiscordUrl,
-                    metadata?.HomepageUrl);
+                    metadata?.HomepageUrl, metadata?.Catalog ?? "");
             })
-            .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(row => row.IsCore)
+            .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    public static IReadOnlyList<ModRow> WithAvailableUpdates(IReadOnlyList<ModRow> installed,
+        IEnumerable<MarketplaceMod> available)
+    {
+        var entries = available.ToArray();
+        return installed.Select(mod =>
+        {
+            var candidate = mod.IsCatalogManaged && mod.Version.Length > 0 && mod.CatalogUrl.Length > 0
+                ? entries.FirstOrDefault(entry =>
+                    entry.Id.Equals(mod.Name, StringComparison.OrdinalIgnoreCase) &&
+                    entry.Catalog.Equals(mod.CatalogUrl, StringComparison.OrdinalIgnoreCase) &&
+                    GitHubReleaseService.IsNewer(entry.Version, mod.Version))
+                : null;
+            return mod with { UpdateCandidate = candidate };
+        }).ToArray();
     }
 
     public static IReadOnlyList<string> InstalledCatalogSources(ServerLocation location)
