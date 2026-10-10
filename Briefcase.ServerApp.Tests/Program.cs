@@ -838,17 +838,33 @@ try
         ServerIniEditor.Fields.Any(field => field.Key == "HeatDelayAggroPostCover"),
         "visual server schema includes heat damage and delay settings");
     var vanillaSchema = FormSchema.LoadBase();
+    var regionChoices = vanillaSchema.Fields.Single(field => field.Key == "ServerRegion").Choices!;
+    Check(regionChoices.Select(choice => choice.Value).SequenceEqual(
+              ["", "us-east", "us-central", "us-west", "eu", "oce", "br", "asia", "me"]) &&
+          regionChoices.Single(choice => choice.Value == "us-east").Label == "US East" &&
+          vanillaSchema.Text(regionChoices.Single(choice => choice.Value == "us-east").LabelKey,
+              "us-east") == "US East",
+        "region choices have readable English labels without changing their INI values");
+    AppTranslations.Select("fr", AppContext.BaseDirectory);
+    Check(vanillaSchema.Text(regionChoices.Single(choice => choice.Value == "us-east").LabelKey,
+              "US East") == "États-Unis (Est)" &&
+          vanillaSchema.Text(regionChoices.Single(choice => choice.Value == "").LabelKey,
+              "Default") == "Par défaut",
+        "region dropdown labels follow the selected language");
+    AppTranslations.Select("en", AppContext.BaseDirectory);
     var playerField = vanillaSchema.Fields.Single(field => field.Key == "MaxPlayers");
     Check(new[] { (Mode: "Solo", Maximum: 8m), (Mode: "Duo", Maximum: 10m), (Mode: "Trio", Maximum: 12m) }
             .All(item => vanillaSchema.EffectiveMaximum(playerField,
                 new Dictionary<string, string> { ["GameMode"] = item.Mode }) == item.Maximum),
         "vanilla player ceilings follow the selected game mode");
     settings["ServerName"] = "Fixture edited";
+    settings["ServerRegion"] = "us-east";
     settings["GameMode"] = "Duo";
     settings["MaxPlayers"] = "10";
     ServerIniEditor.Save(location.ConfigFile, settings, ["DI_SR", "DI_DS", "DI_SR"]);
     var (saved, savedMaps) = ServerIniEditor.Read(location.ConfigFile);
-    Check(saved["ServerName"] == "Fixture edited" && saved["MaxPlayers"] == "10" &&
+    Check(saved["ServerName"] == "Fixture edited" && saved["ServerRegion"] == "us-east" &&
+        saved["MaxPlayers"] == "10" &&
         savedMaps.SequenceEqual(["DI_SR", "DI_DS", "DI_SR"]), "ordered repeated map rotation round-trip");
     Check(RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
               new Dictionary<string, string>(settings) { ["MaxPlayers"] = "11" }, ["DI_SR"])) &&

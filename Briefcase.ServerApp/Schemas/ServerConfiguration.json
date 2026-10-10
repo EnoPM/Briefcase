@@ -79,15 +79,15 @@
       "kind": "choice",
       "default": "eu",
       "choices": [
-        "",
-        "us-east",
-        "us-central",
-        "us-west",
-        "eu",
-        "oce",
-        "br",
-        "asia",
-        "me"
+        { "value": "", "label": "Default" },
+        { "value": "us-east", "label": "US East" },
+        { "value": "us-central", "label": "US Central" },
+        { "value": "us-west", "label": "US West" },
+        { "value": "eu", "label": "Europe" },
+        { "value": "oce", "label": "Oceania" },
+        { "value": "br", "label": "Brazil" },
+        { "value": "asia", "label": "Asia" },
+        { "value": "me", "label": "Middle East" }
       ]
     },
     {
