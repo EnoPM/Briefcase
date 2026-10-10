@@ -26,7 +26,8 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
 }
 
 public sealed record InstalledModMetadata(string Id, string Version, string Name, string Author,
-    string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl);
+    string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl,
+    int? LegacyMaxPlayersMaximum = null);
 
 public sealed class ModMarketplace
 {
@@ -225,9 +226,16 @@ public sealed class ModMarketplace
                 !string.Equals(identity.GetString(), modId, StringComparison.OrdinalIgnoreCase))
                 return null;
             string Read(string key) => root.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
+            int? legacyMaximum = null;
+            if (root.TryGetProperty("serverConfiguration", out var previous) &&
+                previous.ValueKind == JsonValueKind.Object &&
+                previous.TryGetProperty("maxPlayersMaximum", out var limit) &&
+                limit.ValueKind == JsonValueKind.Number && limit.TryGetInt32(out var oldMaximum) &&
+                oldMaximum is > 16 and <= 32)
+                legacyMaximum = oldMaximum;
             return new InstalledModMetadata(modId, Read("version"), Read("name"), Read("author"),
                 Read("description"), Read("catalog"), Read("documentationUrl"), Read("discordUrl"),
-                Read("homepageUrl"));
+                Read("homepageUrl"), legacyMaximum);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
                                    KeyNotFoundException or InvalidOperationException)

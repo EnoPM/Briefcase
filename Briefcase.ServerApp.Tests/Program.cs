@@ -1056,6 +1056,16 @@ try
     Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Enabled" &&
           FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
         "installed mod can be enabled again");
+    File.Delete(Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json"));
+    var installedMetadataPath = Path.Combine(modsRoot, "FixtureMod", ".serverapp-install.json");
+    var previousMetadata = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(installedMetadataPath))!.AsObject();
+    previousMetadata["serverConfiguration"] = new System.Text.Json.Nodes.JsonObject
+    {
+        ["maxPlayersMaximum"] = 30
+    };
+    File.WriteAllText(installedMetadataPath, previousMetadata.ToJsonString());
+    Check(FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
+        "older installed mod metadata preserves its player limit until the JSON override is installed");
     ModCatalog.Uninstall(location, "FixtureMod");
     Check(!Directory.Exists(Path.Combine(modsRoot, "FixtureMod")) &&
         !File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod :") &&

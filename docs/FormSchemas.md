@@ -34,3 +34,5 @@ The mod can supply `Data/FormTranslations/en.json`, `fr.json`, and other languag
 ```
 
 The server INI editor is the first consumer of this schema. Mod configuration and balancing can adopt the same tab/group/field and validation model without adopting INI persistence.
+
+For compatibility, already-installed mods that recorded the previous `serverConfiguration.maxPlayersMaximum` metadata keep that limit until they are reinstalled with a JSON override. New mods should use only the JSON override.

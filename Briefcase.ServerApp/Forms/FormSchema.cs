@@ -97,10 +97,20 @@ public sealed class FormSchema
         foreach (var mod in ModCatalog.Read(location).Where(mod => mod.IsEnabled && mod.HasNativeBinary))
         {
             var path = Path.Combine(location.ModsRoot, mod.Name, "Data", "server-configuration.override.json");
-            if (!File.Exists(path)) continue;
-            if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
-                throw new InvalidDataException("Mod form override cannot be a link: " + mod.Name);
-            schema = schema.ApplyOverride(ReadLimited(path, MaximumOverrideBytes));
+            if (File.Exists(path))
+            {
+                if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+                    throw new InvalidDataException("Mod form override cannot be a link: " + mod.Name);
+                schema = schema.ApplyOverride(ReadLimited(path, MaximumOverrideBytes));
+            }
+            else if (ModMarketplace.InstalledMetadata(location, mod.Name)?.LegacyMaxPlayersMaximum is { } maximum)
+            {
+                // Previous catalog installations stored this capability in metadata. Keep their UI safe
+                // until the mod is reinstalled with a proper JSON form override.
+                schema = schema.ApplyOverride(System.Text.Encoding.UTF8.GetBytes(
+                    "{\"schemaVersion\":1,\"fields\":[{\"key\":\"MaxPlayers\",\"max\":" +
+                    maximum.ToString(CultureInfo.InvariantCulture) + "}]}"));
+            }
             var languageRoot = Path.Combine(location.ModsRoot, mod.Name, "Data", "FormTranslations");
             schema.AddTranslations(languageRoot, "en");
             if (AppTranslations.Language != "en") schema.AddTranslations(languageRoot, AppTranslations.Language);
