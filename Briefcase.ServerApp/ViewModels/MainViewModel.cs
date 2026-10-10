@@ -1023,19 +1023,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 return;
             }
             var developmentBuild = BriefcaseInstallService.IsDevelopmentBuild(BriefcaseInstalledVersion);
-            BriefcaseActionVisible = !developmentBuild &&
-                (briefcase.Check is { InstallNeeded: true } or { UpdateAvailable: true });
-            BriefcaseAppearance = developmentBuild ? UpdatePanelAppearance.Development : briefcase.Check?.InstallNeeded == true
-                ? UpdatePanelAppearance.Missing : briefcase.Check?.UpdateAvailable == true
-                    ? UpdatePanelAppearance.Available : briefcase.Check is not null
+            BriefcaseActionVisible = briefcase.Check is { InstallNeeded: true } or { UpdateAvailable: true };
+            BriefcaseAppearance = briefcase.Check?.UpdateAvailable == true ? UpdatePanelAppearance.Available :
+                developmentBuild ? UpdatePanelAppearance.Development : briefcase.Check?.InstallNeeded == true
+                ? UpdatePanelAppearance.Missing : briefcase.Check is not null
                         ? UpdatePanelAppearance.Current : BriefcaseInstalledVersion == "—"
                             ? UpdatePanelAppearance.Missing : UpdatePanelAppearance.Neutral;
             BriefcaseActionLabel = briefcase.Check?.InstallNeeded == true
                 ? AppTranslations.Get("updates.install_briefcase") : AppTranslations.Get("updates.update_briefcase");
-            BriefcaseUpdateStatus = developmentBuild ? AppTranslations.Get("updates.briefcase_development") :
-                briefcase.Error ?? (briefcase.Check is null ? AppTranslations.Get("updates.unknown") :
+            BriefcaseUpdateStatus = briefcase.Error ?? (briefcase.Check is null ? AppTranslations.Get("updates.unknown") :
                 briefcase.Check.InstallNeeded ? AppTranslations.Format("updates.briefcase_missing", "Not installed; latest release {0}.", briefcase.Check.Latest) :
-                briefcase.Check.UpdateAvailable ? AppTranslations.Format("updates.briefcase_available", "Installed {0}; latest {1}.", briefcase.Check.Installed!, briefcase.Check.Latest) :
+                briefcase.Check.UpdateAvailable ? developmentBuild
+                    ? AppTranslations.Format("updates.briefcase_development_available", "Local development build {0}; release {1} is available.", briefcase.Check.Installed!, briefcase.Check.Latest)
+                    : AppTranslations.Format("updates.briefcase_available", "Installed {0}; latest {1}.", briefcase.Check.Installed!, briefcase.Check.Latest) :
+                developmentBuild ? AppTranslations.Get("updates.briefcase_development") :
                 AppTranslations.Format("updates.briefcase_current", "Up to date ({0}).", briefcase.Check.Installed!));
             RememberCurrentUpdates(key);
         }
@@ -1158,19 +1159,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (_disposed || revision != _updateRevision) return;
                 BriefcaseInstalledVersion = result.Check?.Installed ?? BriefcaseInstalledVersion;
                 var developmentBuild = BriefcaseInstallService.IsDevelopmentBuild(BriefcaseInstalledVersion);
-                BriefcaseActionVisible = !developmentBuild &&
-                    (result.Check is { InstallNeeded: true } or { UpdateAvailable: true });
-                BriefcaseAppearance = developmentBuild ? UpdatePanelAppearance.Development : result.Check?.InstallNeeded == true
-                    ? UpdatePanelAppearance.Missing : result.Check?.UpdateAvailable == true
-                        ? UpdatePanelAppearance.Available : result.Check is not null
+                BriefcaseActionVisible = result.Check is { InstallNeeded: true } or { UpdateAvailable: true };
+                BriefcaseAppearance = result.Check?.UpdateAvailable == true ? UpdatePanelAppearance.Available :
+                    developmentBuild ? UpdatePanelAppearance.Development : result.Check?.InstallNeeded == true
+                    ? UpdatePanelAppearance.Missing : result.Check is not null
                             ? UpdatePanelAppearance.Current : BriefcaseInstalledVersion == "—"
                                 ? UpdatePanelAppearance.Missing : UpdatePanelAppearance.Neutral;
                 BriefcaseActionLabel = result.Check?.InstallNeeded == true
                     ? AppTranslations.Get("updates.install_briefcase") : AppTranslations.Get("updates.update_briefcase");
-                BriefcaseUpdateStatus = developmentBuild ? AppTranslations.Get("updates.briefcase_development") :
-                    result.Error ?? (result.Check is null ? AppTranslations.Get("updates.unknown") :
+                BriefcaseUpdateStatus = result.Error ?? (result.Check is null ? AppTranslations.Get("updates.unknown") :
                     result.Check.InstallNeeded ? AppTranslations.Format("updates.briefcase_missing", "Latest release: {0}.", result.Check.Latest) :
-                    result.Check.UpdateAvailable ? AppTranslations.Format("updates.briefcase_available", "Latest release: {1}.", result.Check.Installed!, result.Check.Latest) :
+                    result.Check.UpdateAvailable ? developmentBuild
+                        ? AppTranslations.Format("updates.briefcase_development_available", "Local development build {0}; release {1} is available.", result.Check.Installed!, result.Check.Latest)
+                        : AppTranslations.Format("updates.briefcase_available", "Latest release: {1}.", result.Check.Installed!, result.Check.Latest) :
+                    developmentBuild ? AppTranslations.Get("updates.briefcase_development") :
                     AppTranslations.Get("updates.briefcase_current", "Up to date."));
             }
             RememberCurrentUpdates(key);

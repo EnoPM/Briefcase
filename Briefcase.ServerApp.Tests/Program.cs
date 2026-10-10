@@ -225,19 +225,10 @@ try
     var localBuildMarker = Path.Combine(win64, "Briefcase", "Core", "Updater", "build.json");
     Directory.CreateDirectory(Path.GetDirectoryName(localBuildMarker)!);
     File.WriteAllText(localBuildMarker, "{\"frameworkVersion\":\"0.8.5-dev.local\"}");
-    var localBuildCheck = await new BriefcaseInstallService().CheckVersionAsync(location!, CancellationToken.None);
-    Check(localBuildCheck.Installed == "0.8.5-dev.local" && !localBuildCheck.UpdateAvailable,
-        "local development runtime does not request a GitHub update");
-    var developmentUpdateBlocked = false;
-    try
-    {
-        await new BriefcaseInstallService().InstallOrUpdateAsync(location!, new Progress<string>(), CancellationToken.None);
-    }
-    catch (InvalidOperationException ex) when (ex.Message.Contains("development build", StringComparison.OrdinalIgnoreCase))
-    {
-        developmentUpdateBlocked = true;
-    }
-    Check(developmentUpdateBlocked, "GitHub release cannot replace a local development runtime");
+    var localBuildVersion = GitHubReleaseService.InstalledBriefcaseVersion(location!);
+    Check(localBuildVersion == "0.8.5-dev.local" &&
+          new BriefcaseInstallService.VersionCheck(localBuildVersion, "0.8.6").UpdateAvailable,
+        "local development runtime can be replaced by a newer published release");
     File.Delete(localBuildMarker);
     var rootExecutable = Path.Combine(temp, "DeceiveIncServer.exe");
     File.WriteAllBytes(rootExecutable, []);
@@ -459,8 +450,10 @@ try
           new BriefcaseInstallService.VersionCheck("1.0.0", "2.0.0").UpdateAvailable &&
           !new BriefcaseInstallService.VersionCheck("2.0.0", "2.0.0").UpdateAvailable &&
           BriefcaseInstallService.IsDevelopmentBuild("0.8.5-dev.local") &&
-          !new BriefcaseInstallService.VersionCheck("0.8.5-dev.local", "2.0.0").UpdateAvailable,
-        "Briefcase action distinguishes missing, outdated, current and local development installations");
+          new BriefcaseInstallService.VersionCheck("0.8.5-dev.local", "0.8.5").UpdateAvailable &&
+          new BriefcaseInstallService.VersionCheck("0.8.5-dev.local", "0.8.6").UpdateAvailable &&
+          !new BriefcaseInstallService.VersionCheck("0.8.5-dev.local", "0.8.4").UpdateAvailable,
+        "Briefcase action allows a development build to be replaced without downgrading it");
     var catalogUrl = "https://example.test/catalog.json";
     var catalogV2 = $$"""
         {"schemaVersion":2,"mods":[{"id":"player-cap","name":"Player Cap","description":"Adjust player limits",
