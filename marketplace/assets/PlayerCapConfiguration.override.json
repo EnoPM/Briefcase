@@ -1,1 +1,1 @@
-{"schemaVersion":1,"fields":[{"key":"MaxPlayers","max":30}]}
+{"schemaVersion":1,"fields":[{"key":"MaxPlayers","max":30,"maxByChoice":null}]}

@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 
@@ -27,7 +28,7 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
 
 public sealed record InstalledModMetadata(string Id, string Version, string Name, string Author,
     string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl,
-    int? LegacyMaxPlayersMaximum = null);
+    int? LegacyMaxPlayersMaximum = null, string Sha256 = "", string FormSchemaOverrideSha256 = "");
 
 public sealed class ModMarketplace
 {
@@ -235,7 +236,7 @@ public sealed class ModMarketplace
                 legacyMaximum = oldMaximum;
             return new InstalledModMetadata(modId, Read("version"), Read("name"), Read("author"),
                 Read("description"), Read("catalog"), Read("documentationUrl"), Read("discordUrl"),
-                Read("homepageUrl"), legacyMaximum);
+                Read("homepageUrl"), legacyMaximum, Read("sha256"), Read("formSchemaOverrideSha256"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
                                    KeyNotFoundException or InvalidOperationException)
@@ -244,6 +245,109 @@ public sealed class ModMarketplace
 
     public static string InstalledVersion(ServerLocation location, string modId) =>
         InstalledMetadata(location, modId)?.Version ?? "";
+
+    // Catalog sidecars may be added after the native archive was installed. Restore only
+    // the verified form files for that exact installed archive; never replace its DLL.
+    public static async Task<bool> RestoreFormAssetsAsync(ServerLocation location, MarketplaceMod mod,
+        CancellationToken cancellationToken)
+    {
+        var installed = InstalledMetadata(location, mod.Id);
+        if (installed is null || !installed.Catalog.Equals(mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
+            !installed.Version.Equals(mod.Version, StringComparison.Ordinal) ||
+            !installed.Sha256.Equals(mod.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
+        var modRoot = Path.Combine(location.ModsRoot, mod.Id);
+        var dataRoot = Path.Combine(modRoot, "Data");
+        var formPath = Path.Combine(dataRoot, "server-configuration.override.json");
+        var translationsRoot = Path.Combine(dataRoot, "FormTranslations");
+        var needsForm = mod.FormSchemaOverrideUrl is not null &&
+            (!File.Exists(formPath) || installed.FormSchemaOverrideSha256.Length == 64 &&
+                !installed.FormSchemaOverrideSha256.Equals(mod.FormSchemaOverrideSha256,
+                    StringComparison.OrdinalIgnoreCase) &&
+                ExistingFormHashMatches(formPath, installed.FormSchemaOverrideSha256));
+        var missingTranslations = mod.FormTranslations?.Where(item =>
+            !File.Exists(Path.Combine(translationsRoot, item.Key + ".json"))).ToArray() ?? [];
+        if (!needsForm && missingTranslations.Length == 0) return false;
+        var form = needsForm ? await DownloadFormOverrideAsync(mod, cancellationToken) : null;
+        var translations = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (language, asset) in missingTranslations)
+            translations.Add(language, await DownloadFormAssetAsync(asset.Url, asset.Sha256, cancellationToken));
+        return RestoreFormAssets(location, mod, form, translations);
+    }
+    public static bool RestoreFormAssets(ServerLocation location, MarketplaceMod mod, byte[]? form,
+        IReadOnlyDictionary<string, byte[]> translations)
+    {
+        var installed = InstalledMetadata(location, mod.Id);
+        if (installed is null || !installed.Catalog.Equals(mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
+            !installed.Version.Equals(mod.Version, StringComparison.Ordinal) ||
+            !installed.Sha256.Equals(mod.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
+        var modRoot = Path.Combine(location.ModsRoot, mod.Id);
+        var dataRoot = Path.Combine(modRoot, "Data");
+        var translationsRoot = Path.Combine(dataRoot, "FormTranslations");
+        foreach (var path in new[] { location.ModsRoot, modRoot, dataRoot, translationsRoot })
+            if (Directory.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+                throw new InvalidDataException("The mod form path contains a directory link.");
+        if (!File.Exists(Path.Combine(modRoot, "dlls", "main.dll"))) return false;
+        if (form is not null) FormSchema.LoadBase().ApplyOverride(form);
+        if (form is not null && mod.FormSchemaOverrideSha256 is { Length: 64 } expectedHash &&
+            !Convert.ToHexString(SHA256.HashData(form)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Mod form override checksum does not match the catalog.");
+        if (form is null && translations.Count == 0) return false;
+        Directory.CreateDirectory(dataRoot);
+        var formChanged = form is not null && WriteFormFile(Path.Combine(dataRoot,
+            "server-configuration.override.json"), form, installed.FormSchemaOverrideSha256);
+        if (formChanged && mod.FormSchemaOverrideSha256 is { Length: 64 } newHash)
+            UpdateInstalledFormHash(Path.Combine(modRoot, ".serverapp-install.json"), newHash);
+        var changed = formChanged;
+        if (translations.Count > 0) Directory.CreateDirectory(translationsRoot);
+        foreach (var (language, bytes) in translations)
+        {
+            if (!Regex.IsMatch(language, "^[a-z]{2}(?:-[A-Za-z0-9]{2,8})?$"))
+                throw new InvalidDataException("Invalid form translation language.");
+            using var json = JsonDocument.Parse(bytes);
+            if (json.RootElement.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Invalid form translation.");
+            changed |= WriteFormFile(Path.Combine(translationsRoot, language + ".json"), bytes, "");
+        }
+        return changed;
+    }
+    private static bool WriteFormFile(string path, byte[] bytes, string previousHash)
+    {
+        if (File.Exists(path))
+        {
+            if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+                throw new InvalidDataException("The mod form file is a link.");
+            if (previousHash.Length != 64 || !ExistingFormHashMatches(path, previousHash)) return false;
+        }
+        var temp = path + ".serverapp-" + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temp, bytes);
+            File.Move(temp, path, true);
+            return true;
+        }
+        catch (IOException) when (File.Exists(path)) { return false; }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
+
+    private static bool ExistingFormHashMatches(string path, string expectedHash)
+    {
+        if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("The mod form file is a link.");
+        if (new FileInfo(path).Length > 65536) return false;
+        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))
+            .Equals(expectedHash, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void UpdateInstalledFormHash(string path, string hash)
+    {
+        if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("The mod installation metadata is a link.");
+        var metadata = JsonNode.Parse(File.ReadAllBytes(path))?.AsObject()
+            ?? throw new InvalidDataException("Invalid mod installation metadata.");
+        metadata["formSchemaOverrideSha256"] = hash;
+        var temp = path + ".serverapp-" + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.WriteAllText(temp, metadata.ToJsonString()); File.Move(temp, path, true); }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
 
     public static void Install(ServerLocation location, MarketplaceMod mod, string archiveFile, byte[]? logoBytes = null,
         byte[]? formOverrideBytes = null, IReadOnlyDictionary<string, byte[]>? formTranslations = null)

@@ -13,7 +13,7 @@
       "logoSha256": "679e7268b30e7d90e0b1034d48143fc0e4ca65fc5f1f7df9dd78a6a7dd853acb",
       "serverConfiguration": { "maxPlayersMaximum": 30 },
       "formSchemaOverrideUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/PlayerCapConfiguration.override.json",
-      "formSchemaOverrideSha256": "acf8cc0fac079158bf41af93500c3e34751ad0590a27fba009513b4a594e1f80",
+      "formSchemaOverrideSha256": "c77611e654ba393f5b8cea380040a7fd18f3046f9fc97c1ade5976bc77c893c1",
       "formTranslations": {
         "en": { "url": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/PlayerCap.en.json", "sha256": "04171dc76f8b1047d29eca3808c90af106d14164d31ab431c6e712be64144937" },
         "fr": { "url": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/PlayerCap.fr.json", "sha256": "5c0eb4de0cf9498c29b7a1e0a847bb26853b300cc4c82304c2cc7d603d3e9cb0" }

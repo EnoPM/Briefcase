@@ -104,7 +104,7 @@ public sealed partial class MainWindow : Window
             if (!_model.IsDemo)
             {
                 _ = _model.CheckUpdatesAsync();
-                _ = _model.RefreshMarketplaceAsync();
+                _ = RefreshMarketplaceAndSettingsAsync();
             }
         };
         KeyDown += (_, args) =>
@@ -290,7 +290,7 @@ public sealed partial class MainWindow : Window
             if (_model.SelectedServer == selected)
             {
                 _ = _model.CheckUpdatesAsync();
-                _ = _model.RefreshMarketplaceAsync();
+                _ = RefreshMarketplaceAndSettingsAsync();
             }
         }
     }
@@ -465,8 +465,10 @@ public sealed partial class MainWindow : Window
                         {
                             var options = spec.Choices!.Select(choice => new FormChoiceOption(choice.Value,
                                 schema.Text(choice.LabelKey, choice.Label))).ToArray();
-                            input = new ComboBox { ItemsSource = options,
+                            var combo = new ComboBox { ItemsSource = options,
                                 SelectedItem = options.FirstOrDefault(option => option.Value == value) };
+                            combo.SelectionChanged += (_, _) => UpdateReferencedBounds(schema);
+                            input = combo;
                         }
                         else if (spec.Display == "slider")
                         {
@@ -633,10 +635,12 @@ public sealed partial class MainWindow : Window
                 {
                     Slider slider when field is not null => field.FormatSliderValue(slider.Value),
                     NumericUpDown numeric => numeric.Value?.ToString(CultureInfo.InvariantCulture) ?? "",
+                    ComboBox combo => (combo.SelectedItem as FormChoiceOption)?.Value ?? "",
                     _ => ""
                 };
             }
-            foreach (var field in schema.Fields.Where(field => field.MaximumReference is not null))
+            foreach (var field in schema.Fields.Where(field =>
+                         field.MaximumReference is not null || field.MaximumByChoice is not null))
             {
                 var bound = schema.EffectiveMaximum(field, values);
                 if (bound is null || !_settingControls.TryGetValue(field.Key, out var control)) continue;
@@ -923,7 +927,16 @@ public sealed partial class MainWindow : Window
     private async void UpdateGameClicked(object? sender, RoutedEventArgs e) { await _model.UpdateGameAsync(); await _model.RefreshGameUpdateAsync(); }
     private async void InstallBriefcaseClicked(object? sender, RoutedEventArgs e) { await _model.InstallBriefcaseAsync(); await _model.RefreshBriefcaseUpdateAsync(); }
     private async void InstallCppClicked(object? sender, RoutedEventArgs e) { await _model.InstallCppRuntimeAsync(); await _model.RefreshRuntimeUpdateAsync(); }
-    private async void RefreshMarketplaceClicked(object? sender, RoutedEventArgs e) => await _model.RefreshMarketplaceAsync();
+    private async Task RefreshMarketplaceAndSettingsAsync()
+    {
+        var selected = _model.SelectedServer;
+        var revision = _model.FormAssetsRevision;
+        await _model.RefreshMarketplaceAsync();
+        if (_model.FormAssetsRevision != revision && _model.SelectedServer == selected)
+            LoadSettings();
+    }
+    private async void RefreshMarketplaceClicked(object? sender, RoutedEventArgs e) =>
+        await RefreshMarketplaceAndSettingsAsync();
     private void OpenModDocumentationClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.DocumentationUrl);
     private void OpenModDiscordClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.DiscordUrl);
     private void OpenModHomepageClicked(object? sender, RoutedEventArgs e) => OpenModLink(sender, mod => mod.HomepageUrl);

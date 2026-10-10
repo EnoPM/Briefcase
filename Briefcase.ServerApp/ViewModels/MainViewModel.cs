@@ -150,6 +150,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<ServerInstallation> Installations => Registry.Installations;
     public ObservableCollection<string> CatalogUrls => Registry.CatalogUrls;
     public ObservableCollection<MarketplaceMod> MarketplaceMods { get; } = [];
+    public int FormAssetsRevision { get; private set; }
     public bool HasMarketplaceMods => MarketplaceMods.Count > 0;
     public bool NoMarketplaceMods => MarketplaceMods.Count == 0;
     public bool CanInstallMarketplaceMod => CanManageMods && HasMarketplaceMods;
@@ -698,11 +699,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         sources = sources.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var url in sources)
             list.AddRange(await marketplace.ReadCatalogAsync(url, CancellationToken.None));
+        string? formError = null;
         if (ServerLocation.TryCreate(SelectedServer, out var location, out var ignoredError))
+        {
+            if (SelectedServer is { } current &&
+                (!location!.IsInstance || current.Id == location.InstanceId))
+            {
+                foreach (var mod in list)
+                {
+                    try
+                    {
+                        if (await ModMarketplace.RestoreFormAssetsAsync(location, mod, CancellationToken.None))
+                            FormAssetsRevision++;
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+                                                  InvalidDataException or HttpRequestException)
+                    { formError ??= error.Message; }
+                }
+            }
             list = list.Select(mod =>
             {
                 return mod with { Status = MarketplaceStatus(location!, mod) };
             }).ToList();
+        }
         using var logoGate = new SemaphoreSlim(4);
         var withLogos = await Task.WhenAll(list.Select(async mod =>
         {
@@ -712,7 +731,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }));
         MarketplaceMods.Clear();
         foreach (var mod in withLogos.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)) MarketplaceMods.Add(mod);
-        return AppTranslations.Format("status.catalog_loaded", "Loaded {0} mods from {1} catalogs.", list.Count, sources.Count);
+        var summary = AppTranslations.Format("status.catalog_loaded", "Loaded {0} mods from {1} catalogs.",
+            list.Count, sources.Count);
+        return formError is null ? summary : summary + " Mod form update failed: " + formError;
     });
 
     private static string MarketplaceStatus(ServerLocation location, MarketplaceMod mod)

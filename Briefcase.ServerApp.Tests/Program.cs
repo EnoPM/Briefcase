@@ -837,24 +837,33 @@ try
     Check(ServerIniEditor.Fields.Any(field => field.Key == "HeatPercentDamagingVIP") &&
         ServerIniEditor.Fields.Any(field => field.Key == "HeatDelayAggroPostCover"),
         "visual server schema includes heat damage and delay settings");
+    var vanillaSchema = FormSchema.LoadBase();
+    var playerField = vanillaSchema.Fields.Single(field => field.Key == "MaxPlayers");
+    Check(new[] { (Mode: "Solo", Maximum: 8m), (Mode: "Duo", Maximum: 10m), (Mode: "Trio", Maximum: 12m) }
+            .All(item => vanillaSchema.EffectiveMaximum(playerField,
+                new Dictionary<string, string> { ["GameMode"] = item.Mode }) == item.Maximum),
+        "vanilla player ceilings follow the selected game mode");
     settings["ServerName"] = "Fixture edited";
+    settings["GameMode"] = "Duo";
     settings["MaxPlayers"] = "10";
     ServerIniEditor.Save(location.ConfigFile, settings, ["DI_SR", "DI_DS", "DI_SR"]);
     var (saved, savedMaps) = ServerIniEditor.Read(location.ConfigFile);
     Check(saved["ServerName"] == "Fixture edited" && saved["MaxPlayers"] == "10" &&
         savedMaps.SequenceEqual(["DI_SR", "DI_DS", "DI_SR"]), "ordered repeated map rotation round-trip");
     Check(RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
-              new Dictionary<string, string>(settings) { ["MaxPlayers"] = "17" }, ["DI_SR"])) &&
+              new Dictionary<string, string>(settings) { ["MaxPlayers"] = "11" }, ["DI_SR"])) &&
+          RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
+              new Dictionary<string, string>(settings) { ["GameMode"] = "Solo" }, ["DI_SR"])) &&
           RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
               new Dictionary<string, string>(settings) { ["BotsAmount"] = "11" }, ["DI_SR"])) &&
           RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
               new Dictionary<string, string>(settings) { ["ServerName"] = new string('N', 49) }, ["DI_SR"])),
-        "server configuration rejects more than 16 players, bots above player capacity and names over 48 characters");
+        "vanilla mode ceilings, bot capacity and the server name limit are validated");
     var playerCapOverride = System.Text.Encoding.UTF8.GetBytes("""
         {"schemaVersion":1,
          "tabs":[{"id":"Custom","label":"Custom"}],
          "groups":[{"id":"CustomGroup","tab":"Custom","label":"Custom settings"}],
-         "fields":[{"key":"MaxPlayers","max":30},
+         "fields":[{"key":"MaxPlayers","max":30,"maxByChoice":null},
                    {"key":"CustomThreshold","label":"Custom threshold","group":"CustomGroup",
                     "kind":"integer","default":"5","min":0,"maxReference":"MaxPlayers",
                     "section":"Custom.Server.Settings"},
@@ -867,6 +876,10 @@ try
                     "section":"Custom.Server.Settings"}]}
         """);
     var expandedSchema = FormSchema.LoadBase().ApplyOverride(playerCapOverride);
+    var expandedPlayerField = expandedSchema.Fields.Single(field => field.Key == "MaxPlayers");
+    Check(new[] { "Solo", "Duo", "Trio" }.All(mode => expandedSchema.EffectiveMaximum(expandedPlayerField,
+              new Dictionary<string, string> { ["GameMode"] = mode }) == 30),
+        "PlayerCap override removes the vanilla mode-dependent ceiling");
     var expandedSettings = new Dictionary<string, string>(settings)
     {
         ["MaxPlayers"] = "30", ["BotsAmount"] = "30", ["CustomThreshold"] = "7",
@@ -1056,8 +1069,36 @@ try
     Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Enabled" &&
           FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
         "installed mod can be enabled again");
-    File.Delete(Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json"));
     var installedMetadataPath = Path.Combine(modsRoot, "FixtureMod", ".serverapp-install.json");
+    var formPath = Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json");
+    var previousForm = System.Text.Encoding.UTF8.GetBytes(
+        "{\"schemaVersion\":1,\"fields\":[{\"key\":\"MaxPlayers\",\"max\":30}]}");
+    File.WriteAllBytes(formPath, previousForm);
+    var previousFormHash = Convert.ToHexString(SHA256.HashData(previousForm)).ToLowerInvariant();
+    var currentFormHash = Convert.ToHexString(SHA256.HashData(playerCapOverride)).ToLowerInvariant();
+    var versionedMetadata = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(installedMetadataPath))!.AsObject();
+    versionedMetadata["formSchemaOverrideSha256"] = previousFormHash;
+    File.WriteAllText(installedMetadataPath, versionedMetadata.ToJsonString());
+    var updatedCatalogEntry = marketplaceEntry with { FormSchemaOverrideSha256 = currentFormHash };
+    Check(ModMarketplace.RestoreFormAssets(location, updatedCatalogEntry, playerCapOverride, formTranslations) &&
+          File.ReadAllBytes(formPath).SequenceEqual(playerCapOverride) &&
+          ModMarketplace.InstalledMetadata(location, "FixtureMod")?.FormSchemaOverrideSha256 == currentFormHash,
+        "catalog updates an unmodified installed form sidecar without replacing the mod archive");
+    File.WriteAllBytes(formPath, previousForm);
+    Check(!ModMarketplace.RestoreFormAssets(location, updatedCatalogEntry, playerCapOverride, formTranslations) &&
+          File.ReadAllBytes(formPath).SequenceEqual(previousForm),
+        "a locally modified form sidecar is preserved during catalog refresh");
+    File.Delete(Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json"));
+    Check(FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 16,
+        "an older catalog install without a form sidecar retains the base bound initially");
+    Check(!ModMarketplace.RestoreFormAssets(location, marketplaceEntry with { Sha256 = "different" },
+              playerCapOverride, formTranslations) &&
+          !File.Exists(Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json")),
+        "a catalog entry for a different archive cannot alter an installed mod's form");
+    Check(ModMarketplace.RestoreFormAssets(location, marketplaceEntry, playerCapOverride, formTranslations) &&
+          FormSchema.LoadForServer(location).Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
+        "a matching catalog restores only the form sidecar for an existing mod");
+    File.Delete(Path.Combine(modsRoot, "FixtureMod", "Data", "server-configuration.override.json"));
     var previousMetadata = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(installedMetadataPath))!.AsObject();
     previousMetadata["serverConfiguration"] = new System.Text.Json.Nodes.JsonObject
     {

@@ -10,9 +10,11 @@ public enum FormFieldKind { Text, Secret, Integer, Decimal, Boolean, Choice }
 public sealed record FormTab(string Id, string Label, string? Feature, string LabelKey);
 public sealed record FormGroup(string Id, string Tab, string Label, string LabelKey);
 public sealed record FormChoice(string Value, string Label, string LabelKey);
+public sealed record FormChoiceMaximum(string Reference, IReadOnlyDictionary<string, decimal> Values);
 public sealed record FormField(string Key, string Label, string Group, string Section,
     FormFieldKind Kind, string Default, decimal? Minimum, decimal? Maximum, string? MaximumReference,
-    int? MaxLength, FormChoice[]? Choices, string Display, decimal Step, string? NotEqualTo, string? Pattern, string LabelKey)
+    FormChoiceMaximum? MaximumByChoice, int? MaxLength, FormChoice[]? Choices, string Display,
+    decimal Step, string? NotEqualTo, string? Pattern, string LabelKey)
 {
     public decimal SliderMaximum(decimal maximum)
     {
@@ -65,10 +67,19 @@ public sealed class FormSchema
             throw new InvalidDataException("Form schema contains an unknown tab or group.");
         foreach (var field in Fields)
         {
-            if (field.MaximumReference is not { } reference) continue;
-            if (reference == field.Key || !Fields.Any(other => other.Key == reference &&
-                    other.Kind is FormFieldKind.Integer or FormFieldKind.Decimal))
+            if (field.MaximumReference is { } reference &&
+                (reference == field.Key || !Fields.Any(other => other.Key == reference &&
+                    other.Kind is FormFieldKind.Integer or FormFieldKind.Decimal)))
                 throw new InvalidDataException("Invalid maximum reference for " + field.Key + ".");
+            if (field.MaximumByChoice is not { } choiceMaximum) continue;
+            var choiceField = Fields.FirstOrDefault(other => other.Key == choiceMaximum.Reference &&
+                other.Kind == FormFieldKind.Choice);
+            if (choiceField is null || choiceField.Key == field.Key ||
+                choiceField.Choices!.Length != choiceMaximum.Values.Count ||
+                choiceField.Choices.Any(choice => !choiceMaximum.Values.ContainsKey(choice.Value)) ||
+                choiceMaximum.Values.Values.Any(value => value < field.Minimum ||
+                    field.Maximum is { } ceiling && value > ceiling))
+                throw new InvalidDataException("Invalid choice maximum for " + field.Key + ".");
         }
         if (Fields.Any(field => field.NotEqualTo is { } other && !Fields.Any(candidate => candidate.Key == other)))
             throw new InvalidDataException("Form schema contains an unknown comparison reference.");
@@ -109,7 +120,7 @@ public sealed class FormSchema
                 // until the mod is reinstalled with a proper JSON form override.
                 schema = schema.ApplyOverride(System.Text.Encoding.UTF8.GetBytes(
                     "{\"schemaVersion\":1,\"fields\":[{\"key\":\"MaxPlayers\",\"max\":" +
-                    maximum.ToString(CultureInfo.InvariantCulture) + "}]}"));
+                    maximum.ToString(CultureInfo.InvariantCulture) + ",\"maxByChoice\":null}]}"));
             }
             var languageRoot = Path.Combine(location.ModsRoot, mod.Name, "Data", "FormTranslations");
             schema.AddTranslations(languageRoot, "en");
@@ -155,11 +166,15 @@ public sealed class FormSchema
 
     public decimal? EffectiveMaximum(FormField field, IReadOnlyDictionary<string, string> values)
     {
-        if (field.MaximumReference is not { } reference) return field.Maximum;
-        if (!values.TryGetValue(reference, out var value) ||
-            !decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var bound))
-            return field.Maximum;
-        return field.Maximum is { } ceiling ? Math.Min(ceiling, bound) : bound;
+        var maximum = field.Maximum;
+        if (field.MaximumReference is { } reference && values.TryGetValue(reference, out var value) &&
+            decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var bound))
+            maximum = maximum is { } ceiling ? Math.Min(ceiling, bound) : bound;
+        if (field.MaximumByChoice is { } choiceMaximum &&
+            values.TryGetValue(choiceMaximum.Reference, out var choice) &&
+            choiceMaximum.Values.TryGetValue(choice, out var choiceBound))
+            maximum = maximum is { } ceiling ? Math.Min(ceiling, choiceBound) : choiceBound;
+        return maximum;
     }
 
     public void Validate(IReadOnlyDictionary<string, string> values)
@@ -210,6 +225,21 @@ public sealed class FormSchema
         var minimum = Number(item, "min");
         var maximum = Number(item, "max");
         var maxReference = Optional(item, "maxReference");
+        FormChoiceMaximum? maxByChoice = null;
+        if (item["maxByChoice"] is { } maxByChoiceNode)
+        {
+            if (maxByChoiceNode is not JsonObject choiceRule || choiceRule["values"] is not JsonObject bounds ||
+                bounds.Count is < 1 or > 64)
+                throw new InvalidDataException("Invalid choice maximum for " + key + ".");
+            var reference = Identifier(choiceRule, "field");
+            var values = new Dictionary<string, decimal>(StringComparer.Ordinal);
+            foreach (var (choice, bound) in bounds)
+            {
+                if (choice.Length is < 1 or > 128 || bound is null || !values.TryAdd(choice, bound.GetValue<decimal>()))
+                    throw new InvalidDataException("Invalid choice maximum for " + key + ".");
+            }
+            maxByChoice = new FormChoiceMaximum(reference, values);
+        }
         var maxLength = Integer(item, "maxLength", optional: true);
         var choices = item["choices"] is JsonArray array ? array.Select(node => ParseChoice(node, key)).ToArray() : null;
         var display = Optional(item, "display") ?? "input";
@@ -221,7 +251,7 @@ public sealed class FormSchema
             choices is not null && choices.Select(choice => choice.Value).Distinct(StringComparer.Ordinal).Count() != choices.Length ||
             display is not ("input" or "slider") || display == "slider" &&
                 kind is not (FormFieldKind.Integer or FormFieldKind.Decimal) ||
-            display == "slider" && maximum is null && maxReference is null ||
+            display == "slider" && maximum is null && maxReference is null && maxByChoice is null ||
             step is <= 0 or > 1000000 || kind == FormFieldKind.Integer && step != decimal.Truncate(step))
             throw new InvalidDataException("Invalid field definition for " + key + ".");
         if (Optional(item, "pattern") is { Length: > 200 } pattern)
@@ -232,7 +262,7 @@ public sealed class FormSchema
             catch (ArgumentException error) { throw new InvalidDataException("Invalid validation pattern: " + key, error); }
         }
         return new FormField(key, Required(item, "label"), Identifier(item, "group"), section,
-            kind, Required(item, "default", allowEmpty: true), minimum, maximum, maxReference,
+            kind, Required(item, "default", allowEmpty: true), minimum, maximum, maxReference, maxByChoice,
             maxLength, choices, display, step, Optional(item, "notEqualTo"), Optional(item, "pattern"),
             Optional(item, "labelKey") ?? "config.field." + key);
     }

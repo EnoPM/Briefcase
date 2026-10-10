@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Briefcase.ServerApp;
 
 /// <summary>A Steam branch installed once and shared by any number of server instances.</summary>
@@ -12,11 +10,5 @@ public sealed record ServerInstallation(string Id, string Branch, string Install
         ? $"{Branch} · Build {build}" : $"{Branch} · {AppTranslations.Get("versions.build_unknown", "Build unknown")}";
     public string Details => InstallRoot;
 
-    public static string ValidateBranch(string? branch)
-    {
-        var value = branch?.Trim().ToLowerInvariant() ?? "";
-        if (!Regex.IsMatch(value, "^[a-z0-9_-]{1,64}$", RegexOptions.CultureInvariant))
-            throw new InvalidDataException("Enter a Steam branch name using lowercase letters, numbers, '-' or '_'.");
-        return value;
-    }
+    public static string ValidateBranch(string? branch) => AppDataStore.ValidateBranch(branch);
 }

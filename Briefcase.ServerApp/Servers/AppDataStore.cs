@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace Briefcase.ServerApp;
 
@@ -36,7 +37,15 @@ public static class AppDataStore
     }
 
     public static string VersionInstallRoot(string dataRoot, string branch) =>
-        Path.Combine(Path.GetFullPath(dataRoot), "game", "versions", ServerInstallation.ValidateBranch(branch));
+        Path.Combine(Path.GetFullPath(dataRoot), "game", "versions", ValidateBranch(branch));
+
+    public static string ValidateBranch(string? branch)
+    {
+        var value = branch?.Trim().ToLowerInvariant() ?? "";
+        if (!Regex.IsMatch(value, "^[a-z0-9_-]{1,64}$", RegexOptions.CultureInvariant))
+            throw new InvalidDataException("Enter a Steam branch name using lowercase letters, numbers, '-' or '_'.");
+        return value;
+    }
 
     public static string ValidateServerName(string name)
     {
