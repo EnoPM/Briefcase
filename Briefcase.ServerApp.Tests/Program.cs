@@ -22,12 +22,15 @@ if (args is ["--verify-catalog", var catalogPath])
         Path.GetFileName(new Uri(url).AbsolutePath)));
     bool HashMatches(string url, string hash) => Convert.ToHexString(SHA256.HashData(Asset(url)))
         .Equals(hash, StringComparison.OrdinalIgnoreCase);
-    Check(mods.All(mod => HashMatches(mod.LogoUrl!, mod.LogoSha256!)) &&
-          HashMatches(playerCap.FormSchemaOverrideUrl!, playerCap.FormSchemaOverrideSha256!) &&
-          playerCap.FormTranslations!.Values.All(asset => HashMatches(asset.Url, asset.Sha256)) &&
-          FormSchema.LoadBase().ApplyOverride(Asset(playerCap.FormSchemaOverrideUrl!))
+    Check(mods.All(mod => HashMatches(mod.LogoUrl!, mod.LogoSha256!)),
+        "published catalog logo hashes match the icon");
+    Check(HashMatches(playerCap.FormSchemaOverrideUrl!, playerCap.FormSchemaOverrideSha256!),
+        "published catalog form override hash matches");
+    Check(playerCap.FormTranslations!.Values.All(asset => HashMatches(asset.Url, asset.Sha256)),
+        "published catalog form translation hashes match");
+    Check(FormSchema.LoadBase().ApplyOverride(Asset(playerCap.FormSchemaOverrideUrl!))
               .Fields.Single(field => field.Key == "MaxPlayers").Maximum == 30,
-        "published catalog hashes match the icon, form override and translations");
+        "published catalog override raises the maximum player limit");
     Console.WriteLine("ServerApp mod catalog passed.");
     return;
 }
