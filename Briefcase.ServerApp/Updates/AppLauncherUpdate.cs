@@ -10,7 +10,7 @@ namespace Briefcase.ServerApp;
 public static class AppLauncherUpdate
 {
     private static readonly string[] Files =
-        ["Briefcase.Launcher.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
+        ["Briefcase.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
 
     public static async Task ApplyAsync(string version, int launcherPid, CancellationToken cancellationToken)
     {
@@ -60,7 +60,7 @@ public static class AppLauncherUpdate
         try
         {
             using var launcher = Process.GetProcessById(pid);
-            if (!launcher.ProcessName.Equals("Briefcase.Launcher", StringComparison.OrdinalIgnoreCase))
+            if (!launcher.ProcessName.Equals("Briefcase", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("The update target is not the Briefcase launcher.");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(2));
@@ -132,8 +132,8 @@ public static class AppLauncherUpdate
             try
             {
                 // Replace the executable last. Each individual move is atomic on the installation volume.
-                foreach (var name in Files.Where(name => name != "Briefcase.Launcher.exe")
-                             .Append("Briefcase.Launcher.exe"))
+                foreach (var name in Files.Where(name => name != "Briefcase.exe")
+                             .Append("Briefcase.exe"))
                 {
                     var temporary = Path.Combine(root, ".launcher-new-" + Guid.NewGuid().ToString("N"));
                     try

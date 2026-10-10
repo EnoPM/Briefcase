@@ -19,7 +19,7 @@ $launcherProject = Join-Path $projectRoot 'Briefcase.ServerApp.Launcher/Briefcas
 $publishDirectory = Join-Path $projectRoot 'artifacts/server-app-aot'
 $launcherPublishDirectory = Join-Path $projectRoot 'artifacts/server-app-launcher-aot'
 $nativeExecutable = Join-Path $projectRoot 'Briefcase.ServerApp/bin/Release/net10.0/win-x64/native/Briefcase.ServerApp.exe'
-$nativeLauncherExecutable = Join-Path $projectRoot 'Briefcase.ServerApp.Launcher/bin/Release/net10.0/win-x64/native/Briefcase.Launcher.exe'
+$nativeLauncherExecutable = Join-Path $projectRoot 'Briefcase.ServerApp.Launcher/bin/Release/net10.0/win-x64/native/Briefcase.exe'
 if ([string]::IsNullOrWhiteSpace($NativeBuildDirectory)) {
     $NativeBuildDirectory = Join-Path $projectRoot '../BriefcaseNative/build'
 }
@@ -93,17 +93,17 @@ $appDirectory = Join-Path $destination "App/versions/$version"
 New-Item -ItemType Directory -Path $appDirectory -Force | Out-Null
 $appExecutable = Join-Path $publishDirectory 'Briefcase.ServerApp.exe'
 if (-not (Test-Path -LiteralPath $appExecutable -PathType Leaf)) { $appExecutable = $nativeExecutable }
-$launcherExecutable = Join-Path $launcherPublishDirectory 'Briefcase.Launcher.exe'
+$launcherExecutable = Join-Path $launcherPublishDirectory 'Briefcase.exe'
 if (-not (Test-Path -LiteralPath $launcherExecutable -PathType Leaf)) { $launcherExecutable = $nativeLauncherExecutable }
 if (-not (Test-Path -LiteralPath $appExecutable -PathType Leaf) -or
     -not (Test-Path -LiteralPath $launcherExecutable -PathType Leaf)) { throw 'Missing AOT application or launcher.' }
 Copy-Item -LiteralPath $appExecutable -Destination (Join-Path $appDirectory 'Briefcase.ServerApp.exe')
-Copy-Item -LiteralPath $launcherExecutable -Destination (Join-Path $destination 'Briefcase.Launcher.exe')
+Copy-Item -LiteralPath $launcherExecutable -Destination (Join-Path $destination 'Briefcase.exe')
 foreach ($name in $runtimeFiles) {
     Copy-Item -LiteralPath (Join-Path $publishDirectory $name) -Destination (Join-Path $appDirectory $name)
     Copy-Item -LiteralPath (Join-Path $launcherPublishDirectory $name) -Destination (Join-Path $destination $name)
 }
-$launcherFiles = @('Briefcase.Launcher.exe') + $runtimeFiles
+$launcherFiles = @('Briefcase.exe') + $runtimeFiles
 $launcherManifestFiles = @($launcherFiles | ForEach-Object {
     $file = Join-Path $destination $_
     [ordered]@{
@@ -188,7 +188,7 @@ try {
     try {
         $actualFiles = @($zip.Entries | ForEach-Object { $_.FullName.Replace([char]92, [char]47) } | Sort-Object)
         $expectedFiles = @(
-            'Briefcase.Launcher.exe', 'Launcher/manifest.json', 'UpdateSource.json', 'App/current.json',
+            'Briefcase.exe', 'Launcher/manifest.json', 'UpdateSource.json', 'App/current.json',
             'Translations/en.json', 'Translations/fr.json'
         ) + $runtimeFiles + @($manifestFiles | ForEach-Object { "App/versions/$version/$($_.path)" }) +
             @("App/versions/$version/manifest.json")

@@ -130,7 +130,7 @@ jobs:
           $process = Start-Process -FilePath (Resolve-Path $installer) -WindowStyle Hidden -Wait -PassThru -ArgumentList $installArgs
           if ($process.ExitCode -ne 0) { throw 'Silent installer test failed.' }
           foreach ($file in @(
-            'Briefcase.Launcher.exe',
+            'Briefcase.exe',
             'Launcher/manifest.json',
             'App/current.json',
             "App/versions/$env:RELEASE_VERSION/Briefcase.ServerApp.exe",
@@ -143,7 +143,7 @@ jobs:
           if ($active.version -cne $env:RELEASE_VERSION) { throw 'Installer activated the wrong version.' }
           $newer = '{0}.{1}.{2}' -f (([int]($env:RELEASE_VERSION.Split('.')[0])) + 1), 0, 0
           $pointer = Join-Path $smoke 'App/current.json'
-          $launcher = Join-Path $smoke 'Briefcase.Launcher.exe'
+          $launcher = Join-Path $smoke 'Briefcase.exe'
           [IO.File]::WriteAllText($pointer, ('{"version":"' + $newer + '"}'))
           [IO.File]::WriteAllBytes($launcher, [byte[]](42, 17, 90, 128))
           $process = Start-Process -FilePath (Resolve-Path $installer) -WindowStyle Hidden -Wait -PassThru -ArgumentList $installArgs
@@ -196,7 +196,7 @@ jobs:
           @(
             "Briefcase $version for Windows x64.",
             '',
-            'Use the installer for a first installation, or extract the full ZIP and run Briefcase.Launcher.exe.',
+            'Use the installer for a first installation, or extract the full ZIP and run Briefcase.exe.',
             'The launcher checks for later releases and updates both the application and its own files.'
           ) | Set-Content -LiteralPath $notes -Encoding utf8
           gh release create "v$version" $archive $installer --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Briefcase $version" --notes-file $notes --draft

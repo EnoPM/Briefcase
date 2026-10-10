@@ -10,8 +10,10 @@ Briefcase ServerApp is a Windows application for installing and managing Deceive
 
 ## Getting started
 
-1. Once a release is available, use the Windows installer or extract the complete ZIP into one folder. Keep the `App`, `Launcher`, and `Translations` folders beside `Briefcase.Launcher.exe`.
-2. Run `Briefcase.Launcher.exe`. A small splash screen checks for an application update, shows download progress when needed, and opens Briefcase. It closes automatically when the main window appears. A verified newer launcher is then installed by the app after the old launcher exits.
+1. Once a release is available, use the Windows installer or extract the complete ZIP into one folder. Keep the `App`, `Launcher`, and `Translations` folders beside `Briefcase.exe`.
+2. Run `Briefcase.exe`. A small splash screen checks for an application update, shows download progress when needed, and opens Briefcase. It closes automatically when the main window appears. A verified newer launcher is then installed by the app after the old launcher exits.
+
+If you installed version 0.1.0, install version 0.1.1 once using the installer or replace the complete portable folder. The 0.1.0 launcher cannot perform the executable rename automatically.
 3. Select the **+** button beside **Servers**. In the dialog, choose **Install a new server** or **Open an existing server**. A new server uses the data directory's `servers` folder by default; check **Choose a different installation folder** to use another empty folder. For an existing server, select `DeceiveIncServer.exe` in the installation folder or `DeceiveIncServer-Win64-Shipping.exe` in `DeceiveInc\Binaries\Win64`.
 4. Select your server in the left column. Use **Configuration** to set its name, ports, player limit and map rotation.
 5. Use **Balancing** to choose **Characters**, **Gadgets**, or **Game**. For a character, choose their portrait, then **Weapons**, **Passives**, or **Expertises**, and finally the named variant. You can search by its game name, setting label, key, or value from any step. Save your changes when finished; the app keeps a backup of the previous profile.
@@ -32,7 +34,7 @@ After ServerApp has disabled `version.dll`, starting the dedicated server direct
 
 Open the gear icon in the upper-right corner to choose a language. Save it and restart the application. This also changes displayed game names, including maps, characters, weapons, passives, and expertises.
 
-You can edit the JSON files in `Translations` beside `Briefcase.Launcher.exe`; files in this shared folder remain available across app updates. To add a language, copy `en.json` to a new file such as `es.json`, set `language.name` to the name users should see in the language list, and translate the values while keeping the keys. Map names in `game.maps.*` are also recognized as aliases when a server reports them; `game.map_alias.*` maps additional server level names to map IDs. Restart the application after adding or editing a file. Missing or invalid translations fall back to bundled translations and then built-in English text. When running the app directly during development, use the `Translations` folder beside its executable.
+You can edit the JSON files in `Translations` beside `Briefcase.exe`; files in this shared folder remain available across app updates. To add a language, copy `en.json` to a new file such as `es.json`, set `language.name` to the name users should see in the language list, and translate the values while keeping the keys. Map names in `game.maps.*` are also recognized as aliases when a server reports them; `game.map_alias.*` maps additional server level names to map IDs. Restart the application after adding or editing a file. Missing or invalid translations fall back to bundled translations and then built-in English text. When running the app directly during development, use the `Translations` folder beside its executable.
 
 ## Data directory
 
@@ -54,4 +56,4 @@ To test the launcher with the application in its installed layout, publish both 
 ./scripts/Deploy-ServerAppLocal.ps1 -OutputDirectory 'D:\BriefcaseLocalTest'
 ```
 
-Run `D:\BriefcaseLocalTest\Briefcase.Launcher.exe`. The script builds the native injection components, publishes the launcher and app, and deploys them in the same directory structure as a release. It does not create an archive. Network updates are disabled by default; pass `-EnableUpdates` if you explicitly want to test them. You can run the script again against the same folder after closing the app and launcher; it keeps previous app versions and selects the newly deployed version.
+Run `D:\BriefcaseLocalTest\Briefcase.exe`. The script builds the native injection components, publishes the launcher and app, and deploys them in the same directory structure as a release. It does not create an archive. Network updates are disabled by default; pass `-EnableUpdates` if you explicitly want to test them. You can run the script again against the same folder after closing the app and launcher; it keeps previous app versions and selects the newly deployed version.

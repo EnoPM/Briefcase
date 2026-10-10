@@ -41,8 +41,11 @@ if (args is ["--verify-update-archive", var archivePath, var installationPath, v
     Check(File.Exists(candidate.Executable) && AppUpdateStore.Current(installationPath) is null,
         "release archive can be installed without activating an untested app");
     var stagedLauncher = LauncherUpdateStore.Stage(installationPath, archivePath, releaseVersion);
-    Check(File.Exists(Path.Combine(stagedLauncher, "Briefcase.Launcher.exe")),
+    Check(File.Exists(Path.Combine(stagedLauncher, "Briefcase.exe")),
         "release archive stages its verified launcher for replacement after startup");
+    AppLauncherUpdate.ApplyPrepared(installationPath, releaseVersion);
+    Check(File.Exists(Path.Combine(installationPath, "Briefcase.exe")),
+        "release archive installs the renamed launcher");
     AppUpdateStore.Activate(installationPath, candidate);
     Check(AppUpdateStore.Current(installationPath)?.Version == releaseVersion,
         "installed release archive can be activated");
@@ -61,8 +64,11 @@ if (args is ["--verify-existing-update", var existingArchivePath, var existingIn
         "preparing a new version leaves the installed version active");
     var stagedLauncher = LauncherUpdateStore.Stage(existingInstallationPath, existingArchivePath, nextVersion);
     Check(LauncherUpdateStore.IsPending(existingInstallationPath, nextVersion) &&
-          File.Exists(Path.Combine(stagedLauncher, "Briefcase.Launcher.exe")),
+          File.Exists(Path.Combine(stagedLauncher, "Briefcase.exe")),
         "the new launcher is staged and verified");
+    AppLauncherUpdate.ApplyPrepared(existingInstallationPath, nextVersion);
+    Check(File.Exists(Path.Combine(existingInstallationPath, "Briefcase.exe")),
+        "an existing installation gains the renamed launcher");
     AppUpdateStore.Activate(existingInstallationPath, candidate);
     Check(AppUpdateStore.Current(existingInstallationPath)?.Version == nextVersion,
         "the new version is active after the update");
@@ -144,7 +150,7 @@ try
     Directory.CreateDirectory(launcherInstallRoot);
     var launcherFiles = new Dictionary<string, byte[]>
     {
-        ["Briefcase.Launcher.exe"] = [21, 22],
+        ["Briefcase.exe"] = [21, 22],
         ["libSkiaSharp.dll"] = [23],
         ["libHarfBuzzSharp.dll"] = [24],
         ["av_libglesv2.dll"] = [25]
@@ -319,7 +325,7 @@ try
         "moving one profile updates only that profile's registered data directory");
     var packagedApp = Path.Combine(temp, "installed-app", "App", "versions", "1.0.0");
     Directory.CreateDirectory(packagedApp);
-    var packagedLauncher = Path.Combine(temp, "installed-app", "Briefcase.Launcher.exe");
+    var packagedLauncher = Path.Combine(temp, "installed-app", "Briefcase.exe");
     File.WriteAllBytes(packagedLauncher, []);
     var restart = AppRestartService.CreateStartInfo(packagedApp, 1234);
     Check(restart.FileName == packagedLauncher &&
@@ -331,7 +337,7 @@ try
     var riderApp = Path.Combine(sourceRoot, "Briefcase.ServerApp", "bin", "Debug", "net10.0", "win-x64");
     Directory.CreateDirectory(riderApp);
     var riderLauncher = Path.Combine(sourceRoot, "Briefcase.ServerApp.Launcher", "bin", "Debug",
-        "net10.0", "win-x64", "Briefcase.Launcher.exe");
+        "net10.0", "win-x64", "Briefcase.exe");
     Directory.CreateDirectory(Path.GetDirectoryName(riderLauncher)!);
     File.WriteAllBytes(riderLauncher, []);
     var riderRestart = AppRestartService.CreateStartInfo(riderApp, 5678);

@@ -14,6 +14,9 @@ UsePreviousAppDir=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 WizardStyle=modern
+LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=no
+ShowLanguageDialog=no
 SetupIconFile=..\Briefcase.ServerApp.Launcher\Assets\BriefcaseIcon.ico
 OutputDir=..\dist
 OutputBaseFilename=Briefcase-Setup-{#AppVersion}-win-x64
@@ -22,11 +25,15 @@ SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
 
+[Languages]
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
+
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\dist\ServerApp\Briefcase.Launcher.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: ShouldInstallBundledLauncher
+Source: "..\dist\ServerApp\Briefcase.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: ShouldInstallBundledLauncher
 Source: "..\dist\ServerApp\libSkiaSharp.dll"; DestDir: "{app}"; Flags: ignoreversion; Check: ShouldInstallBundledLauncher
 Source: "..\dist\ServerApp\libHarfBuzzSharp.dll"; DestDir: "{app}"; Flags: ignoreversion; Check: ShouldInstallBundledLauncher
 Source: "..\dist\ServerApp\av_libglesv2.dll"; DestDir: "{app}"; Flags: ignoreversion; Check: ShouldInstallBundledLauncher
@@ -37,11 +44,11 @@ Source: "..\dist\ServerApp\App\current.json"; DestDir: "{app}\App"; Flags: onlyi
 Source: "..\dist\ServerApp\App\versions\{#AppVersion}\*"; DestDir: "{app}\App\versions\{#AppVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Briefcase"; Filename: "{app}\Briefcase.Launcher.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\Briefcase"; Filename: "{app}\Briefcase.Launcher.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Briefcase"; Filename: "{app}\Briefcase.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\Briefcase"; Filename: "{app}\Briefcase.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\Briefcase.Launcher.exe"; Description: "Launch Briefcase"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Briefcase.exe"; Description: "{cm:LaunchProgram,Briefcase}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 function InstalledVersion: String;

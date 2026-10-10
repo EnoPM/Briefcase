@@ -18,7 +18,7 @@ public static class AppRestartService
         var launcherRoot = app.Parent?.Name.Equals("versions", StringComparison.OrdinalIgnoreCase) == true &&
                            app.Parent.Parent?.Name.Equals("App", StringComparison.OrdinalIgnoreCase) == true
             ? app.Parent.Parent.Parent?.FullName : app.FullName;
-        var launcher = Path.Combine(launcherRoot ?? app.FullName, "Briefcase.Launcher.exe");
+        var launcher = Path.Combine(launcherRoot ?? app.FullName, "Briefcase.exe");
         var development = false;
         if (!File.Exists(launcher))
         {
@@ -31,7 +31,7 @@ public static class AppRestartService
             var configuration = app.FullName.Split(Path.DirectorySeparatorChar)
                 .FirstOrDefault(part => part is "Debug" or "Release") ?? "Debug";
             launcher = Path.Combine(solution.FullName, "Briefcase.ServerApp.Launcher", "bin",
-                configuration, "net10.0", "win-x64", "Briefcase.Launcher.exe");
+                configuration, "net10.0", "win-x64", "Briefcase.exe");
             development = true;
         }
         if (!File.Exists(launcher))

@@ -42,7 +42,7 @@ if (Test-Path -LiteralPath $destination) {
     }
 }
 
-foreach ($process in @(Get-Process -Name 'Briefcase.ServerApp', 'Briefcase.Launcher' -ErrorAction SilentlyContinue)) {
+foreach ($process in @(Get-Process -Name 'Briefcase.ServerApp', 'Briefcase' -ErrorAction SilentlyContinue)) {
     try { $processPath = $process.Path } catch { $processPath = $null }
     if (-not $processPath -or (Test-Inside ([IO.Path]::GetFullPath($processPath)) $destination)) {
         throw 'Close Briefcase and its launcher in the output folder before deploying again.'
@@ -86,7 +86,7 @@ foreach ($file in Get-ChildItem -LiteralPath $sourceApp -Recurse -File) {
     Copy-Item -LiteralPath $file.FullName -Destination $target -Force
 }
 
-$rootFiles = @('Briefcase.Launcher.exe', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll',
+$rootFiles = @('Briefcase.exe', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll',
     'av_libglesv2.dll', 'Launcher/manifest.json', 'UpdateSource.json',
     'Translations/en.json', 'Translations/fr.json')
 foreach ($relative in $rootFiles) {
@@ -99,4 +99,4 @@ foreach ($relative in $rootFiles) {
 # Select the new complete version only after every binary and resource was copied.
 Copy-Item -LiteralPath (Join-Path $stage 'App/current.json') -Destination (Join-Path $destination 'App/current.json') -Force
 Write-Output "Local AOT deployment ready: $destination"
-Write-Output "Run: $([IO.Path]::Combine($destination, 'Briefcase.Launcher.exe'))"
+Write-Output "Run: $([IO.Path]::Combine($destination, 'Briefcase.exe'))"

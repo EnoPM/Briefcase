@@ -9,7 +9,7 @@
         Background="#0E0A18">
   <Canvas Width="650" Height="400" ClipToBounds="True">
     <Image Width="650" Height="400" Stretch="UniformToFill"
-           Source="avares://Briefcase.Launcher/Assets/SplashScreen.png"
+           Source="avares://Briefcase/Assets/SplashScreen.png"
            PointerPressed="BackgroundPressed" />
 
     <Button x:Name="CloseButton" Classes="splash-close" Canvas.Left="606" Canvas.Top="12"

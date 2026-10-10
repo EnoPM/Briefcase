@@ -4,7 +4,7 @@
     <ApplicationIcon>Assets/BriefcaseIcon.ico</ApplicationIcon>
     <TargetFramework>net10.0</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AssemblyName>Briefcase.Launcher</AssemblyName>
+    <AssemblyName>Briefcase</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>

@@ -21,7 +21,7 @@ internal static class LauncherElevation
 
     private static async Task RunAsync(string[] arguments, CancellationToken cancellationToken)
     {
-        var executable = Path.Combine(AppContext.BaseDirectory, "Briefcase.Launcher.exe");
+        var executable = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Briefcase.exe");
         if (!File.Exists(executable))
             throw new FileNotFoundException("The launcher executable is unavailable.", executable);
         var start = new ProcessStartInfo(executable)

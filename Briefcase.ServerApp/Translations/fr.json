@@ -385,7 +385,7 @@
   "game.characters.Yumi.Expertises.Base": "Explosion IEM",
   "game.characters.Yumi.Expertises.Mod1": "Champ médic",
   "game.characters.Yumi.Expertises.Mod2": "Tempête NANO",
-  "ui.translation_files_hint": "Pour ajouter une langue, placez un fichier JSON dans Translations à côté de Briefcase.Launcher.exe avec language.name et les mêmes clés que dans en.json. Redémarrez l'application pour la voir ici.",
+  "ui.translation_files_hint": "Pour ajouter une langue, placez un fichier JSON dans Translations à côté de Briefcase.exe avec language.name et les mêmes clés que dans en.json. Redémarrez l'application pour la voir ici.",
   "ui.language_saved_restart": "Langue enregistrée. Redémarrez l'application pour l'appliquer.",
   "ui.language_description": "Choisissez la langue de Briefcase ServerApp.",
   "ui.save_language": "Enregistrer la langue",

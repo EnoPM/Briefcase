@@ -9,7 +9,7 @@ namespace Briefcase.ServerApp.Launcher;
 public static class LauncherUpdateStore
 {
     private static readonly string[] Files =
-        ["Briefcase.Launcher.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
+        ["Briefcase.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
 
     public static bool IsPending(string root, string version)
     {

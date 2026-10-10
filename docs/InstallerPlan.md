@@ -55,7 +55,7 @@ keeps `App/current.json` if it already selects the same or a newer version;
 otherwise it selects the bundled app. It preserves user-edited translation
 files. The app's settings, catalogs, and registered server data live outside
 the installation directory, and the uninstaller does not remove them or the
-servers. Shortcuts point only to `Briefcase.Launcher.exe`.
+servers. Shortcuts point only to `Briefcase.exe`.
 
 ## Release validation still required
 
