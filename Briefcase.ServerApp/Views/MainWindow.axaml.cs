@@ -436,6 +436,8 @@ public sealed partial class MainWindow : Window
             var (values, maps) = _model.IsDemo
                 ? DemoData.Configuration(row.Id)
                 : ServerIniEditor.Read(location!.ConfigFile);
+            var maxPlayersMaximum = _model.IsDemo ? ServerConfigurationCapabilities.VanillaMaxPlayers :
+                ServerConfigurationCapabilities.MaxPlayersMaximum(location!);
             _mapRotationDraft = maps.ToList();
             Slider? botCountSlider = null;
             foreach (var category in ServerIniEditor.Fields.Select(f => f.Category).Distinct())
@@ -460,7 +462,7 @@ public sealed partial class MainWindow : Window
                         var maximum = spec.Key == "BotsAmount" &&
                                       int.TryParse(values["MaxPlayers"], NumberStyles.Integer, CultureInfo.InvariantCulture,
                                           out var configuredMaximum)
-                            ? Math.Clamp(configuredMaximum, 1, 16) : 16;
+                            ? Math.Clamp(configuredMaximum, 1, maxPlayersMaximum) : maxPlayersMaximum;
                         var selected = int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture,
                             out var configuredValue) ? Math.Clamp(configuredValue, spec.Minimum ?? 0, maximum) :
                             int.Parse(spec.Default, CultureInfo.InvariantCulture);
@@ -678,7 +680,8 @@ public sealed partial class MainWindow : Window
                     _ => ""
                 };
             }
-            ServerIniEditor.Save(location!.ConfigFile, values, _mapRotationDraft);
+            ServerIniEditor.Save(location!.ConfigFile, values, _mapRotationDraft,
+                ServerConfigurationCapabilities.MaxPlayersMaximum(location));
             _model.Report(AppTranslations.Get("status.config_saved"));
             await _model.RefreshAsync();
         }
@@ -895,7 +898,10 @@ public sealed partial class MainWindow : Window
     private async void InstallMarketplaceClicked(object? sender, RoutedEventArgs e)
     {
         if (MarketplaceList.SelectedItem is MarketplaceMod mod)
+        {
             await _model.InstallMarketplaceModAsync(mod);
+            LoadSettings();
+        }
     }
 
     private async void EnableModClicked(object? sender, RoutedEventArgs e) => await ChangeModStateAsync(true);
@@ -906,6 +912,7 @@ public sealed partial class MainWindow : Window
         if (ModsList.SelectedItem is not ModRow mod || !_model.CanManageMods || !mod.CanToggle) return;
         await _model.SetModEnabledAsync(mod, enabled);
         SelectMod(mod.Name);
+        LoadSettings();
     }
 
     private async void UninstallModClicked(object? sender, RoutedEventArgs e)
@@ -915,6 +922,7 @@ public sealed partial class MainWindow : Window
         _modDrafts.Remove(mod.ConfigPath);
         _invalidFormDrafts.Remove(mod.ConfigPath);
         await _model.UninstallModAsync(mod);
+        LoadSettings();
     }
 
     private void SelectMod(string name)

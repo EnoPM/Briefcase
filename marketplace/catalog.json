@@ -9,6 +9,9 @@
       "author": "EnoPM",
       "downloadUrl": "https://github.com/EnoPM/Briefcase.PlayerCap/releases/download/v0.3.7/Briefcase.PlayerCap-windows-x64-0.3.7.zip",
       "archiveSha256": "a3fcc2e5bc799b44727f173a2efb5981722437d6480a3cb21c075d740681e550",
+      "logoUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/BriefcaseIcon.png",
+      "logoSha256": "679e7268b30e7d90e0b1034d48143fc0e4ca65fc5f1f7df9dd78a6a7dd853acb",
+      "serverConfiguration": { "maxPlayersMaximum": 30 },
       "documentationUrl": "https://github.com/EnoPM/Briefcase.PlayerCap#readme",
       "homepageUrl": "https://github.com/EnoPM/Briefcase.PlayerCap"
     },
@@ -20,6 +23,8 @@
       "author": "EnoPM",
       "downloadUrl": "https://github.com/EnoPM/Briefcase.PregameTimer/releases/download/v0.3.6/Briefcase.PregameTimer-windows-x64-0.3.6.zip",
       "archiveSha256": "e3c50d91b8db75d386105f4fb505b05e1274fb30f7c673221fabff40d93fed6c",
+      "logoUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/BriefcaseIcon.png",
+      "logoSha256": "679e7268b30e7d90e0b1034d48143fc0e4ca65fc5f1f7df9dd78a6a7dd853acb",
       "documentationUrl": "https://github.com/EnoPM/Briefcase.PregameTimer#readme",
       "homepageUrl": "https://github.com/EnoPM/Briefcase.PregameTimer"
     },
@@ -31,6 +36,8 @@
       "author": "EnoPM",
       "downloadUrl": "https://github.com/EnoPM/Briefcase.StaminaControl/releases/download/v0.4.7/Briefcase.StaminaControl-windows-x64-0.4.7.zip",
       "archiveSha256": "6738694fc15557dc7f76732421422c928fd54c35b149125f0ea75b7428660116",
+      "logoUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/BriefcaseIcon.png",
+      "logoSha256": "679e7268b30e7d90e0b1034d48143fc0e4ca65fc5f1f7df9dd78a6a7dd853acb",
       "documentationUrl": "https://github.com/EnoPM/Briefcase.StaminaControl#readme",
       "homepageUrl": "https://github.com/EnoPM/Briefcase.StaminaControl"
     }

@@ -11,7 +11,7 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
     Uri DownloadUrl, string Sha256, string Catalog, string Status = "Not installed",
     string? LogoUrl = null, Bitmap? Logo = null, string Author = "", string? LogoSha256 = null,
     string? DocumentationUrl = null, string? DiscordUrl = null, string? HomepageUrl = null,
-    int CatalogSchema = 1)
+    int CatalogSchema = 1, int? MaxPlayersMaximum = null)
 {
     public bool HasLogo => Logo is not null;
     public bool MissingLogo => Logo is null;
@@ -23,7 +23,8 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
 }
 
 public sealed record InstalledModMetadata(string Id, string Version, string Name, string Author,
-    string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl);
+    string Description, string Catalog, string? DocumentationUrl, string? DiscordUrl, string? HomepageUrl,
+    int? MaxPlayersMaximum = null);
 
 public sealed class ModMarketplace
 {
@@ -65,6 +66,7 @@ public sealed class ModMarketplace
             var documentation = OptionalUrl(item, "documentationUrl");
             var discord = OptionalUrl(item, "discordUrl");
             var homepage = OptionalUrl(item, "homepageUrl");
+            var maxPlayersMaximum = ReadMaxPlayersMaximum(item, "serverConfiguration");
             if (!ids.Add(id) || !Regex.IsMatch(id, schema == 2 ? ModIdPattern : LegacyIdPattern) ||
                 id.Length > 64 || name.Length is < 1 or > 128 ||
                 description.Length > 1024 || !Regex.IsMatch(version, "^\\d+\\.\\d+\\.\\d+$") ||
@@ -79,13 +81,24 @@ public sealed class ModMarketplace
             mods.Add(new MarketplaceMod(id, name, description, version, asset, hash.ToLowerInvariant(), url,
                 LogoUrl: logoUrl, Author: author, LogoSha256: logoHash?.ToLowerInvariant(),
                 DocumentationUrl: documentation, DiscordUrl: discord, HomepageUrl: homepage,
-                CatalogSchema: schema));
+                CatalogSchema: schema, MaxPlayersMaximum: maxPlayersMaximum));
         }
         return mods;
     }
 
     private static string? RequiredOptionalString(JsonElement item, string key) =>
         item.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.GetString() : null;
+
+    private static int? ReadMaxPlayersMaximum(JsonElement item, string container)
+    {
+        if (!item.TryGetProperty(container, out var configuration)) return null;
+        if (configuration.ValueKind != JsonValueKind.Object ||
+            !configuration.TryGetProperty("maxPlayersMaximum", out var limit) ||
+            limit.ValueKind != JsonValueKind.Number ||
+            !limit.TryGetInt32(out var maximum) || maximum is < 17 or > 32)
+            throw new InvalidDataException("Invalid serverConfiguration.maxPlayersMaximum.");
+        return maximum;
+    }
 
     private static string? OptionalUrl(JsonElement item, string key)
     {
@@ -148,7 +161,7 @@ public sealed class ModMarketplace
             string Read(string key) => root.TryGetProperty(key, out var value) ? value.GetString() ?? "" : "";
             return new InstalledModMetadata(modId, Read("version"), Read("name"), Read("author"),
                 Read("description"), Read("catalog"), Read("documentationUrl"), Read("discordUrl"),
-                Read("homepageUrl"));
+                Read("homepageUrl"), ReadMaxPlayersMaximum(root, "serverConfiguration"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
                                    KeyNotFoundException or InvalidOperationException)
@@ -234,6 +247,12 @@ public sealed class ModMarketplace
                 if (mod.DocumentationUrl is not null) writer.WriteString("documentationUrl", mod.DocumentationUrl);
                 if (mod.DiscordUrl is not null) writer.WriteString("discordUrl", mod.DiscordUrl);
                 if (mod.HomepageUrl is not null) writer.WriteString("homepageUrl", mod.HomepageUrl);
+                if (mod.MaxPlayersMaximum is { } maximum)
+                {
+                    writer.WriteStartObject("serverConfiguration");
+                    writer.WriteNumber("maxPlayersMaximum", maximum);
+                    writer.WriteEndObject();
+                }
                 writer.WriteEndObject();
             }
             var previousConfig = Path.Combine(target, "Data", "config.json");

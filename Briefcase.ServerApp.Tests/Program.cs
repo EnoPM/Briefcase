@@ -12,6 +12,9 @@ if (args is ["--verify-catalog", var catalogPath])
         "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
     Check(mods.Count == 3 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 3,
         "published mod catalog contains three distinct installable entries");
+    Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
+          mods.Single(mod => mod.Id == "briefcaseplayercap").MaxPlayersMaximum == 30,
+        "official mods use the Briefcase icon and PlayerCap declares the 30-player capability");
     Console.WriteLine("ServerApp mod catalog passed.");
     return;
 }
@@ -230,10 +233,16 @@ try
         "logoSha256":"{{new string('b', 64)}}","documentationUrl":"https://example.test/docs",
         "discordUrl":"https://discord.gg/example"}]}
         """;
-    var parsedCatalog = ModMarketplace.ParseCatalog(System.Text.Encoding.UTF8.GetBytes(catalogV2), catalogUrl);
+    var catalogWithCapability = catalogV2.Replace("\"discordUrl\":\"https://discord.gg/example\"",
+        "\"discordUrl\":\"https://discord.gg/example\",\"serverConfiguration\":{\"maxPlayersMaximum\":30}");
+    var parsedCatalog = ModMarketplace.ParseCatalog(System.Text.Encoding.UTF8.GetBytes(catalogWithCapability), catalogUrl);
     Check(parsedCatalog.Count == 1 && parsedCatalog[0].Id == "player-cap" &&
-          parsedCatalog[0].Author == "EnoPM" && parsedCatalog[0].LogoSha256 == new string('b', 64),
+          parsedCatalog[0].Author == "EnoPM" && parsedCatalog[0].LogoSha256 == new string('b', 64) &&
+          parsedCatalog[0].MaxPlayersMaximum == 30,
         "marketplace schema v2 keeps identity, author and verified asset metadata");
+    Check(RejectsInvalidData(() => ModMarketplace.ParseCatalog(
+              System.Text.Encoding.UTF8.GetBytes(catalogWithCapability.Replace("\"maxPlayersMaximum\":30", "\"maxPlayersMaximum\":33")),
+              catalogUrl)), "marketplace rejects unsupported player limits");
     try
     {
         ModMarketplace.ParseCatalog(System.Text.Encoding.UTF8.GetBytes(catalogV2.Replace("player-cap", "Player Cap")), catalogUrl);
@@ -829,6 +838,17 @@ try
           RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
               new Dictionary<string, string>(settings) { ["ServerName"] = new string('N', 49) }, ["DI_SR"])),
         "server configuration rejects more than 16 players, bots above player capacity and names over 48 characters");
+    var expandedSettings = new Dictionary<string, string>(settings)
+    {
+        ["MaxPlayers"] = "30", ["BotsAmount"] = "30"
+    };
+    ServerIniEditor.Save(location.ConfigFile, expandedSettings, ["DI_SR"], 30);
+    Check(ServerIniEditor.Read(location.ConfigFile).Values["MaxPlayers"] == "30" &&
+          RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile, expandedSettings, ["DI_SR"])) &&
+          RejectsInvalidData(() => ServerIniEditor.Save(location.ConfigFile,
+              new Dictionary<string, string>(expandedSettings) { ["MaxPlayers"] = "31" }, ["DI_SR"], 30)),
+        "mod capability allows 30 players and bots while keeping vanilla and declared ceilings enforced");
+    ServerIniEditor.Save(location.ConfigFile, settings, ["DI_SR", "DI_DS", "DI_SR"]);
     ServerIniEditor.SaveServerName(Path.Combine(recoveredRegistry.Servers.Single().InstanceRoot,
         "TripwireServer.ini"), "Fixture edited");
     using (var namedServer = new MainViewModel(registry: recoveredRegistry))
@@ -961,23 +981,28 @@ try
         output.Write([42]);
     }
     var marketplaceEntry = new MarketplaceMod("FixtureMod", "Fixture", "Test", "1.0.0",
-        new Uri("https://example.test/mod.zip"), "", "https://example.test/catalog.json");
+        new Uri("https://example.test/mod.zip"), "", "https://example.test/catalog.json",
+        MaxPlayersMaximum: 30);
     ModMarketplace.Install(location, marketplaceEntry, modZip);
     Check(File.Exists(Path.Combine(modsRoot, "FixtureMod", "dlls", "main.dll")) &&
         File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod : 1") &&
-        ModMarketplace.InstalledVersion(location, "FixtureMod") == "1.0.0",
+        ModMarketplace.InstalledVersion(location, "FixtureMod") == "1.0.0" &&
+        ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 30,
         "marketplace archive stays inside its UE4SS mod directory and enables the mod");
     ModCatalog.SetEnabled(location, "FixtureMod", false);
     Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Disabled" &&
-        File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod : 0"),
+        File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod : 0") &&
+        ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 16,
         "disabled mod stays installed and UE4SS selection changes");
     ModCatalog.SetEnabled(location, "FixtureMod", true);
-    Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Enabled",
+    Check(ModCatalog.Read(location).Single(mod => mod.Name == "FixtureMod").State == "Enabled" &&
+          ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 30,
         "installed mod can be enabled again");
     ModCatalog.Uninstall(location, "FixtureMod");
     Check(!Directory.Exists(Path.Combine(modsRoot, "FixtureMod")) &&
         !File.ReadAllText(Path.Combine(modsRoot, "mods.txt")).Contains("FixtureMod :") &&
-        Directory.Exists(Path.Combine(modsRoot, "BriefcasePlayerCap")),
+        Directory.Exists(Path.Combine(modsRoot, "BriefcasePlayerCap")) &&
+        ServerConfigurationCapabilities.MaxPlayersMaximum(location) == 16,
         "uninstall removes only the selected mod and its UE4SS selection");
     var launcherRoot = Path.Combine(temp, "launcher");
     Directory.CreateDirectory(launcherRoot);

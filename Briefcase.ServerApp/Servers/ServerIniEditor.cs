@@ -130,8 +130,10 @@ public static class ServerIniEditor
         return (values, maps);
     }
 
-    public static void Save(string file, IReadOnlyDictionary<string, string> values, IReadOnlyList<string> maps)
+    public static void Save(string file, IReadOnlyDictionary<string, string> values, IReadOnlyList<string> maps,
+        int maxPlayersMaximum = ServerConfigurationCapabilities.VanillaMaxPlayers)
     {
+        if (maxPlayersMaximum is < 16 or > 32) throw new InvalidDataException("Invalid maximum player capability.");
         foreach (var spec in Fields)
         {
             if (!values.TryGetValue(spec.Key, out var value)) throw new InvalidDataException($"Missing {spec.Label}.");
@@ -139,9 +141,10 @@ public static class ServerIniEditor
                 throw new InvalidDataException($"Invalid {spec.Label}.");
             if (spec.Key == "ServerName" && value.Length > 48)
                 throw new InvalidDataException("Server name must be 48 characters or fewer.");
+            var maximum = spec.Key is "MaxPlayers" or "BotsAmount" ? maxPlayersMaximum : spec.Maximum;
             if (spec.Kind == SettingKind.Integer && (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ||
-                    number < spec.Minimum || number > spec.Maximum))
-                throw new InvalidDataException($"{spec.Label} must be between {spec.Minimum} and {spec.Maximum}.");
+                    number < spec.Minimum || number > maximum))
+                throw new InvalidDataException($"{spec.Label} must be between {spec.Minimum} and {maximum}.");
             if (spec.Kind == SettingKind.Decimal && (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var decimalValue) ||
                     !double.IsFinite(decimalValue) || decimalValue < spec.Minimum || decimalValue > spec.Maximum))
                 throw new InvalidDataException($"Invalid number for {spec.Label} (allowed: {spec.Minimum}–{spec.Maximum}).");
