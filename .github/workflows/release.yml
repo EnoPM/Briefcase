@@ -201,8 +201,14 @@ jobs:
           ) | Set-Content -LiteralPath $notes -Encoding utf8
           gh release create "v$version" $archive $installer --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Briefcase $version" --notes-file $notes --draft
           if ($LASTEXITCODE) { throw 'Failed to create the draft release.' }
-          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$version" | ConvertFrom-Json
-          if ($LASTEXITCODE -or -not $release.draft) { throw 'Cannot verify the draft release.' }
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'Cannot list releases to verify the draft.' }
+          $drafts = @($releases | Where-Object { $_.tag_name -ceq "v$version" -and $_.draft })
+          if ($drafts.Count -ne 1) { throw 'Cannot find exactly one draft release.' }
+          $release = $drafts[0]
+          if ($release.target_commitish -cne $env:GITHUB_SHA) {
+            throw 'The draft release targets a different commit.'
+          }
           foreach ($file in @($archive, $installer)) {
             $name = Split-Path $file -Leaf
             $matches = @($release.assets | Where-Object { $_.name -ceq $name })
