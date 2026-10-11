@@ -1323,6 +1323,40 @@ try
           installedWithBridge[0].InstallSourceSummary == "Briefcase" &&
           !installedWithBridge[0].CanToggle,
         "BriefcaseServerBridge appears first with its bundled icon and internal origin");
+    var runtimeRow = new ServerRow(Path.GetFileName(freshRoot), win64, true, freshRoot);
+    Check(ServerLocation.TryCreate(runtimeRow, out var runtimeInstance, out _),
+        "the test instance resolves after the shared runtime is installed");
+    ServerInstanceFiles.RefreshRuntime(runtimeInstance!);
+    var sharedBridgeDll = Path.Combine(win64, "ue4ss", "Mods", "BriefcaseServerBridge", "dlls", "main.dll");
+    var instanceBridgeDll = Path.Combine(runtimeInstance!.ModsRoot, "BriefcaseServerBridge", "dlls", "main.dll");
+    var originalBridge = File.ReadAllBytes(sharedBridgeDll);
+    using (var loadedBridge = File.Open(instanceBridgeDll, FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        ServerInstanceFiles.RefreshRuntime(runtimeInstance);
+        Check(File.ReadAllBytes(instanceBridgeDll).SequenceEqual(originalBridge),
+            "restarting with an unchanged loaded bridge DLL does not try to overwrite it");
+    }
+    try
+    {
+        File.WriteAllBytes(sharedBridgeDll, [8, 9, 10]);
+        using var loadedBridge = File.Open(instanceBridgeDll, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var replacement = Task.Run(() => ServerInstanceFiles.RefreshRuntime(runtimeInstance));
+        await Task.Delay(300);
+        Check(!replacement.IsCompleted && File.ReadAllBytes(instanceBridgeDll).SequenceEqual(originalBridge),
+            "a changed runtime waits for the old DLL without damaging it");
+        loadedBridge.Dispose();
+        await replacement;
+        Check(File.ReadAllBytes(instanceBridgeDll).SequenceEqual(new byte[] { 8, 9, 10 }),
+            "a changed runtime DLL is installed once its lock is released");
+        using var exclusiveBridge = File.Open(instanceBridgeDll, FileMode.Open, FileAccess.Read, FileShare.None);
+        var unchanged = Task.Run(() => ServerInstanceFiles.RefreshRuntime(runtimeInstance));
+        await Task.Delay(300);
+        Check(!unchanged.IsCompleted, "an exclusively locked DLL waits instead of failing the restart");
+        exclusiveBridge.Dispose();
+        await unchanged;
+    }
+    finally { File.WriteAllBytes(sharedBridgeDll, originalBridge); }
+
     var legacyInjector = Path.Combine(win64, "Briefcase", "Core", "Tools", "Briefcase.ServerInjector.exe");
     var legacyBootstrap = Path.Combine(win64, "Briefcase", "Core", "Briefcase.ServerBootstrap.dll");
     Directory.CreateDirectory(Path.GetDirectoryName(legacyInjector)!);

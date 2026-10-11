@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Briefcase.ServerApp;
@@ -48,7 +50,7 @@ public static class ServerInstanceFiles
             !File.Exists(Path.Combine(shared, "Mods", bridge, "dlls", "main.dll")))
             throw new InvalidOperationException(
                 "Briefcase is incomplete: install or update its UE4SS runtime and server bridge before starting this instance.");
-        CopyIfPresent(Path.Combine(shared, "UE4SS.dll"), Path.Combine(target, "UE4SS.dll"));
+        CopyRuntimeFile(Path.Combine(shared, "UE4SS.dll"), Path.Combine(target, "UE4SS.dll"));
         CopyIfMissing(Path.Combine(shared, "UE4SS-settings.ini"), Path.Combine(target, "UE4SS-settings.ini"));
         var settings = Path.Combine(target, "UE4SS-settings.ini");
         if (File.Exists(settings))
@@ -145,6 +147,65 @@ public static class ServerInstanceFiles
         if (!File.Exists(target)) CopyIfPresent(source, target);
     }
 
+    private static void CopyRuntimeFile(string source, string target)
+    {
+        if (!File.Exists(source)) return;
+        if (File.GetAttributes(source).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("A linked runtime file cannot be copied safely.");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        if (File.Exists(target))
+        {
+            if (File.GetAttributes(target).HasFlag(FileAttributes.ReparsePoint))
+                throw new InvalidDataException("A linked runtime target cannot be replaced safely.");
+            using var original = File.Open(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var originalHash = SHA256.HashData(original);
+            var waitForRead = Stopwatch.StartNew();
+            while (true)
+            {
+                try
+                {
+                    using var installed = File.Open(target, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    if (original.Length == installed.Length &&
+                        originalHash.AsSpan().SequenceEqual(SHA256.HashData(installed))) return;
+                    break;
+                }
+                catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 33 &&
+                                             waitForRead.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    Thread.Sleep(100);
+                }
+                catch (UnauthorizedAccessException) when (waitForRead.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    Thread.Sleep(100);
+                }
+            }
+        }
+
+        // Keep the previous DLL intact if Windows still has it mapped during shutdown.
+        var temporary = target + ".serverapp-" + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.Copy(source, temporary);
+            var wait = Stopwatch.StartNew();
+            while (true)
+            {
+                try { File.Move(temporary, target, overwrite: true); return; }
+                catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 33 &&
+                                             wait.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    Thread.Sleep(100);
+                }
+                catch (UnauthorizedAccessException) when (wait.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    // Windows also reports an in-use mapped DLL as access denied.
+                    Thread.Sleep(100);
+                }
+            }
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     private static void CopyTree(string source, string target, bool overwrite = false)
     {
         if (!Directory.Exists(source)) return;
@@ -160,7 +221,8 @@ public static class ServerInstanceFiles
                 throw new InvalidDataException("A linked runtime entry cannot be copied safely.");
             var destination = Path.Combine(target, name);
             if (attributes.HasFlag(FileAttributes.Directory)) CopyTree(entry, destination, overwrite);
-            else if (overwrite || !File.Exists(destination)) File.Copy(entry, destination, overwrite);
+            else if (overwrite) CopyRuntimeFile(entry, destination);
+            else if (!File.Exists(destination)) File.Copy(entry, destination);
         }
     }
 }
