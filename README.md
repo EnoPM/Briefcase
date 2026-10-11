@@ -31,4 +31,6 @@ Briefcase also supports several servers and app profiles, including separate dat
 - [Report a problem](https://github.com/EnoPM/Briefcase/issues)
 - [Developer release and installer details](docs/InstallerPlan.md)
 
-This is a community application for Deceive Inc. The game artwork shown in the app is used with the publisher's permission.
+## License and artwork
+
+Briefcase's original source code is available under the [MIT license](LICENSE), consistent with BriefcaseNative and its mods. This license does not cover Deceive Inc. artwork in `Briefcase.ServerApp/Assets/Game/UI` or that artwork as shown in the screenshots. Rights to the game artwork remain with its owners; its use in this community application was permitted by the publisher. Third-party dependencies retain their own licenses.
