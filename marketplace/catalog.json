@@ -48,6 +48,19 @@
       "configSchemaSha256": "62162e834ea41aefc2dcf9c846f5bb95f040caaf61b81b402c0715bc4bea6611",
       "documentationUrl": "https://github.com/EnoPM/Briefcase.StaminaControl#readme",
       "homepageUrl": "https://github.com/EnoPM/Briefcase.StaminaControl"
+    },
+    {
+      "id": "briefcasespectatormode",
+      "name": "Spectator Mode",
+      "description": "Mark lobby players as spectators for the next match. Requires Briefcase 0.8.7 or later; selected players are eliminated after they gain control, and their Spy Pack is removed.",
+      "version": "0.1.0",
+      "author": "EnoPM",
+      "downloadUrl": "https://github.com/EnoPM/Briefcase.SpectatorMode/releases/download/v0.1.0/Briefcase.SpectatorMode-windows-x64-0.1.0.zip",
+      "archiveSha256": "2bed9603094510ab9b9a06e26d01de52abb5bf58c7da45c740ffbf91b54045d5",
+      "logoUrl": "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/assets/SpectatorModeIcon.png",
+      "logoSha256": "a6521e5e6600a8debea0adb65dada03a0344e48984a3e52ebd527b10d78151fb",
+      "documentationUrl": "https://github.com/EnoPM/Briefcase.SpectatorMode#readme",
+      "homepageUrl": "https://github.com/EnoPM/Briefcase.SpectatorMode"
     }
   ]
 }

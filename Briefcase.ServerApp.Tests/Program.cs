@@ -11,8 +11,9 @@ if (args is ["--verify-catalog", var catalogPath])
 {
     var mods = ModMarketplace.ParseCatalog(File.ReadAllBytes(catalogPath),
         "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
-    Check(mods.Count == 3 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 3,
-        "published mod catalog contains three distinct installable entries");
+    Check(mods.Count == 4 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 4 &&
+          mods.Any(mod => mod.Id == "briefcasespectatormode"),
+        "published mod catalog contains four distinct installable entries, including Spectator Mode");
     Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
           mods.Single(mod => mod.Id == "briefcaseplayercap") is { FormSchemaOverrideUrl: not null,
               FormSchemaOverrideSha256: not null, FormTranslations.Count: 2 },
@@ -101,7 +102,8 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
     var privateNativeDirectory = args[2];
     var frameworkArchive = args[3];
     var frameworkVersion = args[4];
-    var playerCapArchive = args.Length == 6 ? args[5] : null;
+    var modArchive = args.Length == 6 ? args[5] : null;
+    MarketplaceMod? installedMod = null;
     var testBase = Environment.GetEnvironmentVariable("BRIEFCASE_TEST_DATA_ROOT") ?? Path.GetTempPath();
     var testRoot = Path.Combine(testBase, "Briefcase Shared Instance Probe", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(testRoot);
@@ -121,16 +123,18 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
         foreach (var instance in new[] { firstLocation!, secondLocation! })
             BriefcasePackageInstaller.InstallOrUpdate(instance, frameworkArchive, frameworkVersion,
                 new Progress<string>());
-        if (playerCapArchive is not null)
+        if (modArchive is not null)
         {
             var catalog = ModMarketplace.ParseCatalog(
                 File.ReadAllBytes(Path.GetFullPath("marketplace/catalog.json")),
                 ServerRegistry.OfficialCatalogUrl);
-            var playerCap = catalog.Single(mod => mod.Id == "briefcaseplayercap");
-            Check(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(playerCapArchive)))
-                .Equals(playerCap.Sha256, StringComparison.OrdinalIgnoreCase),
-                "the PlayerCap archive matches the catalog checksum");
-            ModMarketplace.Install(firstLocation!, playerCap, playerCapArchive);
+            installedMod = catalog.Single(mod =>
+                Path.GetFileName(mod.DownloadUrl.AbsolutePath).Equals(Path.GetFileName(modArchive),
+                    StringComparison.OrdinalIgnoreCase));
+            Check(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(modArchive)))
+                .Equals(installedMod.Sha256, StringComparison.OrdinalIgnoreCase),
+                "the mod archive matches the catalog checksum");
+            ModMarketplace.Install(firstLocation!, installedMod, modArchive);
         }
         foreach (var (instance, name, gamePort, queryPort) in new[]
                  {
@@ -139,7 +143,7 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
                  })
             File.WriteAllText(instance.ConfigFile,
                 $"[{ServerIniEditor.Section}]\nServerName={name}\nGameMode=Solo\n" +
-                $"MaxPlayers={(playerCapArchive is not null && instance == firstLocation ? 30 : 2)}\n" +
+                $"MaxPlayers={(installedMod?.Id == "briefcaseplayercap" && instance == firstLocation ? 30 : 2)}\n" +
                 $"GamePort={gamePort}\nQueryPort={queryPort}\nbIsPublic=False\nbSandboxMode=True\n" +
                 "bEnableUPnP=False\nAutoShutdownEmptyMinutes=1\n");
         firstProcess = ServerProcess.Start(firstLocation!);
@@ -152,11 +156,16 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
             expectedInstanceId: firstLocation!.InstanceId);
         using var liveB = new ServerLiveClient(secondProcess.Id, new WindowsNamedPipeTransport(),
             expectedInstanceId: secondLocation!.InstanceId);
-        if (playerCapArchive is not null)
+        if (installedMod is not null)
         {
             var log = Path.Combine(firstLocation!.Ue4ssRoot, "UE4SS.log");
-            const string expected = "[Briefcase.PlayerCap] headless server: configured MaxPlayers up to 30; native ceilings raised";
-            bool PlayerCapLogged()
+            var expected = installedMod.Id switch
+            {
+                "briefcaseplayercap" => "[Briefcase.PlayerCap] headless server: configured MaxPlayers up to 30; native ceilings raised",
+                "briefcasespectatormode" => "[Briefcase.SpectatorMode] ready",
+                _ => throw new InvalidOperationException("No live probe is defined for this mod.")
+            };
+            bool ModLogged()
             {
                 try
                 {
@@ -168,10 +177,10 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
                 catch (IOException) { return false; }
             }
             using var modTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            while (!modTimeout.IsCancellationRequested && !PlayerCapLogged())
+            while (!modTimeout.IsCancellationRequested && !ModLogged())
                 await Task.Delay(250);
-            Check(!firstProcess.HasExited && PlayerCapLogged(),
-                "PlayerCap raises the new build's ceilings during an isolated server launch");
+            Check(!firstProcess.HasExited && ModLogged(),
+                "the installed mod starts successfully during an isolated server launch");
         }
         else
         {
@@ -181,9 +190,9 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
             Check(liveA.Latest is not null && liveB.Latest is not null,
                 "both instance bridges report verified live data");
         }
-        Console.WriteLine(playerCapArchive is null
+        Console.WriteLine(installedMod is null
             ? "Shared-install instance launch and reconnect passed."
-            : "PlayerCap shared-install launch passed.");
+            : $"{installedMod.Name} shared-install launch passed.");
     }
     finally
     {
