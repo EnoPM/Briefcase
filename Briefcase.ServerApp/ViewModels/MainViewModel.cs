@@ -612,6 +612,30 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RefreshAsync();
     }
 
+    public async Task<bool> SetSpectatorAsync(PlayerRow player, bool spectator)
+    {
+        if (IsDemo) { ReportPreviewOnly(); return false; }
+        if (SelectedServer is not { } selected || !IsRunning || !player.CanSetSpectator) return false;
+        ServerLiveClient? connection;
+        lock (_connectionGate)
+            _connections.TryGetValue(selected.Id, out connection);
+        if (connection?.Latest is not { State: "Lobby" } live ||
+            live.Players.All(item => item.Token != player.Token))
+        {
+            Message = AppTranslations.Get("status.player_gone");
+            return false;
+        }
+        var result = await connection.SetSpectatorAsync(player.Token, spectator, CancellationToken.None);
+        if (result.Ok)
+            ReportTransient(AppTranslations.Format(spectator ? "status.spectator_selected" :
+                "status.spectator_removed", spectator ? "{0} will spectate the next match." :
+                "{0} will play the next match.", player.Name));
+        else
+            Message = AppTranslations.Format("status.spectator_failed",
+                "Spectator selection failed: {0}", result.Message);
+        return result.Ok;
+    }
+
     private void RebuildPlayerTeams(ServerSnapshot snapshot)
     {
         var teamMode = snapshot.GameMode is "Duo" or "Trio";

@@ -2,22 +2,36 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+#if BRIEFCASE_AGENT
+using ServerLocation = Briefcase.Agent.AgentPackageLocation;
+#endif
 
+#if BRIEFCASE_AGENT
+namespace Briefcase.Agent;
+#else
 namespace Briefcase.ServerApp;
+#endif
 
+#if BRIEFCASE_AGENT
+internal static class BriefcasePackageInstaller
+#else
 public static class BriefcasePackageInstaller
+#endif
 {
     private sealed record Item(string Path, long Size, string Hash, bool Preserve);
     private sealed record TransactionItem(string Path, bool Existed);
 
     public static void RecoverPending(ServerLocation location)
     {
+        if (!location.IsInstance)
+            throw new InvalidOperationException("Briefcase can only be installed into a managed server instance.");
+        var root = location.InstanceRoot;
         var updates = Path.Combine(location.BriefcaseRoot, "Updates");
         if (!Directory.Exists(updates)) return;
-        EnsurePlainAncestors(location.Win64, updates);
+        EnsurePlainAncestors(root, updates);
         foreach (var stage in Directory.EnumerateDirectories(updates, "ServerApp-*").Take(32))
         {
-            EnsurePlainAncestors(location.Win64, stage);
+            EnsurePlainAncestors(root, stage);
             var journal = Path.Combine(stage, "transaction.json");
             if (!File.Exists(journal)) continue;
             EnsurePlainAncestors(stage, journal);
@@ -33,9 +47,9 @@ public static class BriefcasePackageInstaller
                 throw new InvalidDataException("Pending Briefcase transaction contains an unsafe path.");
             foreach (var item in records.Reverse())
             {
-                var target = SafeChild(location.Win64, item.Path);
+                var target = SafeChild(root, item.Path);
                 var backup = SafeChild(stage, "previous/" + item.Path);
-                EnsurePlainAncestors(location.Win64, target);
+                EnsurePlainAncestors(root, target);
                 EnsurePlainAncestors(stage, backup);
                 if (File.Exists(backup))
                 {
@@ -52,8 +66,13 @@ public static class BriefcasePackageInstaller
     public static void InstallOrUpdate(ServerLocation location, string archiveFile, string expectedVersion,
         IProgress<string> progress)
     {
-        using (var process = ServerProcess.FindAnyInstallation(location))
+        if (!location.IsInstance)
+            throw new InvalidOperationException("Migrate this server to a managed instance before installing Briefcase.");
+        var root = location.InstanceRoot;
+#if !BRIEFCASE_AGENT
+        using (var process = ServerProcess.Find(location))
             if (process is not null) throw new InvalidOperationException("Stop the server before installing Briefcase.");
+#endif
         RecoverPending(location);
         using var archive = ZipFile.OpenRead(archiveFile);
         var manifestEntry = archive.GetEntry("Package.json") ?? throw new InvalidDataException("Missing package manifest.");
@@ -70,7 +89,19 @@ public static class BriefcasePackageInstaller
         using (var game = File.OpenRead(location.Shipping))
         {
             var gameHash = Convert.ToHexString(sha.ComputeHash(game));
-            if (!gameHash.Equals(manifest.GetProperty("gameSha256").GetString(), StringComparison.OrdinalIgnoreCase))
+            var primaryHash = manifest.GetProperty("gameSha256").GetString();
+            var compatibleHashes = Array.Empty<string>();
+            if (manifest.TryGetProperty("compatibleGameSha256", out var extraHashes))
+            {
+                if (extraHashes.ValueKind != JsonValueKind.Array || extraHashes.GetArrayLength() > 8)
+                    throw new InvalidDataException("Invalid compatible game build list.");
+                compatibleHashes = extraHashes.EnumerateArray().Select(value =>
+                    value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "").ToArray();
+                if (compatibleHashes.Any(hash => !Regex.IsMatch(hash, "^[a-fA-F0-9]{64}$")))
+                    throw new InvalidDataException("Invalid compatible game build hash.");
+            }
+            if (!gameHash.Equals(primaryHash, StringComparison.OrdinalIgnoreCase) &&
+                !compatibleHashes.Contains(gameHash, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidDataException("This Briefcase release does not support the selected game build.");
         }
         var items = new List<Item>();
@@ -93,8 +124,8 @@ public static class BriefcasePackageInstaller
             items.Count > 4095 || archive.Entries.Count != paths.Count ||
             archive.Entries.Any(entry => !paths.Contains(entry.FullName) || entry.FullName.EndsWith('/')))
             throw new InvalidDataException("Incomplete or unexpected Briefcase package files.");
-        var stage = Path.Combine(location.Win64, "Briefcase", "Updates", "ServerApp-" + Guid.NewGuid().ToString("N"));
-        EnsurePlainAncestors(location.Win64, stage);
+        var stage = Path.Combine(location.BriefcaseRoot, "Updates", "ServerApp-" + Guid.NewGuid().ToString("N"));
+        EnsurePlainAncestors(root, stage);
         Directory.CreateDirectory(stage);
         var changed = new List<(string Target, string? Backup)>();
         var keepStage = false;
@@ -112,10 +143,15 @@ public static class BriefcasePackageInstaller
                 if (!Convert.ToHexString(sha.ComputeHash(verify)).Equals(item.Hash, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Package file checksum mismatch: " + item.Path);
             }
+#if BRIEFCASE_AGENT
+            progress.Report("Installing Briefcase…");
+#else
             progress.Report(AppTranslations.Get("status.installing_briefcase", "Installing Briefcase…"));
-            var transaction = items.Where(i => !i.Preserve || !File.Exists(SafeChild(location.Win64, i.Path)))
-                .Select(i => new TransactionItem(i.Path, File.Exists(SafeChild(location.Win64, i.Path))))
-                .Append(new TransactionItem("Package.json", File.Exists(SafeChild(location.Win64, "Package.json"))))
+#endif
+            var transaction = items.Where(i => i.Path != "version.dll" &&
+                (!i.Preserve || !File.Exists(SafeChild(root, i.Path))))
+                .Select(i => new TransactionItem(i.Path, File.Exists(SafeChild(root, i.Path))))
+                .Append(new TransactionItem("Package.json", File.Exists(SafeChild(root, "Package.json"))))
                 .ToArray();
             var journalTemp = Path.Combine(stage, "transaction.tmp");
             using (var journalStream = File.Create(journalTemp))
@@ -134,12 +170,16 @@ public static class BriefcasePackageInstaller
             File.Move(journalTemp, Path.Combine(stage, "transaction.json"));
             foreach (var item in items.Where(i => i.Path != "version.dll"))
                 Copy(item);
-            var packageTarget = SafeChild(location.Win64, "Package.json");
+            var packageTarget = SafeChild(root, "Package.json");
             ReplaceExisting(packageTarget, "Package.json");
             using (var input = manifestEntry.Open())
             using (var output = File.Create(packageTarget)) input.CopyTo(output);
-            Copy(items.Single(i => i.Path == "version.dll"));
+            // The app owns injection; never put the packaged proxy into a server installation.
+#if BRIEFCASE_AGENT
+            progress.Report("Briefcase is ready.");
+#else
             progress.Report(AppTranslations.Get("status.briefcase_ready", "Briefcase is ready."));
+#endif
         }
         catch (Exception failure)
         {
@@ -166,8 +206,8 @@ public static class BriefcasePackageInstaller
 
         void Copy(Item item)
         {
-            var target = SafeChild(location.Win64, item.Path);
-            EnsurePlainAncestors(location.Win64, target);
+            var target = SafeChild(root, item.Path);
+            EnsurePlainAncestors(root, target);
             if (File.Exists(target))
             {
                 if (item.Preserve) return;

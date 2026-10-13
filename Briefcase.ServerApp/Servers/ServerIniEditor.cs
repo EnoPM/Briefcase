@@ -12,11 +12,23 @@ public static class ServerIniEditor
         ("DI_FS", "Fragrant Shore"), ("DI_SE", "Sound Eclipse"),
         ("DI_HSD", "Hard Sell (Morning)"), ("DI_FSN", "Fragrant Shore (Night)")
     ];
+    private static string NativeMapName(string id) => id switch
+    {
+        "DI_Hardsell" => "Hardsell",
+        "DI_SR" => "Silverreef",
+        "DI_DS" => "Diamondspire",
+        "DI_FS" => "FragrantShore",
+        "DI_SE" => "SoundEclipse",
+        "DI_HSD" => "Hardsell_Day",
+        "DI_FSN" => "FragrantShore_Night",
+        _ => throw new InvalidDataException("Unsupported map: " + id)
+    };
     public static IReadOnlyList<FormField> Fields => FormSchema.LoadBase().Fields;
 
-    public static void WriteDefault(string file, string? name = null)
+    public static void WriteDefault(string file, string? name = null, ServerLocation? installation = null)
     {
-        var values = FormSchema.LoadBase().Defaults();
+        var schema = installation is null ? FormSchema.LoadBase() : FormSchema.LoadForInstallation(installation);
+        var values = schema.Defaults();
         values["ServerName"] = name is null ? values["ServerName"] : AppDataStore.ValidateServerName(name);
         var lines = new List<string>
         {
@@ -26,8 +38,7 @@ public static class ServerIniEditor
             "ServerRegion=" + values["ServerRegion"],
             "GameMode=" + values["GameMode"]
         };
-        lines.AddRange(new[] { "Hardsell", "Silverreef", "Diamondspire", "FragrantShore",
-            "SoundEclipse", "Hardsell_Day", "FragrantShore_Night" }.Select(map => "MapRotation=" + map));
+        lines.AddRange(RotationEntries(Maps.Select(map => map.Id)));
         lines.AddRange([
             "Password=" + values["Password"],
             "bCrossplay=" + values["bCrossplay"],
@@ -56,6 +67,9 @@ public static class ServerIniEditor
             "HeatDelayToDecay=" + values["HeatDelayToDecay"],
             "HeatDecayRate=" + values["HeatDecayRate"]
         ]);
+        foreach (var field in schema.Fields.Where(field => field.Key is
+                     "MinimumDeployedPlayersToStart" or "bTournamentMode"))
+            lines.Add(field.Key + "=" + values[field.Key]);
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllLines(file, lines, new UTF8Encoding(false));
     }
@@ -115,14 +129,18 @@ public static class ServerIniEditor
     }
 
     public static (Dictionary<string, string> Values, List<string> Maps) Read(string file, FormSchema? schema = null)
+        => ReadText(File.Exists(file) ? File.ReadAllText(file) : null, schema);
+
+    public static (Dictionary<string, string> Values, List<string> Maps) ReadText(string? content,
+        FormSchema? schema = null)
     {
         schema ??= FormSchema.LoadBase();
         var values = schema.Defaults();
         var maps = new List<string>();
-        if (!File.Exists(file)) return (values, Maps.Select(x => x.Id).ToList());
+        if (content is null) return (values, Maps.Select(x => x.Id).ToList());
         var activeSection = "";
         var rotationSpecified = false;
-        foreach (var line in File.ReadLines(file))
+        foreach (var line in content.Split('\n'))
         {
             var raw = line.Trim();
             if (raw.StartsWith('[')) { activeSection = raw.Trim('[', ']'); continue; }
@@ -131,15 +149,17 @@ public static class ServerIniEditor
             if (eq < 1) continue;
             var key = raw[..eq].Trim();
             var value = raw[(eq + 1)..].Trim();
-            if (activeSection == schema.Section && key == "!MapRotation")
-            { maps.Clear(); rotationSpecified = true; continue; }
-            if (activeSection == schema.Section && key is "+MapRotation" or "MapRotation")
+            if (activeSection.Equals(schema.Section, StringComparison.OrdinalIgnoreCase) &&
+                key.TrimStart('!', '+', '-', '.').Equals("MapRotation", StringComparison.OrdinalIgnoreCase))
             {
                 rotationSpecified = true;
+                if (key[0] == '!') { maps.Clear(); continue; }
                 foreach (var map in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
                 {
                     var id = map.Trim('"');
-                    maps.Add(AppTranslations.TryResolveMapAlias(id, out var alias) ? alias : id);
+                    id = AppTranslations.TryResolveMapAlias(id, out var alias) ? alias : id;
+                    if (key[0] == '-') maps.RemoveAll(existing => existing.Equals(id, StringComparison.OrdinalIgnoreCase));
+                    else if (key[0] != '+' || !maps.Contains(id, StringComparer.OrdinalIgnoreCase)) maps.Add(id);
                 }
             }
             else if (schema.Fields.Any(field => field.Key.Equals(key, StringComparison.OrdinalIgnoreCase) &&
@@ -153,11 +173,23 @@ public static class ServerIniEditor
     public static void Save(string file, IReadOnlyDictionary<string, string> values, IReadOnlyList<string> maps,
         FormSchema? schema = null)
     {
+        var original = File.Exists(file) ? File.ReadAllText(file) : "";
+        var updated = RenderText(original, values, maps, schema);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        var temporary = file + ".briefcase-tmp";
+        var backup = file + ".briefcase-backup";
+        File.WriteAllText(temporary, updated, new UTF8Encoding(false));
+        if (File.Exists(file)) File.Copy(file, backup, true);
+        File.Move(temporary, file, true);
+    }
+
+    public static string RenderText(string original, IReadOnlyDictionary<string, string> values,
+        IReadOnlyList<string> maps, FormSchema? schema = null)
+    {
         schema ??= FormSchema.LoadBase();
         schema.Validate(values);
         if (maps.Count == 0 || maps.Any(map => !Maps.Any(item => item.Id == map)))
             throw new InvalidDataException("Select at least one supported map.");
-        var original = File.Exists(file) ? File.ReadAllText(file) : "";
         var lines = original.Split('\n').Select(x => x.TrimEnd('\r')).ToList();
         foreach (var section in schema.Fields.Select(field => field.Section.Length == 0 ? schema.Section : field.Section)
                      .Append(schema.Section).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -179,34 +211,53 @@ public static class ServerIniEditor
                 var eq = raw.IndexOf('=');
                 if (eq < 1) continue;
                 var key = raw[..eq].Trim().TrimStart('+', '!', '-', '.');
-                if (section.Equals(schema.Section, StringComparison.OrdinalIgnoreCase) && key == "MapRotation" ||
+                if (section.Equals(schema.Section, StringComparison.OrdinalIgnoreCase) &&
+                    key.Equals("MapRotation", StringComparison.OrdinalIgnoreCase) ||
                     fields.Any(field => field.Key.Equals(key, StringComparison.OrdinalIgnoreCase)))
                     lines.RemoveAt(i);
             }
             var entries = fields.Select(field => field.Key + "=" + values[field.Key]).ToList();
             if (section.Equals(schema.Section, StringComparison.OrdinalIgnoreCase))
             {
-                entries.Add("!MapRotation=ClearArray");
-                entries.AddRange(maps.Select(map => "+MapRotation=" + map));
+                entries.AddRange(RotationEntries(maps));
             }
             lines.InsertRange(start + 1, entries);
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        var temporary = file + ".briefcase-tmp";
-        var backup = file + ".briefcase-backup";
-        File.WriteAllText(temporary, string.Join("\r\n", lines).TrimEnd('\r', '\n') + "\r\n", new UTF8Encoding(false));
-        if (File.Exists(file)) File.Copy(file, backup, true);
-        File.Move(temporary, file, true);
+        return string.Join("\r\n", lines).TrimEnd('\r', '\n') + "\r\n";
+    }
+
+    public static string RenderChangedText(string original,
+        IReadOnlyDictionary<string, string> changes, FormSchema schema)
+    {
+        var (values, maps) = ReadText(original, schema);
+        foreach (var (key, value) in changes)
+        {
+            if (!values.ContainsKey(key))
+                throw new InvalidDataException("Unknown server configuration field: " + key);
+            values[key] = value;
+        }
+        return RenderText(original, values, maps, schema);
     }
 
     public static void SaveMapRotation(string file, IReadOnlyList<string> maps)
     {
+        var original = File.Exists(file) ? File.ReadAllText(file) : "";
+        var updated = RenderMapRotationText(original, maps);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        var temporary = file + ".briefcase-tmp";
+        var backup = file + ".briefcase-backup";
+        File.WriteAllText(temporary, updated, new UTF8Encoding(false));
+        if (File.Exists(file)) File.Copy(file, backup, true);
+        File.Move(temporary, file, true);
+    }
+
+    public static string RenderMapRotationText(string original, IReadOnlyList<string> maps)
+    {
         if (maps.Count == 0 || maps.Any(map => !Maps.Any(item => item.Id == map)))
             throw new InvalidDataException("Select at least one supported map.");
 
-        var original = File.Exists(file) ? File.ReadAllText(file) : "";
         var lines = original.Split('\n').Select(x => x.TrimEnd('\r')).ToList();
-        var start = lines.FindIndex(x => x.Trim() == "[" + Section + "]");
+        var start = lines.FindIndex(x => x.Trim().Equals("[" + Section + "]", StringComparison.OrdinalIgnoreCase));
         if (start < 0)
         {
             if (lines.Count > 0 && lines[^1] != "") lines.Add("");
@@ -223,15 +274,16 @@ public static class ServerIniEditor
             var key = raw[..eq].Trim().TrimStart('+', '!', '-', '.');
             if (key.Equals("MapRotation", StringComparison.OrdinalIgnoreCase)) lines.RemoveAt(i);
         }
-        var entries = new List<string> { "!MapRotation=ClearArray" };
-        entries.AddRange(maps.Select(map => "+MapRotation=" + map));
+        var entries = RotationEntries(maps);
         lines.InsertRange(start + 1, entries);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        var temporary = file + ".briefcase-tmp";
-        var backup = file + ".briefcase-backup";
-        File.WriteAllText(temporary, string.Join("\r\n", lines).TrimEnd('\r', '\n') + "\r\n", new UTF8Encoding(false));
-        if (File.Exists(file)) File.Copy(file, backup, true);
-        File.Move(temporary, file, true);
+        return string.Join("\r\n", lines).TrimEnd('\r', '\n') + "\r\n";
+    }
+
+    private static List<string> RotationEntries(IEnumerable<string> maps)
+    {
+        var entries = new List<string> { "!MapRotation=ClearArray" };
+        entries.AddRange(maps.Select(map => ".MapRotation=" + NativeMapName(map)));
+        return entries;
     }
 }

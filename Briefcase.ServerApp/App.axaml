@@ -97,6 +97,26 @@
       <Setter Property="Background" Value="#6C3849" />
       <Setter Property="BorderBrush" Value="#D08A9E" />
     </Style>
+    <Style Selector="app|IconButton.kick-action">
+      <Setter Property="Background" Value="#AD3045" />
+      <Setter Property="BorderBrush" Value="#E16476" />
+    </Style>
+    <Style Selector="app|IconButton.kick-action:pointerover /template/ Border#PART_IconButtonBorder">
+      <Setter Property="Background" Value="#CA4057" />
+      <Setter Property="BorderBrush" Value="#F18495" />
+    </Style>
+    <Style Selector="app|IconButton.spectator-off">
+      <Setter Property="Background" Value="#302F38" />
+      <Setter Property="BorderBrush" Value="#625E6D" />
+    </Style>
+    <Style Selector="app|IconButton.spectator-on">
+      <Setter Property="Background" Value="#265F7D" />
+      <Setter Property="BorderBrush" Value="#72C9E8" />
+    </Style>
+    <Style Selector="app|IconButton.spectator-on:pointerover /template/ Border#PART_IconButtonBorder">
+      <Setter Property="Background" Value="#347B9E" />
+      <Setter Property="BorderBrush" Value="#A8E6F6" />
+    </Style>
     <Style Selector="app|IconButton:disabled">
       <Setter Property="Opacity" Value="0.5" />
     </Style>

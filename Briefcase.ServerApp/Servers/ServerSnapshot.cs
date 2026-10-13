@@ -53,7 +53,9 @@ public sealed record PlayerRow(string Name, string Token, string Platform, strin
     string Character = "", int? AccountLevel = null, int? CharacterLevel = null,
     IReadOnlyList<PlayerGadget>? Gadgets = null, IReadOnlyList<PlayerUpgrade>? Upgrades = null,
     IReadOnlyList<PlayerLoadoutItem>? Loadout = null, int? Team = null,
-    bool? Dead = null, double? Health = null, double? MaxHealth = null)
+    bool? Dead = null, double? Health = null, double? MaxHealth = null, bool InMatch = false,
+    bool InLobby = false, bool Spectator = false, bool? EliminationReady = null,
+    bool SpectatorAvailable = false, string BanditId = "")
 {
     private static readonly IBrush BasicLevelBackground = new SolidColorBrush(Color.Parse("#302A37"));
     private static readonly IBrush BasicLevelBorder = new SolidColorBrush(Color.Parse("#D8D2DF"));
@@ -65,6 +67,9 @@ public sealed record PlayerRow(string Name, string Token, string Platform, strin
     private static readonly IBrush DeadHealthForeground = new SolidColorBrush(Color.Parse("#918A9B"));
 
     public bool IsDead => Dead == true;
+    public bool CanKill => InMatch && !IsDead && Health is > 0 && MaxHealth is > 0 &&
+                           EliminationReady != false;
+    public bool CanSetSpectator => InLobby && SpectatorAvailable;
     public Bitmap? Portrait => string.IsNullOrWhiteSpace(Character) ? null : BalanceIcons.CharacterPortrait(Character, IsDead);
     public bool HasPortrait => Portrait is not null;
     public bool PortraitUnavailable => !HasPortrait;
@@ -91,12 +96,14 @@ public sealed record PlayerRow(string Name, string Token, string Platform, strin
     public bool GadgetsUnavailable => !HasGadgets;
     public bool UpgradesUnavailable => !HasUpgrades;
     public bool LoadoutUnavailable => LoadoutItems.Count == 0;
-    public bool HasNetworkId => !string.IsNullOrWhiteSpace(NetworkId);
+    public string PreferredId => !string.IsNullOrWhiteSpace(BanditId) ? BanditId : NetworkId;
+    public bool HasIdentity => !string.IsNullOrWhiteSpace(PreferredId);
     public string CharacterSummary => string.IsNullOrWhiteSpace(Character) ? AppTranslations.Get("player.character_unknown")
         : AppTranslations.Format("player.character_name", "Character: {0}", BalanceGameNames.Character(Character));
     public string AccountLevelText => AppTranslations.Format("player.account_level", "Account level: {0}", AccountLevel?.ToString() ?? "—");
-    public string Identity => !HasNetworkId ? "" : string.IsNullOrWhiteSpace(Platform)
-        ? NetworkId : Platform.Trim() + " · " + NetworkId;
+    public string Identity => !HasIdentity ? "" :
+        (string.IsNullOrWhiteSpace(Platform) ? "" : Platform.Trim() + " · ") +
+        (!string.IsNullOrWhiteSpace(BanditId) ? "Bandit · " + BanditId : NetworkId);
 }
 
 public sealed record ServerSnapshot(
@@ -163,6 +170,10 @@ public static class ServerSnapshotReader
             var state = Text(root, "state");
             var map = Text(root, "map");
             if (state.Length > 64 || map.Length > 128) return null;
+            var spectatorAvailable = root.TryGetProperty("capabilities", out var capabilities) &&
+                capabilities.ValueKind == JsonValueKind.Object &&
+                capabilities.TryGetProperty("spectatorMode", out var spectatorCapability) &&
+                spectatorCapability.ValueKind == JsonValueKind.True;
             var players = new List<PlayerRow>();
             foreach (var player in root.GetProperty("players").EnumerateArray())
             {
@@ -172,6 +183,8 @@ public static class ServerSnapshotReader
                 var token = player.GetProperty("token").GetString();
                 var platform = player.GetProperty("platform").GetString() ?? "Unknown";
                 var networkId = player.GetProperty("networkId").GetString() ?? "";
+                var banditId = player.TryGetProperty("banditId", out var banditValue) &&
+                    banditValue.ValueKind == JsonValueKind.String ? banditValue.GetString() ?? "" : "";
                 var platformId = player.TryGetProperty("platformId", out var platformValue)
                     ? platformValue.GetString() ?? "" : "";
                 var character = player.TryGetProperty("character", out var characterValue) &&
@@ -192,13 +205,24 @@ public static class ServerSnapshotReader
                 } : null;
                 var health = OptionalHealth(player, "health");
                 var maxHealth = OptionalHealth(player, "maxHealth");
+                var spectator = player.TryGetProperty("spectator", out var spectatorValue) &&
+                                spectatorValue.ValueKind == JsonValueKind.True;
+                bool? eliminationReady = player.TryGetProperty("eliminationReady", out var readyValue)
+                    ? readyValue.ValueKind switch
+                    {
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        _ => null
+                    } : null;
                 if (string.IsNullOrWhiteSpace(token) || token.Length > 64 ||
                     !token.All(char.IsAsciiLetterOrDigit) || platform.Length > 32 ||
-                    networkId.Length > 256 || platformId.Length > 256 || character.Length > 64 ||
+                    networkId.Length > 256 || banditId.Length > 256 || platformId.Length > 256 ||
+                    banditId.Any(char.IsControl) || character.Length > 64 ||
                     character.Any(char.IsControl)) return null;
                 players.Add(new PlayerRow(name, token, platform, networkId, platformId,
                     character, accountLevel, characterLevel, gadgets, upgrades, loadout, team,
-                    dead, health, maxHealth));
+                    dead, health, maxHealth, state == "In match", state == "Lobby",
+                    spectator, eliminationReady, spectatorAvailable, banditId));
             }
             return new("—", state, map, "—", players.Count, null, players,
                 "Live server connection", true);

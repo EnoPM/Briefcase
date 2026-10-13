@@ -14,7 +14,7 @@ public sealed record FormChoiceMaximum(string Reference, IReadOnlyDictionary<str
 public sealed record FormField(string Key, string Label, string Group, string Section,
     FormFieldKind Kind, string Default, decimal? Minimum, decimal? Maximum, string? MaximumReference,
     FormChoiceMaximum? MaximumByChoice, int? MaxLength, FormChoice[]? Choices, string Display,
-    decimal Step, string? NotEqualTo, string? Pattern, string LabelKey)
+    decimal Step, string? NotEqualTo, string? Pattern, string LabelKey, string? ImageId = null)
 {
     public decimal SliderMaximum(decimal maximum)
     {
@@ -102,9 +102,24 @@ public sealed class FormSchema
         return Parse(bytes);
     }
 
-    public static FormSchema LoadForServer(ServerLocation location, string? directory = null)
+    public static FormSchema LoadForInstallation(ServerLocation location, string? directory = null)
+        => LoadForBuildId(SteamCmdService.InstalledBuildId(location), directory);
+
+    public static FormSchema LoadForBuildId(string? buildId, string? directory = null)
     {
         var schema = LoadBase(directory);
+        if (buildId != "25777350") return schema;
+        using var resource = typeof(FormSchema).Assembly.GetManifestResourceStream(
+            "Briefcase.ServerApp.Fallback.ServerConfiguration.25777350.override.json")
+            ?? throw new InvalidDataException("Bundled server build schema is missing.");
+        using var output = new MemoryStream();
+        resource.CopyTo(output);
+        return schema.ApplyOverride(output.ToArray());
+    }
+
+    public static FormSchema LoadForServer(ServerLocation location, string? directory = null)
+    {
+        var schema = LoadForInstallation(location, directory);
         foreach (var mod in ModCatalog.Read(location).Where(mod => mod.IsEnabled && mod.HasNativeBinary))
         {
             var path = Path.Combine(location.ModsRoot, mod.Name, "Data", "server-configuration.override.json");
@@ -152,7 +167,7 @@ public sealed class FormSchema
             Merge(merged, patch, "tabs", "id");
             Merge(merged, patch, "groups", "id");
             Merge(merged, patch, "fields", "key");
-            return new FormSchema(merged);
+            return new FormSchema(merged, _translations);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
         { throw new InvalidDataException("Invalid form override JSON.", error); }
@@ -245,6 +260,9 @@ public sealed class FormSchema
         var display = Optional(item, "display") ?? "input";
         var step = Number(item, "step") ?? (kind == FormFieldKind.Integer ? 1m : 0.1m);
         var section = Optional(item, "section") ?? "";
+        var imageId = Optional(item, "image");
+        if (imageId is not null && !GameImageCatalog.Contains(imageId))
+            throw new InvalidDataException("Unknown bundled game image for " + key + ": " + imageId);
         if (section.Length > 0 && !Regex.IsMatch(section, "^[A-Za-z0-9_./-]{1,200}$") ||
             minimum > maximum || maxLength is < 1 or > 256 ||
             kind == FormFieldKind.Choice && (choices is null || choices.Length is < 1 or > 64) ||
@@ -264,7 +282,7 @@ public sealed class FormSchema
         return new FormField(key, Required(item, "label"), Identifier(item, "group"), section,
             kind, Required(item, "default", allowEmpty: true), minimum, maximum, maxReference, maxByChoice,
             maxLength, choices, display, step, Optional(item, "notEqualTo"), Optional(item, "pattern"),
-            Optional(item, "labelKey") ?? "config.field." + key);
+            Optional(item, "labelKey") ?? "config.field." + key, imageId);
     }
 
     private static FormChoice ParseChoice(JsonNode? node, string fieldKey)

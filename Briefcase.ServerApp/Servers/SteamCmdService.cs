@@ -102,7 +102,7 @@ public sealed class SteamCmdService
             throw new InvalidDataException("The selected server installation is incomplete.");
         if (updating)
         {
-            using var process = ServerProcess.Find(location!);
+            using var process = ServerProcess.FindAnyInstallation(location!);
             if (process is not null) throw new InvalidOperationException("Stop the server before updating game files.");
         }
         var steamcmd = await EnsureInstalledAsync(progress, cancellationToken);
@@ -110,6 +110,71 @@ public sealed class SteamCmdService
         if (!updating && !resume) File.WriteAllText(marker, branch);
         progress.Report(AppTranslations.Get(updating ? "status.updating_server" : "status.installing_server",
             updating ? "Updating the dedicated server…" : "Installing the dedicated server…"));
+        try
+        {
+            await RunSteamCmdAsync(steamcmd, root, branch, betaPassword, progress, cancellationToken);
+        }
+        catch (SteamCmdRunException firstFailure) when (updating && !firstFailure.FileAccessDenied &&
+                                                       !cancellationToken.IsCancellationRequested)
+        {
+            // An old depot manifest can become inaccessible after a branch is published.
+            // A fresh install does not ask SteamCMD for that old manifest.
+            progress.Report(AppTranslations.Get("status.retrying_clean_server_download",
+                "The update failed; downloading a clean server copy before replacing the old one…"));
+            var stage = SteamInstallationRecovery.NewStagePath(root);
+            try
+            {
+                Directory.CreateDirectory(stage);
+                File.WriteAllText(Path.Combine(stage, ".briefcase-steam-branch"), branch);
+                try
+                {
+                    await RunSteamCmdAsync(steamcmd, stage, branch, betaPassword, progress, cancellationToken);
+                }
+                catch (SteamCmdRunException secondFailure) when (secondFailure.FileAccessDenied)
+                {
+                    throw new UnauthorizedAccessException(secondFailure.Message, secondFailure);
+                }
+                catch (SteamCmdRunException secondFailure)
+                {
+                    throw new InvalidOperationException(
+                        "The existing installation update failed, and a clean download also failed. " +
+                        secondFailure.Message, secondFailure);
+                }
+                using (var process = ServerProcess.FindAnyInstallation(location!))
+                    if (process is not null)
+                        throw new InvalidOperationException("Stop the server before replacing game files.");
+                SteamInstallationRecovery.Activate(root, stage, branch);
+            }
+            catch (UnauthorizedAccessException) { throw; }
+            catch (Exception recoveryFailure) when (recoveryFailure is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    "SteamCMD could not update the existing installation (" + firstFailure.Message +
+                    "). The clean-install recovery did not complete: " + recoveryFailure.Message,
+                    recoveryFailure);
+            }
+            finally
+            {
+                try { SteamInstallationRecovery.DeleteStageIfPresent(root, stage); }
+                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (SteamCmdRunException failure) when (failure.FileAccessDenied)
+        {
+            throw new UnauthorizedAccessException(failure.Message, failure);
+        }
+        catch (SteamCmdRunException failure)
+        {
+            throw new InvalidOperationException(failure.Message, failure);
+        }
+        progress.Report(AppTranslations.Get("status.server_files_ready", "Dedicated server files are ready."));
+        return shipping;
+    }
+
+    private async Task RunSteamCmdAsync(string steamcmd, string root, string branch, string? betaPassword,
+        IProgress<string> progress, CancellationToken cancellationToken)
+    {
+        var shipping = Path.Combine(root, "DeceiveInc", "Binaries", "Win64", "DeceiveIncServer-Win64-Shipping.exe");
         var start = new ProcessStartInfo(steamcmd)
         {
             WorkingDirectory = _toolsFolder,
@@ -123,6 +188,11 @@ public sealed class SteamCmdService
         for (var attempt = 0; attempt < 2; attempt++)
         {
             using var child = Process.Start(start) ?? throw new InvalidOperationException("SteamCMD did not start.");
+            using var cancellation = cancellationToken.Register(() =>
+            {
+                try { if (!child.HasExited) child.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+            });
             var succeeded = false;
             var needsBootstrapRetry = false;
             string? failureLine = null;
@@ -147,25 +217,28 @@ public sealed class SteamCmdService
             }, cancellationToken);
             var error = ConsumeAsync(child.StandardError, Record, cancellationToken);
             await Task.WhenAll(output, error, child.WaitForExitAsync(cancellationToken));
-            if (child.ExitCode == 0 && succeeded && File.Exists(shipping))
-            {
-                progress.Report(AppTranslations.Get("status.server_files_ready", "Dedicated server files are ready."));
-                return shipping;
-            }
+            if (child.ExitCode == 0 && succeeded && File.Exists(shipping) && InstalledBuildIdAtRoot(root) is not null)
+                return;
             if (attempt == 0 && needsBootstrapRetry)
             {
                 progress.Report(AppTranslations.Get("status.retrying_server_download", "Retrying the server download…"));
                 await Task.Delay(1500, cancellationToken);
                 continue;
             }
-            if ((failureLine ?? "").Contains("access denied", StringComparison.OrdinalIgnoreCase) ||
-                (failureLine ?? "").Contains("permission denied", StringComparison.OrdinalIgnoreCase))
-                throw new UnauthorizedAccessException("SteamCMD cannot write to the server directory: " + failureLine);
-            throw new InvalidOperationException("SteamCMD could not install the dedicated server: " +
-                (failureLine ?? lastLine ?? $"exit code {child.ExitCode}") +
-                ". SteamCMD logs are in " + Path.Combine(_toolsFolder, "logs") + ".");
+            var detail = failureLine ?? lastLine ?? $"exit code {child.ExitCode}";
+            var fileAccessDenied = (detail.Contains("access denied", StringComparison.OrdinalIgnoreCase) &&
+                !detail.Contains("manifest", StringComparison.OrdinalIgnoreCase) &&
+                !detail.Contains("depot", StringComparison.OrdinalIgnoreCase)) ||
+                detail.Contains("permission denied", StringComparison.OrdinalIgnoreCase);
+            throw new SteamCmdRunException("SteamCMD could not install the dedicated server: " + detail +
+                ". SteamCMD logs are in " + Path.Combine(_toolsFolder, "logs") + ".", fileAccessDenied);
         }
-        throw new InvalidOperationException("SteamCMD exhausted its installation retries.");
+        throw new SteamCmdRunException("SteamCMD exhausted its installation retries.", false);
+    }
+
+    private sealed class SteamCmdRunException(string message, bool fileAccessDenied) : Exception(message)
+    {
+        public bool FileAccessDenied { get; } = fileAccessDenied;
     }
 
     public static IReadOnlyList<string> AppUpdateArguments(string installRoot, string branch,
@@ -177,12 +250,10 @@ public sealed class SteamCmdService
             "+force_install_dir", Path.GetFullPath(installRoot), "+login", "anonymous",
             "+app_update", ServerAppId.ToString()
         };
-        if (branch != "public")
-        {
-            arguments.AddRange(["-beta", branch]);
-            if (!string.IsNullOrWhiteSpace(betaPassword))
-                arguments.AddRange(["-betapassword", betaPassword]);
-        }
+        // Explicitly reset SteamCMD's remembered beta when returning to the public branch.
+        arguments.AddRange(["-beta", branch]);
+        if (branch != "public" && !string.IsNullOrWhiteSpace(betaPassword))
+            arguments.AddRange(["-betapassword", betaPassword]);
         arguments.AddRange(["validate", "+quit"]);
         return arguments;
     }

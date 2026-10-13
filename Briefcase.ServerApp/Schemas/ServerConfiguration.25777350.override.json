@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "fields": [
+    {
+      "key": "MaxPlayers",
+      "max": 15,
+      "maxByChoice": {
+        "field": "GameMode",
+        "values": { "Solo": 15, "Duo": 14, "Trio": 15 }
+      }
+    },
+    {
+      "key": "MinimumDeployedPlayersToStart",
+      "label": "Minimum deployed players to start",
+      "group": "Game",
+      "kind": "integer",
+      "default": "0",
+      "min": 0,
+      "display": "slider",
+      "step": 1,
+      "maxReference": "MaxPlayers"
+    },
+    {
+      "key": "bTournamentMode",
+      "label": "Tournament mode (CSV results)",
+      "group": "Game",
+      "kind": "boolean",
+      "default": "False"
+    }
+  ]
+}

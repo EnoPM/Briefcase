@@ -14,6 +14,7 @@ public sealed class GitHubReleaseService
 
     public static string? InstalledBriefcaseVersion(ServerLocation location)
     {
+        ServerInstanceFiles.MigrateLegacyRuntime(location);
         var file = Path.Combine(location.BriefcaseRoot, "Core", "Updater", "build.json");
         if (!File.Exists(file)) return null;
         using var stream = File.OpenRead(file);

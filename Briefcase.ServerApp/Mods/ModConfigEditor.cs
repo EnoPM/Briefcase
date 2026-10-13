@@ -13,7 +13,7 @@ public sealed record ModSliderRange(decimal Minimum, decimal Maximum, decimal St
 }
 
 public sealed record ModConfigValue(string Label, string Path, JsonNode Parent, string? Key, int Index,
-    JsonValueKind Kind, string Value, ModSliderRange? Slider = null);
+    JsonValueKind Kind, string Value, ModSliderRange? Slider = null, string? ImageId = null);
 
 public sealed class ModConfigEditor
 {
@@ -21,7 +21,8 @@ public sealed class ModConfigEditor
     public JsonNode Root { get; }
     public IReadOnlyList<ModConfigValue> Values { get; }
 
-    public ModConfigEditor(string file, string? draftJson = null)
+    public ModConfigEditor(string file, string? draftJson = null,
+        byte[]? schemaBytes = null, IReadOnlyDictionary<string, string>? remoteTranslations = null)
     {
         FilePath = file;
         if (draftJson is null && new FileInfo(file).Length > 1_048_576)
@@ -29,12 +30,22 @@ public sealed class ModConfigEditor
         Root = JsonNode.Parse(draftJson ?? File.ReadAllText(file)) ??
             throw new InvalidDataException("The mod configuration is empty.");
         var fields = new List<ModConfigValue>();
-        Visit(Root, "", fields, 0, LoadTranslations(Path.GetDirectoryName(file)!));
-        var sliders = LoadSliders(Path.GetDirectoryName(file)!);
+        Visit(Root, "", fields, 0,
+            remoteTranslations ?? LoadTranslations(Path.GetDirectoryName(file)!));
+        var (sliders, images) = schemaBytes is not null
+            ? ParseSchemaBytes(schemaBytes)
+            : remoteTranslations is not null
+                ? (new Dictionary<string, ModSliderRange>(), new Dictionary<string, string>())
+                : LoadSchema(Path.GetDirectoryName(file)!);
         for (var index = 0; index < fields.Count; index++)
-            if (fields[index].Kind == JsonValueKind.Number &&
-                sliders.TryGetValue(fields[index].Path, out var range))
-                fields[index] = fields[index] with { Slider = range };
+        {
+            var field = fields[index];
+            if (field.Kind == JsonValueKind.Number && sliders.TryGetValue(field.Path, out var range))
+                field = field with { Slider = range };
+            if (images.TryGetValue(field.Path, out var imageId))
+                field = field with { ImageId = imageId };
+            fields[index] = field;
+        }
         if (fields.Count == 0) throw new InvalidDataException("This mod has no editable settings.");
         Values = fields;
     }
@@ -44,31 +55,43 @@ public sealed class ModConfigEditor
         if (bytes.Length is <= 0 or > 65_536)
             throw new InvalidDataException("Invalid mod configuration schema size.");
         using var document = JsonDocument.Parse(bytes);
-        _ = ParseSliders(document.RootElement);
+        _ = ParseSchema(document.RootElement);
     }
 
-    private static IReadOnlyDictionary<string, ModSliderRange> LoadSliders(string dataDirectory)
+    private static (IReadOnlyDictionary<string, ModSliderRange> Sliders,
+        IReadOnlyDictionary<string, string> Images) ParseSchemaBytes(byte[] bytes)
+    {
+        ValidateSchema(bytes);
+        using var document = JsonDocument.Parse(bytes);
+        return ParseSchema(document.RootElement);
+    }
+
+    private static (IReadOnlyDictionary<string, ModSliderRange> Sliders,
+        IReadOnlyDictionary<string, string> Images) LoadSchema(string dataDirectory)
     {
         var path = Path.Combine(dataDirectory, "config.schema.json");
-        if (!File.Exists(path)) return new Dictionary<string, ModSliderRange>();
+        if (!File.Exists(path)) return (new Dictionary<string, ModSliderRange>(),
+            new Dictionary<string, string>());
         if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint) || new FileInfo(path).Length > 65_536)
             throw new InvalidDataException("Invalid mod configuration schema file.");
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
-        return ParseSliders(document.RootElement);
+        return ParseSchema(document.RootElement);
     }
 
-    private static IReadOnlyDictionary<string, ModSliderRange> ParseSliders(JsonElement root)
+    private static (IReadOnlyDictionary<string, ModSliderRange> Sliders,
+        IReadOnlyDictionary<string, string> Images) ParseSchema(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object ||
             !root.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("Invalid mod configuration schema.");
         var sliders = new Dictionary<string, ModSliderRange>(StringComparer.Ordinal);
-        ReadProperties(properties, "", sliders, 0);
-        return sliders;
+        var images = new Dictionary<string, string>(StringComparer.Ordinal);
+        ReadProperties(properties, "", sliders, images, 0);
+        return (sliders, images);
     }
 
     private static void ReadProperties(JsonElement properties, string prefix,
-        Dictionary<string, ModSliderRange> sliders, int depth)
+        Dictionary<string, ModSliderRange> sliders, Dictionary<string, string> images, int depth)
     {
         if (depth > 12 || sliders.Count > 512) throw new InvalidDataException("Mod configuration schema is too complex.");
         foreach (var property in properties.EnumerateObject())
@@ -76,11 +99,17 @@ public sealed class ModConfigEditor
             if (property.Value.ValueKind != JsonValueKind.Object)
                 throw new InvalidDataException("Invalid mod configuration field schema.");
             var path = prefix.Length == 0 ? property.Name : prefix + "." + property.Name;
+            if (property.Value.TryGetProperty("image", out var image))
+            {
+                if (image.ValueKind != JsonValueKind.String || image.GetString() is not { } id ||
+                    !GameImageCatalog.Contains(id) || !images.TryAdd(path, id))
+                    throw new InvalidDataException("Unknown bundled game image for " + path + ".");
+            }
             if (property.Value.TryGetProperty("properties", out var children))
             {
                 if (children.ValueKind != JsonValueKind.Object)
                     throw new InvalidDataException("Invalid nested mod configuration schema.");
-                ReadProperties(children, path, sliders, depth + 1);
+                ReadProperties(children, path, sliders, images, depth + 1);
             }
             if (!property.Value.TryGetProperty("display", out var display) ||
                 display.ValueKind != JsonValueKind.String || display.GetString() != "slider") continue;

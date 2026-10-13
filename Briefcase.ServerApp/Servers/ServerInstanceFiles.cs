@@ -7,6 +7,8 @@ namespace Briefcase.ServerApp;
 /// <summary>Creates the small writable runtime beside an instance, never inside the shared game.</summary>
 public static class ServerInstanceFiles
 {
+    private const string FreshInstanceMarker = ".briefcase-fresh-instance";
+
     public static string Provision(string dataDirectory, string id, ServerLocation installation, string? name = null)
     {
         if (!Guid.TryParseExact(id, "N", out _)) throw new InvalidDataException("Invalid instance ID.");
@@ -23,11 +25,17 @@ public static class ServerInstanceFiles
             if (!File.Exists(ini))
             {
                 if (name is null) File.WriteAllText(ini, "[/Script/DeceiveInc.TripwireServerSettings]\n");
-                else ServerIniEditor.WriteDefault(ini, name);
+                else ServerIniEditor.WriteDefault(ini, name, installation);
             }
-            CopyTree(Path.Combine(installation.Win64, "ue4ss"), Path.Combine(root, "ue4ss"));
-            CopyTree(Path.Combine(installation.BriefcaseRoot, "Mods"), Path.Combine(root, "Briefcase", "Mods"));
-            EnsureLegacyNativeModSelection(root);
+            if (name is null)
+            {
+                CopyTree(Path.Combine(installation.BriefcaseRoot, "Core"), Path.Combine(root, "Briefcase", "Core"));
+                CopyIfPresent(Path.Combine(installation.Win64, "Package.json"), Path.Combine(root, "Package.json"));
+                CopyTree(Path.Combine(installation.Win64, "ue4ss"), Path.Combine(root, "ue4ss"));
+                CopyTree(Path.Combine(installation.BriefcaseRoot, "Mods"), Path.Combine(root, "Briefcase", "Mods"));
+                EnsureLegacyNativeModSelection(root);
+            }
+            else File.WriteAllText(Path.Combine(root, FreshInstanceMarker), "");
             return root;
         }
         catch
@@ -43,15 +51,13 @@ public static class ServerInstanceFiles
         if (!instance.IsInstance) return;
         if (!Directory.Exists(instance.InstanceRoot))
             throw new DirectoryNotFoundException("The server instance directory is missing.");
-        var shared = Path.Combine(instance.Win64, "ue4ss");
+        MigrateLegacyRuntime(instance);
         var target = instance.Ue4ssRoot;
         var bridge = "BriefcaseServerBridge";
-        if (!File.Exists(Path.Combine(shared, "UE4SS.dll")) ||
-            !File.Exists(Path.Combine(shared, "Mods", bridge, "dlls", "main.dll")))
+        if (!File.Exists(Path.Combine(target, "UE4SS.dll")) ||
+            !File.Exists(Path.Combine(target, "Mods", bridge, "dlls", "main.dll")))
             throw new InvalidOperationException(
-                "Briefcase is incomplete: install or update its UE4SS runtime and server bridge before starting this instance.");
-        CopyRuntimeFile(Path.Combine(shared, "UE4SS.dll"), Path.Combine(target, "UE4SS.dll"));
-        CopyIfMissing(Path.Combine(shared, "UE4SS-settings.ini"), Path.Combine(target, "UE4SS-settings.ini"));
+                "Briefcase is incomplete in this instance: install or update its UE4SS runtime and server bridge before starting it.");
         var settings = Path.Combine(target, "UE4SS-settings.ini");
         if (File.Exists(settings))
         {
@@ -61,10 +67,7 @@ public static class ServerInstanceFiles
                     lines[index] = "ModsFolderPath = " + instance.ModsRoot;
             File.WriteAllLines(settings, lines);
         }
-        CopyTree(Path.Combine(shared, "Mods", bridge), Path.Combine(instance.ModsRoot, bridge), overwrite: true);
-        var sourceList = Path.Combine(shared, "Mods", "mods.txt");
         var targetList = Path.Combine(instance.ModsRoot, "mods.txt");
-        CopyIfMissing(sourceList, targetList);
         if (Directory.Exists(Path.Combine(instance.ModsRoot, bridge)))
         {
             Directory.CreateDirectory(instance.ModsRoot);
@@ -75,6 +78,21 @@ public static class ServerInstanceFiles
             File.WriteAllLines(targetList, selection);
         }
         EnsureLegacyNativeModSelection(instance.InstanceRoot);
+    }
+
+    /// <summary>Copies an old shared runtime once, without changing or removing files in the Steam build.</summary>
+    public static void MigrateLegacyRuntime(ServerLocation instance)
+    {
+        if (!instance.IsInstance || !Directory.Exists(instance.InstanceRoot) ||
+            File.Exists(Path.Combine(instance.InstanceRoot, FreshInstanceMarker))) return;
+        var installedHost = Path.Combine(instance.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll");
+        if (File.Exists(installedHost)) return;
+        var oldRoot = Path.Combine(instance.Win64, "Briefcase");
+        if (!File.Exists(Path.Combine(oldRoot, "Core", "Briefcase.NativeHost.dll"))) return;
+        CopyTree(Path.Combine(oldRoot, "Core"), Path.Combine(instance.BriefcaseRoot, "Core"));
+        CopyIfMissing(Path.Combine(instance.Win64, "Package.json"),
+            Path.Combine(instance.InstanceRoot, "Package.json"));
+        CopyTree(Path.Combine(instance.Win64, "ue4ss"), instance.Ue4ssRoot);
     }
 
     private static void EnsureLegacyNativeModSelection(string instanceRoot)

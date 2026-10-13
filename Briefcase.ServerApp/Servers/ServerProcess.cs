@@ -54,6 +54,8 @@ public sealed class ServerProcess
 
     public static Process Start(ServerLocation location)
     {
+        if (!location.IsInstance)
+            throw new InvalidOperationException("Migrate this server to a managed instance before starting it from Briefcase.");
         using var existing = Find(location);
         if (existing is not null)
             throw new InvalidOperationException("This server is already running.");
@@ -61,6 +63,7 @@ public sealed class ServerProcess
         var bootstrap = Path.Combine(AppContext.BaseDirectory, "Native", "Briefcase.ServerBootstrap.dll");
         if (!File.Exists(injector) || !File.Exists(bootstrap))
             throw new InvalidOperationException("The ServerApp installation is incomplete: its private injection components are missing.");
+        ServerInstanceFiles.MigrateLegacyRuntime(location);
         if (!File.Exists(Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll")))
             throw new InvalidOperationException("Install Briefcase before starting this server from ServerApp.");
         using (var other = FindAnyInstallation(location))

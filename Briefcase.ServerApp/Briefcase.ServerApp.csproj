@@ -26,8 +26,10 @@
     <EmbeddedResource Include="../marketplace/assets/SuspicionControlIcon.png" LogicalName="Briefcase.ServerApp.SuspicionControlLogo.png" />
     <AvaloniaResource Include="Assets/BriefcaseIcon.ico" />
     <AvaloniaResource Include="Assets/Game/IconCatalog.json" />
+    <EmbeddedResource Include="Assets/Game/ImageCatalog.json" LogicalName="Briefcase.ServerApp.GameImages.json" />
     <EmbeddedResource Include="Translations/en.json" LogicalName="Briefcase.ServerApp.Fallback.en.json" />
     <EmbeddedResource Include="Schemas/ServerConfiguration.json" LogicalName="Briefcase.ServerApp.Fallback.ServerConfiguration.json" />
+    <EmbeddedResource Include="Schemas/ServerConfiguration.25777350.override.json" LogicalName="Briefcase.ServerApp.Fallback.ServerConfiguration.25777350.override.json" />
     <None Update="Schemas/ServerConfiguration.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Translations/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

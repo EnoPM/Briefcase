@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     private Action? _dismissModal;
     private Action? _dismissConfirmation;
     private ModConfigEditor? _modEditor;
+    private LootControlEditorControl? _lootEditor;
     private readonly Dictionary<ModConfigValue, Control> _modInputs = new();
     private readonly Dictionary<string, string> _modDrafts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, string>> _invalidFormDrafts = new(StringComparer.OrdinalIgnoreCase);
@@ -59,6 +60,7 @@ public sealed partial class MainWindow : Window
                 _settingControls.Clear();
                 _modInputs.Clear();
                 _modEditor = null;
+                _lootEditor = null;
                 _selectedModPath = null;
                 SaveModButton.IsEnabled = false;
                 SelectedModTitle.Text = AppTranslations.Get("mod.select_title");
@@ -699,6 +701,7 @@ public sealed partial class MainWindow : Window
     private void LoadModEditor(ModRow mod)
     {
         _modEditor = null;
+        _lootEditor = null;
         _modInputs.Clear();
         ModConfigurationFields.Children.Clear();
         ModEditorError.Text = "";
@@ -751,6 +754,18 @@ public sealed partial class MainWindow : Window
 
     private void BuildModForm(string path, string? json)
     {
+        _lootEditor = null;
+        if (LootControlConfigEditor.IsLootControl(path))
+        {
+            _modEditor = null;
+            _modInputs.Clear();
+            ModConfigurationFields.Children.Clear();
+            var loot = new LootControlConfigEditor(path,
+                json ?? throw new InvalidDataException("Mod configuration is unavailable."));
+            _lootEditor = new LootControlEditorControl(loot);
+            ModConfigurationFields.Children.Add(_lootEditor);
+            return;
+        }
         var editor = new ModConfigEditor(path, json);
         _modEditor = editor;
         _modInputs.Clear();
@@ -791,8 +806,19 @@ public sealed partial class MainWindow : Window
                     : new TextBox { Text = entry.Value };
             _modInputs[entry] = input;
             var line = new Grid { ColumnDefinitions = new ColumnDefinitions("3*,2*"), ColumnSpacing = 16 };
-            line.Children.Add(new TextBlock { Text = entry.Label, TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+            var label = new TextBlock { Text = entry.Label, TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+            if (entry.ImageId is { } imageId && GameImageCatalog.Load(imageId) is { } bitmap)
+            {
+                var caption = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+                caption.Children.Add(new Image { Source = bitmap, Width = 22, Height = 22,
+                    Stretch = Stretch.Uniform,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+                caption.Children.Add(label);
+                line.Children.Add(caption);
+            }
+            else line.Children.Add(label);
             Grid.SetColumn(display, 1);
             line.Children.Add(display);
             ModConfigurationFields.Children.Add(line);
@@ -814,8 +840,11 @@ public sealed partial class MainWindow : Window
         if (_selectedModPath is null || _model.IsDemo || !File.Exists(_selectedModPath)) return;
         try
         {
-            _modDrafts[_selectedModPath] = _jsonMode || _modEditor is null
-                ? ModJsonEditor.Text ?? "" : _modEditor.Render(FormValues());
+            _modDrafts[_selectedModPath] = _jsonMode
+                ? ModJsonEditor.Text ?? ""
+                : _lootEditor is not null ? _lootEditor.Render()
+                : _modEditor is not null ? _modEditor.Render(FormValues())
+                : ModJsonEditor.Text ?? "";
             _invalidFormDrafts.Remove(_selectedModPath);
         }
         catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
@@ -843,7 +872,13 @@ public sealed partial class MainWindow : Window
     private void JsonModeClicked(object? sender, RoutedEventArgs e)
     {
         if (_jsonMode) return;
-        if (_modEditor is not null && !_model.IsDemo)
+        if (_lootEditor is not null && !_model.IsDemo)
+        {
+            try { ModJsonEditor.Text = _lootEditor.Render(); }
+            catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
+            { ModEditorError.Text = ex.Message; return; }
+        }
+        else if (_modEditor is not null && !_model.IsDemo)
         {
             try { ModJsonEditor.Text = _modEditor.Render(FormValues()); }
             catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
@@ -869,6 +904,8 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_jsonMode) ModConfigEditor.SaveRaw(_selectedModPath, ModJsonEditor.Text ?? "");
+            else if (_lootEditor is not null)
+                ModConfigEditor.SaveRaw(_selectedModPath, _lootEditor.Render());
             else if (_modEditor is not null) _modEditor.Save(FormValues());
             else return;
             var savedPath = _selectedModPath;
@@ -1253,12 +1290,19 @@ public sealed partial class MainWindow : Window
 
     private async void CopyPlayerIdClicked(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: PlayerRow player } || !player.HasNetworkId) return;
+        if (sender is not Button { DataContext: PlayerRow player } || !player.HasIdentity) return;
         if (Clipboard is { } clipboard)
         {
-            await clipboard.SetTextAsync(player.NetworkId);
+            await clipboard.SetTextAsync(player.PreferredId);
             _model.ReportTransient(AppTranslations.Get("status.network_copied"));
         }
+    }
+
+    private async void SpectatorSelectionClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not IconButton { DataContext: PlayerRow player } ||
+            !_model.IsRunning || !player.CanSetSpectator) return;
+        await _model.SetSpectatorAsync(player, !player.Spectator);
     }
 
     private async void CopyNetworkAddressClicked(object? sender, RoutedEventArgs e)

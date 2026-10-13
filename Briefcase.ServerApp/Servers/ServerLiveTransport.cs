@@ -80,21 +80,29 @@ public sealed class ServerLiveClient : IDisposable
     {
         if (playerToken.Length is < 1 or > 64 || !playerToken.All(char.IsAsciiLetterOrDigit))
             return (false, "Invalid player selection.");
-        return await SendCommandAsync("kick", playerToken, null, null, null, cancellationToken);
+        return await SendCommandAsync("kick", playerToken, null, null, null, null, cancellationToken);
     }
+
+    public Task<(bool Ok, string Message)> KillAsync(string playerToken,
+        CancellationToken cancellationToken) =>
+        SendCommandAsync("kill", playerToken, null, null, null, null, cancellationToken);
+
+    public Task<(bool Ok, string Message)> SetSpectatorAsync(string playerToken, bool spectator,
+        CancellationToken cancellationToken) =>
+        SendCommandAsync("setSpectator", playerToken, null, null, null, spectator, cancellationToken);
 
     public Task<(bool Ok, string Message)> MoveTeamAsync(string playerToken, int team, int teamSize,
         CancellationToken cancellationToken) =>
-        SendCommandAsync("moveTeam", playerToken, null, team, teamSize, cancellationToken);
+        SendCommandAsync("moveTeam", playerToken, null, team, teamSize, null, cancellationToken);
 
     public Task<(bool Ok, string Message)> SwapTeamAsync(string playerToken, string otherToken, int teamSize,
         CancellationToken cancellationToken) =>
-        SendCommandAsync("swapTeam", playerToken, otherToken, null, teamSize, cancellationToken);
+        SendCommandAsync("swapTeam", playerToken, otherToken, null, teamSize, null, cancellationToken);
 
     private async Task<(bool Ok, string Message)> SendCommandAsync(string command, string playerToken,
-        string? otherToken, int? team, int? teamSize, CancellationToken cancellationToken)
+        string? otherToken, int? team, int? teamSize, bool? spectator, CancellationToken cancellationToken)
     {
-        if (command is not ("kick" or "moveTeam" or "swapTeam") ||
+        if (command is not ("kick" or "kill" or "moveTeam" or "swapTeam" or "setSpectator") ||
             playerToken.Length is < 1 or > 64 || !playerToken.All(char.IsAsciiLetterOrDigit) ||
             otherToken is { } other && (other.Length is < 1 or > 64 ||
                 !other.All(char.IsAsciiLetterOrDigit)) ||
@@ -116,6 +124,7 @@ public sealed class ServerLiveClient : IDisposable
             if (otherToken is not null) message.Append(",\"otherToken\":\"").Append(otherToken).Append('"');
             if (team is not null) message.Append(",\"team\":").Append(team.Value);
             if (teamSize is not null) message.Append(",\"teamSize\":").Append(teamSize.Value);
+            if (spectator is not null) message.Append(",\"spectator\":").Append(spectator.Value ? "true" : "false");
             message.Append("}\n");
             await _writeGate.WaitAsync(cancellationToken);
             try
@@ -203,7 +212,8 @@ public sealed class ServerLiveClient : IDisposable
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-                OperationCanceledException or InvalidOperationException or TimeoutException or ObjectDisposedException)
+                OperationCanceledException or InvalidOperationException or TimeoutException or ObjectDisposedException or
+                HttpRequestException or System.Net.WebSockets.WebSocketException)
             {
                 if (_stop.IsCancellationRequested) break;
             }

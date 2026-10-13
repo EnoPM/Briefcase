@@ -95,7 +95,8 @@ if (args is ["--live-pipe-pid", var pidText] && int.TryParse(pidText, out var li
     return;
 }
 
-if (args is ["--verify-shared-install", var serverExecutable])
+if (args is ["--verify-shared-install", var serverExecutable, var privateNativeDirectory,
+        var frameworkArchive, var frameworkVersion])
 {
     var testBase = Environment.GetEnvironmentVariable("BRIEFCASE_TEST_DATA_ROOT") ?? Path.GetTempPath();
     var testRoot = Path.Combine(testBase, "Briefcase Shared Instance Probe", Guid.NewGuid().ToString("N"));
@@ -109,6 +110,13 @@ if (args is ["--verify-shared-install", var serverExecutable])
         var secondRow = testRegistry.Add(serverExecutable, serverName: "Briefcase Probe B");
         Check(ServerLocation.TryCreate(firstRow, out firstLocation, out _) &&
               ServerLocation.TryCreate(secondRow, out secondLocation, out _), "probe instances resolve");
+        var nativeTarget = Path.Combine(AppContext.BaseDirectory, "Native");
+        Directory.CreateDirectory(nativeTarget);
+        foreach (var file in new[] { "Briefcase.ServerInjector.exe", "Briefcase.ServerBootstrap.dll" })
+            File.Copy(Path.Combine(privateNativeDirectory, file), Path.Combine(nativeTarget, file), overwrite: true);
+        foreach (var instance in new[] { firstLocation!, secondLocation! })
+            BriefcasePackageInstaller.InstallOrUpdate(instance, frameworkArchive, frameworkVersion,
+                new Progress<string>());
         foreach (var (instance, name, gamePort, queryPort) in new[]
                  {
                      (firstLocation!, "Briefcase Probe A", 48670, 48671),
@@ -719,6 +727,17 @@ try
             } } }
     };
     var detailed = ServerSnapshotReader.ParseLive(JsonSerializer.Serialize(detailedPlayer), 4242);
+    var spectatorSnapshot = ServerSnapshotReader.ParseLive(JsonSerializer.Serialize(new
+    {
+        schemaVersion = 2, type = "snapshot", processId = 4242, state = "Lobby",
+        capabilities = new { spectatorMode = true },
+        players = new[] { new { name = "Alice", token = "p1", platform = "PC",
+            banditId = "Bandit-123", networkId = "EOS-123", spectator = true } }
+    }), 4242);
+    Check(spectatorSnapshot?.Players.Single() is { CanSetSpectator: true, Spectator: true,
+                                                   PreferredId: "Bandit-123" } &&
+          spectatorSnapshot.Players.Single().Identity.Contains("Bandit-123", StringComparison.Ordinal),
+        "the lobby exposes spectator control and prefers the player's Bandit ID");
     Check(detailed?.Players.Single() is { Character: "Ace", AccountLevel: 43, CharacterLevel: 18,
                                            Team: 1, IsDead: true, HasHealth: true } detailedRow &&
           detailedRow.HealthPercent == 25.5 && detailedRow.HealthText.StartsWith("25", StringComparison.Ordinal) &&
@@ -1131,6 +1150,76 @@ try
           !File.ReadAllText(freshIni).Contains("MinimumDeployedPlayersToStart") &&
           !File.ReadAllText(freshIni).Contains("51000"),
         "new managed servers use the fresh dedicated server defaults without smoketest options or copied settings");
+    var updatedInstall = Path.Combine(temp, "updated-build");
+    var updatedWin64 = Path.Combine(updatedInstall, "DeceiveInc", "Binaries", "Win64");
+    Directory.CreateDirectory(updatedWin64);
+    File.WriteAllBytes(Path.Combine(updatedWin64, "DeceiveIncServer-Win64-Shipping.exe"), [1]);
+    var updatedManifest = Path.Combine(updatedInstall, "steamapps", "appmanifest_5007710.acf");
+    Directory.CreateDirectory(Path.GetDirectoryName(updatedManifest)!);
+    File.WriteAllText(updatedManifest, "\"buildid\" \"25777350\"");
+    Check(ServerLocation.TryCreate(updatedWin64, out var updatedLocation, out _) && updatedLocation is not null,
+        "updated dedicated-server test installation exists");
+    var updatedSchema = FormSchema.LoadForServer(updatedLocation!);
+    var updatedPlayerField = updatedSchema.Fields.Single(field => field.Key == "MaxPlayers");
+    Check(new[] { (Mode: "Solo", Maximum: 15m), (Mode: "Duo", Maximum: 14m),
+                  (Mode: "Trio", Maximum: 15m) }
+            .All(item => updatedSchema.EffectiveMaximum(updatedPlayerField,
+                new Dictionary<string, string> { ["GameMode"] = item.Mode }) == item.Maximum) &&
+          updatedSchema.Fields.Any(field => field.Key == "MinimumDeployedPlayersToStart" &&
+              field.MaximumReference == "MaxPlayers") &&
+          updatedSchema.Fields.Any(field => field.Key == "bTournamentMode") &&
+          !FormSchema.LoadForBuildId(null).Fields.Any(field =>
+              field.Key == "MinimumDeployedPlayersToStart"),
+        "new build exposes its mode limits, lobby threshold and tournament setting only for that build");
+    var updatedInstance = ServerInstanceFiles.Provision(temp, Guid.NewGuid().ToString("N"),
+        updatedLocation!, "Updated Server");
+    var updatedIni = File.ReadAllText(Path.Combine(updatedInstance, "TripwireServer.ini"));
+    Check(updatedIni.Contains("MinimumDeployedPlayersToStart=0") &&
+          updatedIni.Contains("bTournamentMode=False"),
+        "new instances include options supported by their dedicated-server build");
+    var recoveryRoot = Path.Combine(temp, "steam-recovery");
+    var recoveryStage = SteamInstallationRecovery.NewStagePath(recoveryRoot);
+    var oldExe = Path.Combine(recoveryRoot, "DeceiveInc", "Binaries", "Win64", "DeceiveIncServer-Win64-Shipping.exe");
+    var newExe = Path.Combine(recoveryStage, "DeceiveInc", "Binaries", "Win64", "DeceiveIncServer-Win64-Shipping.exe");
+    var savedConfig = Path.Combine(recoveryRoot, "DeceiveInc", "Saved", "Config", "WindowsServer", "TripwireServer.ini");
+    Directory.CreateDirectory(Path.GetDirectoryName(oldExe)!);
+    Directory.CreateDirectory(Path.GetDirectoryName(savedConfig)!);
+    File.WriteAllBytes(oldExe, [1]);
+    File.WriteAllText(savedConfig, "user config");
+    Directory.CreateDirectory(Path.GetDirectoryName(newExe)!);
+    File.WriteAllBytes(newExe, [2]);
+    var recoveryManifest = Path.Combine(recoveryStage, "steamapps", "appmanifest_5007710.acf");
+    Directory.CreateDirectory(Path.GetDirectoryName(recoveryManifest)!);
+    File.WriteAllText(recoveryManifest, "\"buildid\" \"25777350\"");
+    SteamInstallationRecovery.Activate(recoveryRoot, recoveryStage, "public");
+    Check(File.ReadAllBytes(oldExe).SequenceEqual(new byte[] { 2 }) &&
+          File.ReadAllText(savedConfig) == "user config" &&
+          File.ReadAllText(Path.Combine(recoveryRoot, ".briefcase-steam-branch")) == "public" &&
+          !Directory.Exists(recoveryStage),
+        "a clean Steam download replaces stale game files while retaining local configuration");
+    var lootData = Path.Combine(temp, "BriefcaseLootControl", "Data");
+    Directory.CreateDirectory(lootData);
+    var lootConfig = Path.Combine(lootData, "config.json");
+    var lootJson = """
+        {"schemaVersion":1,"enabled":true,"diagnostics":true,
+         "objects":{"BondPile":{"occurrenceFactor":0.5}},
+         "presets":[],"mapCounts":[],"points":[]}
+        """;
+    File.WriteAllText(lootConfig, lootJson);
+    var lootEditor = new LootControlConfigEditor(lootConfig, lootJson);
+    var quietLoot = lootEditor.Render(
+        new Dictionary<(LootPlaceKey, string), string>(),
+        new Dictionary<(string, string), string>(),
+        new Dictionary<string, string>(), diagnostics: false);
+    using (var quietDocument = System.Text.Json.JsonDocument.Parse(quietLoot))
+        Check(quietDocument.RootElement.GetProperty("diagnostics").ValueKind ==
+              System.Text.Json.JsonValueKind.False &&
+              quietDocument.RootElement.GetProperty("objects").GetProperty("BondPile")
+                  .GetProperty("occurrenceFactor").GetDecimal() == 0.5m &&
+              GameImageCatalog.ForLootItem("BondPile") == "loot/bonds" &&
+              GameImageCatalog.ForLootItem("Keycard_Orange") ==
+                  GameImageCatalog.ForLootItem("Keycard_OrangeLAF"),
+            "LootControl options preserve existing rules and use bundled images");
     var playerField = vanillaSchema.Fields.Single(field => field.Key == "MaxPlayers");
     Check(new[] { (Mode: "Solo", Maximum: 8m), (Mode: "Duo", Maximum: 10m), (Mode: "Trio", Maximum: 12m) }
             .All(item => vanillaSchema.EffectiveMaximum(playerField,
@@ -1171,6 +1260,14 @@ try
                     "section":"Custom.Server.Settings"}]}
         """);
     var expandedSchema = FormSchema.LoadBase().ApplyOverride(playerCapOverride);
+    var updatedModSchema = updatedSchema.ApplyOverride(playerCapOverride);
+    var updatedModPlayerField = updatedModSchema.Fields.Single(field => field.Key == "MaxPlayers");
+    Check(new[] { "Solo", "Duo", "Trio" }.All(mode =>
+              updatedModSchema.EffectiveMaximum(updatedModPlayerField,
+                  new Dictionary<string, string> { ["GameMode"] = mode }) == 30) &&
+          updatedModSchema.Fields.Any(field => field.Key == "MinimumDeployedPlayersToStart") &&
+          updatedModSchema.Fields.Any(field => field.Key == "bTournamentMode"),
+        "PlayerCap extends the updated build to 30 players while retaining its new settings");
     var expandedPlayerField = expandedSchema.Fields.Single(field => field.Key == "MaxPlayers");
     Check(new[] { "Solo", "Duo", "Trio" }.All(mode => expandedSchema.EffectiveMaximum(expandedPlayerField,
               new Dictionary<string, string> { ["GameMode"] = mode }) == 30),
@@ -1311,88 +1408,123 @@ try
             output.Write(content);
         }
     }
-    BriefcasePackageInstaller.InstallOrUpdate(location, package, "0.0.1", new Progress<string>());
-    Check(File.Exists(Path.Combine(win64, "version.dll")) &&
-        File.Exists(Path.Combine(win64, "Briefcase", "Core", "Briefcase.NativeHost.dll")) &&
-        File.Exists(Path.Combine(win64, "ue4ss", "Mods", "BriefcaseServerBridge", "dlls", "main.dll")) &&
-        File.Exists(Path.Combine(win64, "ue4ss", "Mods", "BriefcaseServerBridge", "enabled.txt")),
-        "validated initial framework archive installs the live server bridge into Win64");
+    var packageId = Guid.NewGuid().ToString("N");
+    var packageRoot = ServerInstanceFiles.Provision(temp, packageId, location!);
+    var packageRow = new ServerRow(packageId, win64, true, packageRoot);
+    Check(ServerLocation.TryCreate(packageRow, out var packageLocation, out _) && packageLocation is not null,
+        "framework package resolves a managed server instance");
+    var sharedBeforeInstall = Directory.EnumerateFiles(win64, "*", SearchOption.AllDirectories)
+        .ToDictionary(path => Path.GetRelativePath(win64, path), File.ReadAllBytes);
+    BriefcasePackageInstaller.InstallOrUpdate(packageLocation!, package, "0.0.1", new Progress<string>());
+    Check(File.Exists(Path.Combine(packageRoot, "Briefcase", "Core", "Briefcase.NativeHost.dll")) &&
+          File.Exists(Path.Combine(packageRoot, "ue4ss", "Mods", "BriefcaseServerBridge", "dlls", "main.dll")) &&
+          !File.Exists(Path.Combine(packageRoot, "version.dll")) &&
+          sharedBeforeInstall.All(pair => File.ReadAllBytes(Path.Combine(win64, pair.Key)).SequenceEqual(pair.Value)) &&
+          Directory.EnumerateFiles(win64, "*", SearchOption.AllDirectories).Count() == sharedBeforeInstall.Count,
+        "framework installation stays inside its instance and leaves the shared Steam build intact");
+    var compatiblePackage = Path.Combine(temp, "framework-compatible.zip");
+    using (var zip = ZipFile.Open(compatiblePackage, ZipArchiveMode.Create))
+    {
+        var compatibleManifest = new
+        {
+            manifest.updateSchema, manifest.platform, manifest.environment, manifest.frameworkVersion,
+            gameSha256 = new string('0', 64), compatibleGameSha256 = new[] { gameHash }, manifest.files
+        };
+        var entry = zip.CreateEntry("Package.json");
+        using (var writer = new StreamWriter(entry.Open())) writer.Write(JsonSerializer.Serialize(compatibleManifest));
+        foreach (var (name, content) in packageFiles)
+        {
+            entry = zip.CreateEntry(name);
+            using var output = entry.Open();
+            output.Write(content);
+        }
+    }
+    BriefcasePackageInstaller.InstallOrUpdate(packageLocation!, compatiblePackage, "0.0.1", new Progress<string>());
+    Check(File.Exists(Path.Combine(packageRoot, "Briefcase", "Core", "Briefcase.NativeHost.dll")),
+        "a release may support the latest game build alongside its original build");
+    var legacySharedHost = Path.Combine(updatedWin64, "Briefcase", "Core", "Briefcase.NativeHost.dll");
+    var legacySharedBridge = Path.Combine(updatedWin64, "ue4ss", "Mods", "BriefcaseServerBridge", "dlls", "main.dll");
+    var legacySharedUe4ss = Path.Combine(updatedWin64, "ue4ss", "UE4SS.dll");
+    Directory.CreateDirectory(Path.GetDirectoryName(legacySharedHost)!);
+    Directory.CreateDirectory(Path.GetDirectoryName(legacySharedBridge)!);
+    File.WriteAllBytes(legacySharedHost, [6, 7]);
+    File.WriteAllBytes(legacySharedBridge, [8, 9]);
+    File.WriteAllBytes(legacySharedUe4ss, [4, 5]);
+    var importedLegacyRoot = ServerInstanceFiles.Provision(temp, Guid.NewGuid().ToString("N"), updatedLocation!);
+    Check(File.ReadAllBytes(Path.Combine(importedLegacyRoot, "Briefcase", "Core", "Briefcase.NativeHost.dll"))
+              .SequenceEqual(new byte[] { 6, 7 }) &&
+          File.ReadAllBytes(Path.Combine(importedLegacyRoot, "ue4ss", "UE4SS.dll"))
+              .SequenceEqual(new byte[] { 4, 5 }),
+        "importing an existing server copies its legacy runtime into the instance");
+    var newInstanceId = Guid.NewGuid().ToString("N");
+    var newInstanceRoot = ServerInstanceFiles.Provision(temp, newInstanceId, updatedLocation!, "Clean Server");
+    Check(ServerLocation.TryCreate(new ServerRow(newInstanceId, updatedWin64, true, newInstanceRoot),
+              out var newInstance, out _), "fresh instance resolves");
+    ServerInstanceFiles.MigrateLegacyRuntime(newInstance!);
+    Check(!File.Exists(Path.Combine(newInstanceRoot, "Briefcase", "Core", "Briefcase.NativeHost.dll")),
+        "new servers do not inherit Briefcase from the shared Steam installation");
+    var legacyInstanceId = Guid.NewGuid().ToString("N");
+    var legacyInstanceRoot = Path.Combine(temp, "servers", legacyInstanceId);
+    Directory.CreateDirectory(legacyInstanceRoot);
+    Check(ServerLocation.TryCreate(new ServerRow(legacyInstanceId, updatedWin64, true, legacyInstanceRoot),
+              out var legacyInstance, out _), "legacy managed instance resolves");
+    ServerInstanceFiles.MigrateLegacyRuntime(legacyInstance!);
+    Check(File.ReadAllBytes(Path.Combine(legacyInstance!.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll"))
+              .SequenceEqual(new byte[] { 6, 7 }) &&
+          File.ReadAllBytes(Path.Combine(legacyInstance.ModsRoot, "BriefcaseServerBridge", "dlls", "main.dll"))
+              .SequenceEqual(new byte[] { 8, 9 }),
+        "existing users retain a working per-instance copy of the old shared runtime");
+    location = packageLocation;
+    modsRoot = location!.ModsRoot;
     var installedWithBridge = ModCatalog.Read(location);
     using var bridgeIcon = typeof(ModLogo).Assembly.GetManifestResourceStream("Briefcase.ServerApp.BridgeLogo.png");
     Check(installedWithBridge[0].IsCore && bridgeIcon is { Length: > 24 } &&
           installedWithBridge[0].InstallSourceSummary == "Briefcase" &&
           !installedWithBridge[0].CanToggle,
         "BriefcaseServerBridge appears first with its bundled icon and internal origin");
-    var runtimeRow = new ServerRow(Path.GetFileName(freshRoot), win64, true, freshRoot);
-    Check(ServerLocation.TryCreate(runtimeRow, out var runtimeInstance, out _),
-        "the test instance resolves after the shared runtime is installed");
-    ServerInstanceFiles.RefreshRuntime(runtimeInstance!);
-    var sharedBridgeDll = Path.Combine(win64, "ue4ss", "Mods", "BriefcaseServerBridge", "dlls", "main.dll");
-    var instanceBridgeDll = Path.Combine(runtimeInstance!.ModsRoot, "BriefcaseServerBridge", "dlls", "main.dll");
-    var originalBridge = File.ReadAllBytes(sharedBridgeDll);
+    ServerInstanceFiles.RefreshRuntime(location);
+    var instanceBridgeDll = Path.Combine(modsRoot, "BriefcaseServerBridge", "dlls", "main.dll");
+    var originalBridge = File.ReadAllBytes(instanceBridgeDll);
     using (var loadedBridge = File.Open(instanceBridgeDll, FileMode.Open, FileAccess.Read, FileShare.Read))
     {
-        ServerInstanceFiles.RefreshRuntime(runtimeInstance);
+        ServerInstanceFiles.RefreshRuntime(location);
         Check(File.ReadAllBytes(instanceBridgeDll).SequenceEqual(originalBridge),
-            "restarting with an unchanged loaded bridge DLL does not try to overwrite it");
+            "restarting does not overwrite an unchanged instance bridge while it is loaded");
     }
-    try
-    {
-        File.WriteAllBytes(sharedBridgeDll, [8, 9, 10]);
-        using var loadedBridge = File.Open(instanceBridgeDll, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var replacement = Task.Run(() => ServerInstanceFiles.RefreshRuntime(runtimeInstance));
-        await Task.Delay(300);
-        Check(!replacement.IsCompleted && File.ReadAllBytes(instanceBridgeDll).SequenceEqual(originalBridge),
-            "a changed runtime waits for the old DLL without damaging it");
-        loadedBridge.Dispose();
-        await replacement;
-        Check(File.ReadAllBytes(instanceBridgeDll).SequenceEqual(new byte[] { 8, 9, 10 }),
-            "a changed runtime DLL is installed once its lock is released");
-        using var exclusiveBridge = File.Open(instanceBridgeDll, FileMode.Open, FileAccess.Read, FileShare.None);
-        var unchanged = Task.Run(() => ServerInstanceFiles.RefreshRuntime(runtimeInstance));
-        await Task.Delay(300);
-        Check(!unchanged.IsCompleted, "an exclusively locked DLL waits instead of failing the restart");
-        exclusiveBridge.Dispose();
-        await unchanged;
-    }
-    finally { File.WriteAllBytes(sharedBridgeDll, originalBridge); }
 
-    var legacyInjector = Path.Combine(win64, "Briefcase", "Core", "Tools", "Briefcase.ServerInjector.exe");
-    var legacyBootstrap = Path.Combine(win64, "Briefcase", "Core", "Briefcase.ServerBootstrap.dll");
+    var legacyInjector = Path.Combine(location.BriefcaseRoot, "Core", "Tools", "Briefcase.ServerInjector.exe");
+    var legacyBootstrap = Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.ServerBootstrap.dll");
     Directory.CreateDirectory(Path.GetDirectoryName(legacyInjector)!);
     File.WriteAllBytes(legacyInjector, [10]);
     File.WriteAllBytes(legacyBootstrap, [11]);
-    Check(ServerPreparation.Prepare(location) &&
-          !File.Exists(Path.Combine(win64, "version.dll")) &&
-          File.Exists(Path.Combine(win64, "version.dll.disabled")) &&
+    ServerPreparation.Prepare(location);
+    Check(!File.Exists(Path.Combine(win64, "version.dll")) &&
           !File.Exists(legacyInjector) && !File.Exists(legacyBootstrap),
-        "ServerApp disables the proxy and removes legacy server-side injection files");
-    using (var nativeUpdates = JsonDocument.Parse(File.ReadAllText(Path.Combine(win64, "Briefcase", "updater.json"))))
+        "ServerApp removes old instance tools without installing a proxy in SteamCMD");
+    using (var nativeUpdates = JsonDocument.Parse(File.ReadAllText(Path.Combine(location.BriefcaseRoot, "updater.json"))))
         Check(!nativeUpdates.RootElement.GetProperty("enabled").GetBoolean() &&
               !nativeUpdates.RootElement.GetProperty("updateMods").GetBoolean(),
-            "ServerApp disables the legacy native updater before launch");
+            "ServerApp disables the instance's native updater before launch");
     Check(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(win64)!)!,
             "Saved", "Config", "WindowsServer", "Engine.ini")).Contains("sb.DisableEAC=1"),
         "ServerApp prepares the anti-cheat setting before injection");
-    File.WriteAllText(Path.Combine(win64, "ue4ss", "Mods", "mods.txt"), "CustomMod : 1\n");
+    File.WriteAllText(Path.Combine(modsRoot, "mods.txt"), "CustomMod : 1\n");
     BriefcasePackageInstaller.InstallOrUpdate(location, package, "0.0.1", new Progress<string>());
-    Check(File.ReadAllText(Path.Combine(win64, "ue4ss", "Mods", "mods.txt")) == "CustomMod : 1\n" &&
-          File.ReadAllBytes(Path.Combine(win64, "version.dll")).SequenceEqual(new byte[] { 1, 2, 3 }),
-        "framework upgrade preserves mod selection and replaces packaged binaries");
-    var interrupted = Path.Combine(win64, "Briefcase", "Updates", "ServerApp-test");
-    Directory.CreateDirectory(Path.Combine(interrupted, "previous"));
-    File.WriteAllBytes(Path.Combine(interrupted, "previous", "version.dll"), [1, 2, 3]);
-    File.WriteAllBytes(Path.Combine(win64, "version.dll"), [9]);
+    Check(File.ReadAllText(Path.Combine(modsRoot, "mods.txt")) == "CustomMod : 1\n" &&
+          !File.Exists(Path.Combine(packageRoot, "version.dll")),
+        "framework upgrade preserves instance mod selection and never installs the proxy");
+    var interrupted = Path.Combine(location.BriefcaseRoot, "Updates", "ServerApp-test");
+    var hostFile = Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll");
+    Directory.CreateDirectory(Path.Combine(interrupted, "previous", "Briefcase", "Core"));
+    File.WriteAllBytes(Path.Combine(interrupted, "previous", "Briefcase", "Core", "Briefcase.NativeHost.dll"), [6, 7]);
+    File.WriteAllBytes(hostFile, [9]);
     File.WriteAllText(Path.Combine(interrupted, "transaction.json"),
-        "[{\"path\":\"version.dll\",\"existed\":true}]");
+        "[{\"path\":\"Briefcase/Core/Briefcase.NativeHost.dll\",\"existed\":true}]");
     BriefcasePackageInstaller.RecoverPending(location);
-    Check(!Directory.Exists(interrupted) && File.ReadAllBytes(Path.Combine(win64, "version.dll"))
-          .SequenceEqual(new byte[] { 1, 2, 3 }),
-        "interrupted framework installation restores its previous binary before startup");
-    Check(ServerPreparation.Prepare(location) &&
-          !File.Exists(Path.Combine(win64, "version.dll")) &&
-          File.ReadAllBytes(Path.Combine(win64, "version.dll.disabled")).SequenceEqual(new byte[] { 1, 2, 3 }),
-        "ServerApp disables the newly installed proxy after an update");
+    Check(!Directory.Exists(interrupted) && File.ReadAllBytes(hostFile)
+          .SequenceEqual(new byte[] { 6, 7 }) &&
+          sharedBeforeInstall.All(pair => File.ReadAllBytes(Path.Combine(win64, pair.Key)).SequenceEqual(pair.Value)),
+        "interrupted instance update restores its previous DLL without changing the Steam build");
 
     var modZip = Path.Combine(temp, "mod.zip");
     using (var zip = ZipFile.Open(modZip, ZipArchiveMode.Create))
@@ -1539,7 +1671,8 @@ try
         "updates remain disabled until configured and compare semantic versions");
 
     await ServerRemoval.DeleteFilesAsync(location);
-    Check(!Directory.Exists(temp), "deletion removes only the confirmed test server installation");
+    Check(!Directory.Exists(location.InstanceRoot) && Directory.Exists(temp),
+        "deletion removes only the confirmed test server installation");
 }
 finally
 {

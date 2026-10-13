@@ -319,7 +319,7 @@
                                    TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding AccountLevelText}" FontSize="11" Foreground="#B9E5CF" />
                         <TextBlock Text="{Binding Identity}" FontSize="10" Foreground="#A69DAF"
-                                   IsVisible="{Binding HasNetworkId}" TextTrimming="CharacterEllipsis"
+                                   IsVisible="{Binding HasIdentity}" TextTrimming="CharacterEllipsis"
                                    ToolTip.Tip="{Binding Identity}" />
                         <StackPanel IsVisible="{Binding HasHealth}" Orientation="Horizontal" Spacing="8"
                                     Margin="0,3,0,0" HorizontalAlignment="Left"
@@ -411,17 +411,30 @@
                                      VerticalAlignment="Center" />
                         </StackPanel>
                       </StackPanel>
-                      <StackPanel Grid.Column="3" Spacing="4" VerticalAlignment="Center">
-                        <app:IconButton Classes="icon-button" Click="CopyPlayerIdClicked"
+                      <Grid Grid.Column="3" ColumnDefinitions="Auto,Auto" RowDefinitions="Auto,Auto"
+                            ColumnSpacing="4" RowSpacing="4" VerticalAlignment="Center">
+                        <Grid Grid.Column="0" IsVisible="{Binding CanSetSpectator}">
+                          <app:IconButton Classes="spectator-off" Click="SpectatorSelectionClicked"
+                                          IsVisible="{Binding !Spectator}" IconSize="18"
+                                          IconData="M 2,10 C 5,5 15,5 18,10 C 15,15 5,15 2,10 Z M 10,7 A 3,3 0 1 0 10,13 A 3,3 0 1 0 10,7 M 2,17 L 18,3"
+                                          IconStroke="#A7A4B2" IconStrokeThickness="1.5"
+                                          ToolTip.Tip="{app:Tr Key=player.enable_spectator}" />
+                          <app:IconButton Classes="spectator-on" Click="SpectatorSelectionClicked"
+                                          IsVisible="{Binding Spectator}" IconSize="18"
+                                          IconData="M 2,10 C 5,5 15,5 18,10 C 15,15 5,15 2,10 Z M 10,7 A 3,3 0 1 0 10,13 A 3,3 0 1 0 10,7"
+                                          IconStroke="#E1F6FF" IconStrokeThickness="1.5"
+                                          ToolTip.Tip="{app:Tr Key=player.disable_spectator}" />
+                        </Grid>
+                        <app:IconButton Grid.Column="1" Classes="icon-button" Click="CopyPlayerIdClicked"
                                         HorizontalAlignment="Center" IconSize="17"
-                                        IsVisible="{Binding HasNetworkId}" ToolTip.Tip="{app:Tr Key=ui.copy_id}"
+                                        IsVisible="{Binding HasIdentity}" ToolTip.Tip="{app:Tr Key=ui.copy_id}"
                                         IconData="M 6,4 L 16,4 L 16,17 L 6,17 Z M 3,13 L 3,2 L 13,2"
                                         IconStroke="#C9B8E0" IconStrokeThickness="1.5" />
-                        <app:IconButton Classes="danger" Click="KickClicked" HorizontalAlignment="Center"
-                                        IconSize="17" ToolTip.Tip="{app:Tr Key=ui.kick}"
+                        <app:IconButton Grid.Row="1" Grid.ColumnSpan="2" Classes="danger kick-action" Click="KickClicked"
+                                        HorizontalAlignment="Center" IconSize="17" ToolTip.Tip="{app:Tr Key=ui.kick}"
                                         IconData="M 2.5,9 L 12.5,9 M 8.5,5 L 12.5,9 L 8.5,13 M 14.5,3 L 17.5,3 L 17.5,16 L 14.5,16"
                                         IconStroke="#FFE9EE" IconStrokeThickness="1.5" />
-                      </StackPanel>
+                      </Grid>
                     </Grid>
                   </Border>
                 </DataTemplate>

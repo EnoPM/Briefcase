@@ -5,7 +5,7 @@ public sealed class ServerLocation
     public string Win64 { get; }
     public string Shipping { get; }
     public string InstallRoot { get; }
-    public string BriefcaseRoot => Path.Combine(Win64, "Briefcase");
+    public string BriefcaseRoot => Path.Combine(IsInstance ? InstanceRoot : Win64, "Briefcase");
     public string InstanceId { get; private set; } = "";
     public string InstanceRoot { get; private set; } = "";
     public bool IsInstance => InstanceId.Length > 0;

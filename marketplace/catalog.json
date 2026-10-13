@@ -4,7 +4,7 @@
     {
       "id": "briefcaseplayercap",
       "name": "Player Cap",
-      "description": "Raise Solo, Duo and Trio player ceilings to 32 while keeping the configured MaxPlayers value.",
+      "description": "Raise Solo, Duo and Trio player ceilings to 30 while keeping the configured MaxPlayers value.",
       "version": "0.3.8",
       "author": "EnoPM",
       "downloadUrl": "https://github.com/EnoPM/Briefcase.PlayerCap/releases/download/v0.3.8/Briefcase.PlayerCap-windows-x64-0.3.8.zip",
