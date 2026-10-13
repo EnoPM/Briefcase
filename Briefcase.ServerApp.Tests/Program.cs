@@ -95,9 +95,13 @@ if (args is ["--live-pipe-pid", var pidText] && int.TryParse(pidText, out var li
     return;
 }
 
-if (args is ["--verify-shared-install", var serverExecutable, var privateNativeDirectory,
-        var frameworkArchive, var frameworkVersion])
+if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
 {
+    var serverExecutable = args[1];
+    var privateNativeDirectory = args[2];
+    var frameworkArchive = args[3];
+    var frameworkVersion = args[4];
+    var playerCapArchive = args.Length == 6 ? args[5] : null;
     var testBase = Environment.GetEnvironmentVariable("BRIEFCASE_TEST_DATA_ROOT") ?? Path.GetTempPath();
     var testRoot = Path.Combine(testBase, "Briefcase Shared Instance Probe", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(testRoot);
@@ -117,13 +121,25 @@ if (args is ["--verify-shared-install", var serverExecutable, var privateNativeD
         foreach (var instance in new[] { firstLocation!, secondLocation! })
             BriefcasePackageInstaller.InstallOrUpdate(instance, frameworkArchive, frameworkVersion,
                 new Progress<string>());
+        if (playerCapArchive is not null)
+        {
+            var catalog = ModMarketplace.ParseCatalog(
+                File.ReadAllBytes(Path.GetFullPath("marketplace/catalog.json")),
+                ServerRegistry.OfficialCatalogUrl);
+            var playerCap = catalog.Single(mod => mod.Id == "briefcaseplayercap");
+            Check(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(playerCapArchive)))
+                .Equals(playerCap.Sha256, StringComparison.OrdinalIgnoreCase),
+                "the PlayerCap archive matches the catalog checksum");
+            ModMarketplace.Install(firstLocation!, playerCap, playerCapArchive);
+        }
         foreach (var (instance, name, gamePort, queryPort) in new[]
                  {
                      (firstLocation!, "Briefcase Probe A", 48670, 48671),
                      (secondLocation!, "Briefcase Probe B", 48672, 48673)
                  })
             File.WriteAllText(instance.ConfigFile,
-                $"[{ServerIniEditor.Section}]\nServerName={name}\nGameMode=Solo\nMaxPlayers=2\n" +
+                $"[{ServerIniEditor.Section}]\nServerName={name}\nGameMode=Solo\n" +
+                $"MaxPlayers={(playerCapArchive is not null && instance == firstLocation ? 30 : 2)}\n" +
                 $"GamePort={gamePort}\nQueryPort={queryPort}\nbIsPublic=False\nbSandboxMode=True\n" +
                 "bEnableUPnP=False\nAutoShutdownEmptyMinutes=1\n");
         firstProcess = ServerProcess.Start(firstLocation!);
@@ -136,12 +152,38 @@ if (args is ["--verify-shared-install", var serverExecutable, var privateNativeD
             expectedInstanceId: firstLocation!.InstanceId);
         using var liveB = new ServerLiveClient(secondProcess.Id, new WindowsNamedPipeTransport(),
             expectedInstanceId: secondLocation!.InstanceId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        while (!timeout.IsCancellationRequested && (liveA.Latest is null || liveB.Latest is null))
-            await Task.Delay(250);
-        Check(liveA.Latest is not null && liveB.Latest is not null,
-            "both instance bridges report verified live data");
-        Console.WriteLine("Shared-install instance launch and reconnect passed.");
+        if (playerCapArchive is not null)
+        {
+            var log = Path.Combine(firstLocation!.Ue4ssRoot, "UE4SS.log");
+            const string expected = "[Briefcase.PlayerCap] headless server: configured MaxPlayers up to 30; native ceilings raised";
+            bool PlayerCapLogged()
+            {
+                try
+                {
+                    using var stream = new FileStream(log, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream);
+                    return reader.ReadToEnd().Contains(expected, StringComparison.Ordinal);
+                }
+                catch (IOException) { return false; }
+            }
+            using var modTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            while (!modTimeout.IsCancellationRequested && !PlayerCapLogged())
+                await Task.Delay(250);
+            Check(!firstProcess.HasExited && PlayerCapLogged(),
+                "PlayerCap raises the new build's ceilings during an isolated server launch");
+        }
+        else
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            while (!timeout.IsCancellationRequested && (liveA.Latest is null || liveB.Latest is null))
+                await Task.Delay(250);
+            Check(liveA.Latest is not null && liveB.Latest is not null,
+                "both instance bridges report verified live data");
+        }
+        Console.WriteLine(playerCapArchive is null
+            ? "Shared-install instance launch and reconnect passed."
+            : "PlayerCap shared-install launch passed.");
     }
     finally
     {
