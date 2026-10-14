@@ -73,9 +73,11 @@ jobs:
           [[ -n $UPSTREAM_READ_TOKEN ]] || { echo 'UPSTREAM_READ_TOKEN is required.' >&2; exit 1; }
           encoded=$(printf 'x-access-token:%s' "$UPSTREAM_READ_TOKEN" | base64 -w0)
           echo "::add-mask::$encoded"
-          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_COUNT=2
           export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $encoded"
+          export GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf
+          export GIT_CONFIG_VALUE_1=git@github.com:
           cd BriefcaseNative
           bash scripts/linux/prepare-backend.sh artifacts/linux/ue4ss-reference artifacts/linux/ue4ss-build
           bash scripts/linux/build-server-host.sh artifacts/linux/ue4ss-reference \
