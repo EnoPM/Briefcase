@@ -10,6 +10,7 @@
     <IsAotCompatible>true</IsAotCompatible>
     <InvariantGlobalization>false</InvariantGlobalization>
     <BriefcaseNativeBuildDirectory Condition="'$(BriefcaseNativeBuildDirectory)' == ''">$(MSBuildProjectDirectory)\..\..\BriefcaseNative\build</BriefcaseNativeBuildDirectory>
+    <BriefcaseLinuxNativeDirectory Condition="'$(BriefcaseLinuxNativeDirectory)' == ''">$(MSBuildProjectDirectory)/../linux-native</BriefcaseLinuxNativeDirectory>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
@@ -18,6 +19,8 @@
   <ItemGroup>
     <Content Include="$(BriefcaseNativeBuildDirectory)\Briefcase.ServerInjector.exe" Link="Native\Briefcase.ServerInjector.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(BriefcaseNativeBuildDirectory)\Briefcase.ServerInjector.exe')" />
     <Content Include="$(BriefcaseNativeBuildDirectory)\Briefcase.ServerBootstrap.dll" Link="Native\Briefcase.ServerBootstrap.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(BriefcaseNativeBuildDirectory)\Briefcase.ServerBootstrap.dll')" />
+    <Content Include="$(BriefcaseLinuxNativeDirectory)/Briefcase.ServerLauncher" Link="Native/Briefcase.ServerLauncher" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(RuntimeIdentifier)' == 'linux-x64' and Exists('$(BriefcaseLinuxNativeDirectory)/Briefcase.ServerLauncher')" />
+    <Content Include="$(BriefcaseLinuxNativeDirectory)/BriefcaseNative-Server-linux-x64-*.zip" Link="Native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(RuntimeIdentifier)' == 'linux-x64' and Exists('$(BriefcaseLinuxNativeDirectory)')" />
     <AvaloniaResource Include="Assets/Game/UI/**/*.png" />
     <AvaloniaResource Include="Assets/BriefcaseIcon.png" />
     <EmbeddedResource Include="Assets/BriefcaseServerBridgeIcon.png" LogicalName="Briefcase.ServerApp.BridgeLogo.png" />

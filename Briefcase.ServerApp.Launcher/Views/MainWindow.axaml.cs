@@ -110,7 +110,8 @@ public sealed partial class MainWindow : Window
         {
             if (installed is null) { ShowError(ex); return; }
             candidate = installed;
-            stagedLauncherVersion = null;
+            // An earlier, verified launcher replacement is still pending even
+            // when the network check for a newer application fails.
             StageText.Text = AppTranslations.Get("launcher.update_failed");
         }
 

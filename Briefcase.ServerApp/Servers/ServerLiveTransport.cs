@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
@@ -27,6 +28,25 @@ public sealed class WindowsNamedPipeTransport : IServerTransport
         catch
         {
             pipe.Dispose();
+            throw;
+        }
+    }
+}
+
+public sealed class UnixServerSocketTransport(string briefcaseRoot) : IServerTransport
+{
+    public async Task<Stream> ConnectAsync(int processId, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(briefcaseRoot, "Run", $"server-{processId}.sock");
+        var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellationToken);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
             throw;
         }
     }
@@ -211,7 +231,7 @@ public sealed class ServerLiveClient : IDisposable
                     StateChanged?.Invoke();
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+            catch (Exception ex) when (ex is IOException or SocketException or UnauthorizedAccessException or
                 OperationCanceledException or InvalidOperationException or TimeoutException or ObjectDisposedException or
                 HttpRequestException or System.Net.WebSockets.WebSocketException)
             {

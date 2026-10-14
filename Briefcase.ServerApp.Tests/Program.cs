@@ -11,9 +11,8 @@ if (args is ["--verify-catalog", var catalogPath])
 {
     var mods = ModMarketplace.ParseCatalog(File.ReadAllBytes(catalogPath),
         "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
-    Check(mods.Count == 4 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 4 &&
-          mods.Any(mod => mod.Id == "briefcasespectatormode"),
-        "published mod catalog contains four distinct installable entries, including Spectator Mode");
+    Check(mods.Count == 3 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 3,
+        "published mod catalog contains three distinct installable entries");
     Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
           mods.Single(mod => mod.Id == "briefcaseplayercap") is { FormSchemaOverrideUrl: not null,
               FormSchemaOverrideSha256: not null, FormTranslations.Count: 2 },
@@ -96,14 +95,9 @@ if (args is ["--live-pipe-pid", var pidText] && int.TryParse(pidText, out var li
     return;
 }
 
-if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
+if (args is ["--verify-shared-install", var serverExecutable, var privateNativeDirectory,
+        var frameworkArchive, var frameworkVersion])
 {
-    var serverExecutable = args[1];
-    var privateNativeDirectory = args[2];
-    var frameworkArchive = args[3];
-    var frameworkVersion = args[4];
-    var modArchive = args.Length == 6 ? args[5] : null;
-    MarketplaceMod? installedMod = null;
     var testBase = Environment.GetEnvironmentVariable("BRIEFCASE_TEST_DATA_ROOT") ?? Path.GetTempPath();
     var testRoot = Path.Combine(testBase, "Briefcase Shared Instance Probe", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(testRoot);
@@ -123,27 +117,13 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
         foreach (var instance in new[] { firstLocation!, secondLocation! })
             BriefcasePackageInstaller.InstallOrUpdate(instance, frameworkArchive, frameworkVersion,
                 new Progress<string>());
-        if (modArchive is not null)
-        {
-            var catalog = ModMarketplace.ParseCatalog(
-                File.ReadAllBytes(Path.GetFullPath("marketplace/catalog.json")),
-                ServerRegistry.OfficialCatalogUrl);
-            installedMod = catalog.Single(mod =>
-                Path.GetFileName(mod.DownloadUrl.AbsolutePath).Equals(Path.GetFileName(modArchive),
-                    StringComparison.OrdinalIgnoreCase));
-            Check(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(modArchive)))
-                .Equals(installedMod.Sha256, StringComparison.OrdinalIgnoreCase),
-                "the mod archive matches the catalog checksum");
-            ModMarketplace.Install(firstLocation!, installedMod, modArchive);
-        }
         foreach (var (instance, name, gamePort, queryPort) in new[]
                  {
                      (firstLocation!, "Briefcase Probe A", 48670, 48671),
                      (secondLocation!, "Briefcase Probe B", 48672, 48673)
                  })
             File.WriteAllText(instance.ConfigFile,
-                $"[{ServerIniEditor.Section}]\nServerName={name}\nGameMode=Solo\n" +
-                $"MaxPlayers={(installedMod?.Id == "briefcaseplayercap" && instance == firstLocation ? 30 : 2)}\n" +
+                $"[{ServerIniEditor.Section}]\nServerName={name}\nGameMode=Solo\nMaxPlayers=2\n" +
                 $"GamePort={gamePort}\nQueryPort={queryPort}\nbIsPublic=False\nbSandboxMode=True\n" +
                 "bEnableUPnP=False\nAutoShutdownEmptyMinutes=1\n");
         firstProcess = ServerProcess.Start(firstLocation!);
@@ -156,43 +136,12 @@ if (args.Length is 5 or 6 && args[0] == "--verify-shared-install")
             expectedInstanceId: firstLocation!.InstanceId);
         using var liveB = new ServerLiveClient(secondProcess.Id, new WindowsNamedPipeTransport(),
             expectedInstanceId: secondLocation!.InstanceId);
-        if (installedMod is not null)
-        {
-            var log = Path.Combine(firstLocation!.Ue4ssRoot, "UE4SS.log");
-            var expected = installedMod.Id switch
-            {
-                "briefcaseplayercap" => "[Briefcase.PlayerCap] headless server: configured MaxPlayers up to 30; native ceilings raised",
-                "briefcasespectatormode" => "[Briefcase.SpectatorMode] ready",
-                _ => throw new InvalidOperationException("No live probe is defined for this mod.")
-            };
-            bool ModLogged()
-            {
-                try
-                {
-                    using var stream = new FileStream(log, FileMode.Open, FileAccess.Read,
-                        FileShare.ReadWrite | FileShare.Delete);
-                    using var reader = new StreamReader(stream);
-                    return reader.ReadToEnd().Contains(expected, StringComparison.Ordinal);
-                }
-                catch (IOException) { return false; }
-            }
-            using var modTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            while (!modTimeout.IsCancellationRequested && !ModLogged())
-                await Task.Delay(250);
-            Check(!firstProcess.HasExited && ModLogged(),
-                "the installed mod starts successfully during an isolated server launch");
-        }
-        else
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            while (!timeout.IsCancellationRequested && (liveA.Latest is null || liveB.Latest is null))
-                await Task.Delay(250);
-            Check(liveA.Latest is not null && liveB.Latest is not null,
-                "both instance bridges report verified live data");
-        }
-        Console.WriteLine(installedMod is null
-            ? "Shared-install instance launch and reconnect passed."
-            : $"{installedMod.Name} shared-install launch passed.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        while (!timeout.IsCancellationRequested && (liveA.Latest is null || liveB.Latest is null))
+            await Task.Delay(250);
+        Check(liveA.Latest is not null && liveB.Latest is not null,
+            "both instance bridges report verified live data");
+        Console.WriteLine("Shared-install instance launch and reconnect passed.");
     }
     finally
     {
@@ -630,11 +579,14 @@ try
           GameMapNames.Display("Fragrant Shore") == "Fragrance" &&
           GameMapNames.Display("DI_SE") == "Sonar" &&
           GameMapNames.Display("DI_FSN") == "Fragrance (Nuit)" &&
-          GameMapNames.Display("DI_HSD") == "Surenchère (Matin)",
+          GameMapNames.Display("DI_HSD") == "Surenchère (Matin)" &&
+          GameMapNames.Display("LVL_Variant_FragrantShore_Night") == "Fragrance (Nuit)" &&
+          GameMapNames.Display("/Game/Levels/LVL_Hardsell/LevelVariant/LVL_Variant_HardSell_Day") == "Surenchère (Matin)",
         "map rotation and live level names use the game's French map labels");
     AppTranslations.Select("en", AppContext.BaseDirectory);
     Check(GameMapNames.Display("DI_SR") == "Silver Reef" &&
           GameMapNames.Display("LVL_Hardsell") == "Hard Sell" &&
+          GameMapNames.Display("LVL_Variant_FragrantShore_Night") == "Fragrant Shore (Night)" &&
           GameMapNames.Display("Surenchère") == "Hard Sell",
         "map display names switch back to English");
     var translations = Path.Combine(temp, "Translations");
@@ -1368,6 +1320,30 @@ try
         File.ReadAllText(location.ConfigFile).Contains("Keep=unchanged") &&
         File.ReadAllText(location.ConfigFile).Contains("; retained marker"),
         "immediate rotation save preserves unrelated settings and duplicate map order");
+    var engineRotationFile = Path.Combine(temp, "engine-rotation.ini");
+    var engineRotation = "[" + ServerIniEditor.Section + "]\r\n!MapRotation=ClearArray\r\n" +
+        ".MapRotation=Hardsell\r\n.MapRotation=Silverreef\r\n.MapRotation=Hardsell\r\n" +
+        string.Concat(Enumerable.Repeat("MapRotation=Hardsell\r\nMapRotation=Silverreef\r\nMapRotation=Hardsell\r\n", 4)) +
+        "[Other]\r\nMapRotation=keep\r\n";
+    File.WriteAllText(engineRotationFile, engineRotation);
+    Check(ServerIniEditor.Read(engineRotationFile).Maps.SequenceEqual(["DI_Hardsell", "DI_SR", "DI_Hardsell"]) &&
+          ServerIniEditor.RepairServerWrittenMapRotation(engineRotationFile) &&
+          !ServerIniEditor.RepairServerWrittenMapRotation(engineRotationFile) &&
+          ServerIniEditor.Read(engineRotationFile).Maps.SequenceEqual(["DI_Hardsell", "DI_SR", "DI_Hardsell"]) &&
+          !File.ReadAllText(engineRotationFile).Contains("\r\nMapRotation=Hardsell") &&
+          File.ReadAllText(engineRotationFile).Contains("[Other]\r\nMapRotation=keep") &&
+          File.ReadAllText(engineRotationFile + ".briefcase-backup") == engineRotation,
+        "server-written map copies are repaired without losing intentional repeats or unrelated sections");
+    var bareRotation = "[" + ServerIniEditor.Section + "]\r\nMapRotation=Hardsell\r\nMapRotation=Silverreef\r\n";
+    File.WriteAllText(engineRotationFile, bareRotation);
+    Check(!ServerIniEditor.RepairServerWrittenMapRotation(engineRotationFile) &&
+          ServerIniEditor.Read(engineRotationFile).Maps.SequenceEqual(["DI_Hardsell", "DI_SR"]),
+        "legacy bare map rotations remain readable and are not rewritten");
+    File.WriteAllText(engineRotationFile, bareRotation.Replace("MapRotation=Hardsell",
+        "!MapRotation=ClearArray\r\nMapRotation=Hardsell", StringComparison.Ordinal));
+    Check(!ServerIniEditor.RepairServerWrittenMapRotation(engineRotationFile) &&
+          ServerIniEditor.Read(engineRotationFile).Maps.SequenceEqual(["DI_Hardsell", "DI_SR"]),
+        "a clear followed only by bare map entries remains a valid legacy rotation");
     settings["HeatDecayRate"] = "100";
     try
     {

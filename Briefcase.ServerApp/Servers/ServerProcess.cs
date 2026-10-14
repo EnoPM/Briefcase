@@ -25,6 +25,7 @@ public sealed class ServerProcess
 
     public static Process? Find(ServerLocation location)
     {
+        if (OperatingSystem.IsLinux()) return LinuxServerProcess.Find(location);
         foreach (var process in Process.GetProcessesByName("DeceiveIncServer-Win64-Shipping"))
         {
             try
@@ -54,11 +55,13 @@ public sealed class ServerProcess
 
     public static Process Start(ServerLocation location)
     {
+        if (OperatingSystem.IsLinux()) return LinuxServerProcess.Start(location);
         if (!location.IsInstance)
             throw new InvalidOperationException("Migrate this server to a managed instance before starting it from Briefcase.");
         using var existing = Find(location);
         if (existing is not null)
             throw new InvalidOperationException("This server is already running.");
+        ServerIniEditor.RepairServerWrittenMapRotation(location.ConfigFile);
         var injector = Path.Combine(AppContext.BaseDirectory, "Native", "Briefcase.ServerInjector.exe");
         var bootstrap = Path.Combine(AppContext.BaseDirectory, "Native", "Briefcase.ServerBootstrap.dll");
         if (!File.Exists(injector) || !File.Exists(bootstrap))
@@ -123,12 +126,18 @@ public sealed class ServerProcess
 
     public static Process? FindAnyInstallation(ServerLocation location)
     {
+        if (OperatingSystem.IsLinux()) return LinuxServerProcess.FindAnyInstallation(location);
         if (!ServerLocation.TryCreate(location.Win64, out var shared, out _)) return null;
         return Find(shared!);
     }
 
     public static async Task StopAsync(ServerLocation location, CancellationToken cancellationToken)
     {
+        if (OperatingSystem.IsLinux())
+        {
+            await LinuxServerProcess.StopAsync(location, cancellationToken);
+            return;
+        }
         using var process = Find(location);
         if (process is null)
             return;
@@ -160,6 +169,8 @@ public sealed class ServerProcess
                 }
             }
             await process.WaitForExitAsync(cancellationToken);
+            if (location.IsInstance)
+                ServerIniEditor.RepairServerWrittenMapRotation(location.ConfigFile);
         }
         finally
         {

@@ -1,0 +1,171 @@
+name: Add Linux files to Briefcase release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: briefcase-serverapp-release
+  cancel-in-progress: false
+
+jobs:
+  build-linux:
+    if: github.repository == 'EnoPM/Briefcase' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      RUSTUP_TOOLCHAIN: 1.97.1
+      BRIEFCASE_BUILD_JOBS: 4
+      AVALONIA_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: serverapp
+          persist-credentials: false
+
+      - name: Check version and the existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(tr -d '\r\n' < serverapp/VERSION)
+          native_ref=$(tr -d '\r\n' < serverapp/NativeSource.ref)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $native_ref =~ ^[a-f0-9]{40}$ ]]
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$version")
+          [[ $(jq -r '.draft' <<< "$release") == false ]]
+          [[ $(jq -r '.tag_name' <<< "$release") == "v$version" ]]
+          for name in "Briefcase-Setup-$version-win-x64.exe" "Briefcase.ServerApp-win-x64-$version.zip"; do
+            jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<< "$release" >/dev/null
+          done
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "NATIVE_REF=$native_ref" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: EnoPM/BriefcaseNative
+          ref: ${{ env.NATIVE_REF }}
+          path: BriefcaseNative
+          persist-credentials: false
+
+      - name: Verify reviewed native source inventory
+        run: python3 BriefcaseNative/scripts/release/Assert-Source.py
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Linux build and smoke-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential clang-19 lld-19 cmake ninja-build git python3 \
+            libssl-dev pkg-config libcurl4-openssl-dev libarchive-dev \
+            zlib1g-dev xvfb libfontconfig1 libcurl4t64 libarchive13t64
+          rustup toolchain install 1.97.1 --profile minimal --no-self-update
+
+      - name: Build and test the pinned Linux server runtime
+        env:
+          UPSTREAM_READ_TOKEN: ${{ secrets.UPSTREAM_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n $UPSTREAM_READ_TOKEN ]] || { echo 'UPSTREAM_READ_TOKEN is required.' >&2; exit 1; }
+          encoded=$(printf 'x-access-token:%s' "$UPSTREAM_READ_TOKEN" | base64 -w0)
+          echo "::add-mask::$encoded"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $encoded"
+          cd BriefcaseNative
+          bash scripts/linux/prepare-backend.sh artifacts/linux/ue4ss-reference artifacts/linux/ue4ss-build
+          bash scripts/linux/build-server-host.sh artifacts/linux/ue4ss-reference \
+            artifacts/linux/ue4ss-build artifacts/linux/ue4ss-build/_deps
+          python3 scripts/linux/package-server.py --build build/linux-server-host \
+            --backend-source artifacts/linux/ue4ss-reference \
+            --backend-deps artifacts/linux/ue4ss-build/_deps --output dist/Releases
+
+      - name: Build and verify Linux application archive and Debian package
+        run: |
+          set -euo pipefail
+          native_version=$(tr -d '\r\n' < BriefcaseNative/VERSION)
+          native_package="$PWD/BriefcaseNative/dist/Releases/BriefcaseNative-Server-linux-x64-$native_version.zip"
+          cd serverapp
+          dotnet run --project Briefcase.ServerApp.LinuxTests/Briefcase.ServerApp.LinuxTests.csproj -c Release
+          bash scripts/Publish-LinuxRelease.sh --native-package "$native_package" \
+            --output "$PWD/dist/LinuxRelease" --enable-updates
+          python3 scripts/Test-LinuxRelease.py dist/LinuxRelease
+          python3 scripts/Test-LinuxRelease.py dist/LinuxRelease --test-launcher-replacement
+          bash scripts/Package-LinuxDeb.sh dist/LinuxRelease \
+            "dist/Briefcase-$RELEASE_VERSION-linux-amd64.deb"
+          dpkg-deb --contents "dist/Briefcase-$RELEASE_VERSION-linux-amd64.deb" \
+            | grep -F './usr/share/applications/briefcase.desktop'
+          sudo dpkg -i "dist/Briefcase-$RELEASE_VERSION-linux-amd64.deb"
+          python3 scripts/Test-LinuxRelease.py /opt/briefcase
+          python3 - <<'PY'
+          import json, os, pathlib, zipfile
+          version = os.environ['RELEASE_VERSION']
+          archive = pathlib.Path(f'dist/Briefcase.ServerApp-linux-x64-{version}.zip')
+          with zipfile.ZipFile(archive) as package:
+              assert json.loads(package.read('UpdateSource.json'))['enabled'] is True
+              assert f'App/versions/{version}/Briefcase.ServerApp' in package.namelist()
+              assert 'Briefcase' in package.namelist()
+          PY
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: serverapp-linux-release
+          path: |
+            serverapp/dist/Briefcase.ServerApp-linux-x64-${{ env.RELEASE_VERSION }}.zip
+            serverapp/dist/Briefcase-${{ env.RELEASE_VERSION }}-linux-amd64.deb
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish-linux:
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: serverapp
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: serverapp-linux-release
+          path: release
+      - name: Attach and verify Linux assets on the existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(tr -d '\r\n' < serverapp/VERSION)
+          files=("release/Briefcase.ServerApp-linux-x64-$version.zip"
+                 "release/Briefcase-$version-linux-amd64.deb")
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$version")
+          [[ $(jq -r '.draft' <<< "$release_json") == false ]]
+          upload=()
+          for file in "${files[@]}"; do
+            name=${file##*/}
+            digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
+            old=$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest' <<< "$release_json")
+            if [[ -z $old ]]; then
+              upload+=("$file")
+            elif [[ $old != "$digest" ]]; then
+              echo "Existing release asset differs: $name" >&2
+              exit 1
+            fi
+          done
+          if ((${#upload[@]})); then
+            gh release upload "v$version" "${upload[@]}" --repo "$GITHUB_REPOSITORY"
+          fi
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$version")
+          for file in "${files[@]}"; do
+            name=${file##*/}
+            digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
+            count=$(jq --arg name "$name" --arg digest "$digest" \
+              '[.assets[] | select(.name == $name and .digest == $digest)] | length' <<< "$release_json")
+            [[ $count == 1 ]] || { echo "Release verification failed: $name" >&2; exit 1; }
+          done

@@ -259,7 +259,7 @@
                                   VerticalAlignment="Center" IconSize="16" IconStroke="#C9B8E0"
                                   IconData="M 16,6 A 7,7 0 1 0 17,11 M 16,2 L 16,7 L 11,7" />
                 </Grid>
-                <Grid ColumnDefinitions="8,*,Auto,Auto,Auto" ColumnSpacing="10" MinHeight="40" Margin="28,0,2,0">
+                <Grid ColumnDefinitions="8,*,Auto,Auto,Auto" ColumnSpacing="10" MinHeight="40" Margin="28,0,2,0" IsVisible="{Binding IsWindows}">
                   <Border Width="6" Height="6" Background="{Binding RuntimeAppearance.Border}" CornerRadius="3" VerticalAlignment="Center" />
                   <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
                     <TextBlock Text="{app:Tr Key=updates.runtime_title}" FontSize="12" FontWeight="SemiBold"

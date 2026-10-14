@@ -14,10 +14,9 @@ public sealed class AppProcessController : IDisposable
         var useDotnet = app.Version == "0.0.0" && !File.Exists(app.Executable) &&
                         File.Exists(Path.Combine(app.Directory, "Briefcase.ServerApp.dll"));
         if (!File.Exists(app.Executable) && !useDotnet)
-            throw new FileNotFoundException("Briefcase.ServerApp.exe is missing.", app.Executable);
+            throw new FileNotFoundException("The Briefcase application executable is missing.", app.Executable);
 
-        var signalName = "Local\\Briefcase.ServerApp.Ready." + Guid.NewGuid().ToString("N");
-        using var ready = new EventWaitHandle(false, EventResetMode.ManualReset, signalName);
+        using var ready = new LauncherReadyChannel();
         _owned?.Dispose();
         var start = new ProcessStartInfo(useDotnet ? "dotnet" : app.Executable)
         {
@@ -25,7 +24,7 @@ public sealed class AppProcessController : IDisposable
             UseShellExecute = false
         };
         if (useDotnet) start.ArgumentList.Add(Path.Combine(app.Directory, "Briefcase.ServerApp.dll"));
-        start.ArgumentList.Add("--launcher-ready=" + signalName);
+        start.ArgumentList.Add("--launcher-ready=" + ready.Name);
         if (launcherUpdateVersion is not null)
         {
             start.ArgumentList.Add("--launcher-update=" + launcherUpdateVersion);
@@ -39,7 +38,7 @@ public sealed class AppProcessController : IDisposable
         {
             while (!timeout.IsCancellationRequested)
             {
-                if (ready.WaitOne(0)) return true;
+                if (ready.IsReady) return true;
                 if (_owned.HasExited) return false;
                 await Task.Delay(100, timeout.Token);
             }

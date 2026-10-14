@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -29,7 +30,8 @@ public sealed class SteamCmdService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     public const int ServerAppId = 5007710;
-    private static readonly Uri DownloadUrl = new("https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip");
+    private static readonly Uri WindowsDownloadUrl = new("https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip");
+    private static readonly Uri LinuxDownloadUrl = new("https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private readonly string _toolsFolder;
 
@@ -38,14 +40,17 @@ public sealed class SteamCmdService
     public async Task<string> EnsureInstalledAsync(IProgress<string> progress, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_toolsFolder);
-        var executable = Path.Combine(_toolsFolder, "steamcmd.exe");
-        if (File.Exists(executable)) return executable;
+        var linux = OperatingSystem.IsLinux();
+        var executable = Path.Combine(_toolsFolder, linux ? "steamcmd.sh" : "steamcmd.exe");
+        if (File.Exists(executable) && (!linux || File.Exists(Path.Combine(_toolsFolder, "linux32", "steamcmd"))))
+            return executable;
         progress.Report(AppTranslations.Get("status.preparing_download", "Preparing the download…"));
-        using var response = await Http.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await Http.GetAsync(linux ? LinuxDownloadUrl : WindowsDownloadUrl,
+            HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > 100_000_000)
             throw new InvalidDataException("SteamCMD download is unexpectedly large.");
-        var archiveFile = Path.Combine(_toolsFolder, "steamcmd.zip.download");
+        var archiveFile = Path.Combine(_toolsFolder, linux ? "steamcmd.tar.gz.download" : "steamcmd.zip.download");
         try
         {
             await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
@@ -64,16 +69,67 @@ public sealed class SteamCmdService
                             total * 100 / expected));
                 }
             }
-            using var archive = ZipFile.OpenRead(archiveFile);
-            var item = archive.Entries.SingleOrDefault(entry => entry.FullName.Equals("steamcmd.exe", StringComparison.OrdinalIgnoreCase));
-            if (item is null || item.Length is <= 0 or > 100_000_000)
-                throw new InvalidDataException("Valve's archive has no valid steamcmd.exe.");
-            var tempExecutable = executable + ".download";
-            item.ExtractToFile(tempExecutable, true);
-            File.Move(tempExecutable, executable, true);
+            if (linux) ExtractLinuxSteamCmd(archiveFile, _toolsFolder);
+            else
+            {
+                using var archive = ZipFile.OpenRead(archiveFile);
+                var item = archive.Entries.SingleOrDefault(entry => entry.FullName.Equals("steamcmd.exe", StringComparison.OrdinalIgnoreCase));
+                if (item is null || item.Length is <= 0 or > 100_000_000)
+                    throw new InvalidDataException("Valve's archive has no valid steamcmd.exe.");
+                var tempExecutable = executable + ".download";
+                item.ExtractToFile(tempExecutable, true);
+                File.Move(tempExecutable, executable, true);
+            }
             return executable;
         }
         finally { if (File.Exists(archiveFile)) File.Delete(archiveFile); }
+    }
+
+    private static void ExtractLinuxSteamCmd(string archiveFile, string toolsFolder)
+    {
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
+        string[] expected = ["steamcmd.sh", "linux32/steamcmd", "linux32/steamerrorreporter",
+            "linux32/libstdc++.so.6", "linux32/crashhandler.so"];
+        var allowed = new HashSet<string>(expected, StringComparer.Ordinal);
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        var stage = Path.Combine(toolsFolder, ".steamcmd-stage-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stage);
+        try
+        {
+            using var file = File.OpenRead(archiveFile);
+            using var gzip = new GZipStream(file, CompressionMode.Decompress);
+            using var tar = new TarReader(gzip);
+            TarEntry? entry;
+            while ((entry = tar.GetNextEntry()) is not null)
+            {
+                if (!allowed.Contains(entry.Name) || !found.Add(entry.Name) ||
+                    entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile) ||
+                    entry.Length is <= 0 or > 100_000_000 || entry.DataStream is null)
+                    throw new InvalidDataException("Valve's Linux SteamCMD archive has unexpected contents.");
+                var output = Path.Combine(stage, entry.Name.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+                using var target = File.Create(output);
+                entry.DataStream.CopyTo(target);
+                if (target.Length != entry.Length)
+                    throw new InvalidDataException("The Linux SteamCMD archive is incomplete.");
+            }
+            if (found.Count != expected.Length)
+                throw new InvalidDataException("Valve's Linux SteamCMD archive is incomplete.");
+            foreach (var name in expected.Where(name => name != "steamcmd.sh"))
+            {
+                var relative = name.Replace('/', Path.DirectorySeparatorChar);
+                var destination = Path.Combine(toolsFolder, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Move(Path.Combine(stage, relative), destination, true);
+            }
+            File.Move(Path.Combine(stage, "steamcmd.sh"), Path.Combine(toolsFolder, "steamcmd.sh"), true);
+            foreach (var name in new[] { "steamcmd.sh", "linux32/steamcmd", "linux32/steamerrorreporter" })
+                File.SetUnixFileMode(Path.Combine(toolsFolder, name.Replace('/', Path.DirectorySeparatorChar)),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        }
+        finally { Directory.Delete(stage, recursive: true); }
     }
 
     public async Task<string> InstallOrUpdateAsync(string installRoot, bool updating,
@@ -88,7 +144,8 @@ public sealed class SteamCmdService
         if (directory.Parent is null || directory.FullName == directory.Root.FullName ||
             (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0))
             throw new InvalidDataException("Select a normal, non-root server directory.");
-        var shipping = Path.Combine(root, "DeceiveInc", "Binaries", "Win64", "DeceiveIncServer-Win64-Shipping.exe");
+        var shipping = Path.Combine(root, "DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64",
+            OperatingSystem.IsLinux() ? "DeceiveIncServer-Linux-Shipping" : "DeceiveIncServer-Win64-Shipping.exe");
         var marker = Path.Combine(root, ".briefcase-steam-branch");
         if (File.Exists(marker) && File.GetAttributes(marker).HasFlag(FileAttributes.ReparsePoint))
             throw new InvalidDataException("The server installation marker cannot be a link.");
@@ -174,7 +231,8 @@ public sealed class SteamCmdService
     private async Task RunSteamCmdAsync(string steamcmd, string root, string branch, string? betaPassword,
         IProgress<string> progress, CancellationToken cancellationToken)
     {
-        var shipping = Path.Combine(root, "DeceiveInc", "Binaries", "Win64", "DeceiveIncServer-Win64-Shipping.exe");
+        var shipping = Path.Combine(root, "DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64",
+            OperatingSystem.IsLinux() ? "DeceiveIncServer-Linux-Shipping" : "DeceiveIncServer-Win64-Shipping.exe");
         var start = new ProcessStartInfo(steamcmd)
         {
             WorkingDirectory = _toolsFolder,

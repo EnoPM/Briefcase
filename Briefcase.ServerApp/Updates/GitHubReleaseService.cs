@@ -41,10 +41,11 @@ public sealed class GitHubReleaseService
         var tag = root.GetProperty("tag_name").GetString() ?? "";
         if (!Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+$")) throw new InvalidDataException("Invalid Briefcase release version.");
         var version = tag[1..];
-        var name = $"BriefcaseNative-Server-windows-x64-{version}.zip";
+        var platform = OperatingSystem.IsLinux() ? "linux" : "windows";
+        var name = $"BriefcaseNative-Server-{platform}-x64-{version}.zip";
         var matching = root.GetProperty("assets").EnumerateArray()
             .Where(asset => asset.GetProperty("name").GetString() == name).ToArray();
-        if (matching.Length != 1) throw new InvalidDataException("The latest release has no unique Windows server archive.");
+        if (matching.Length != 1) throw new InvalidDataException($"The latest release has no unique {platform} server archive.");
         var item = matching[0];
         var url = new Uri(item.GetProperty("browser_download_url").GetString()!);
         var expected = $"https://github.com/EnoPM/BriefcaseNative/releases/download/{tag}/{name}";

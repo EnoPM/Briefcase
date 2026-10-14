@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Briefcase.ServerApp/Briefcase.ServerApp.csproj" />
+    <ProjectReference Include="../Briefcase.ServerApp.Launcher/Briefcase.ServerApp.Launcher.csproj" />
+  </ItemGroup>
+</Project>

@@ -9,8 +9,9 @@ namespace Briefcase.ServerApp;
 /// <summary>Replaces the launcher only after the process that started this app has exited.</summary>
 public static class AppLauncherUpdate
 {
-    private static readonly string[] Files =
-        ["Briefcase.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
+    private static readonly string[] Files = OperatingSystem.IsLinux()
+        ? ["Briefcase", "libSkiaSharp.so", "libHarfBuzzSharp.so"]
+        : ["Briefcase.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
 
     public static async Task ApplyAsync(string version, int launcherPid, CancellationToken cancellationToken)
     {
@@ -18,6 +19,9 @@ public static class AppLauncherUpdate
         try { ApplyPrepared(InstallRoot(), version); }
         catch (Exception error) when (AccessDenied(error))
         {
+            if (OperatingSystem.IsLinux())
+                throw new UnauthorizedAccessException(
+                    "Briefcase cannot update its launcher in this folder. Move the installation to a writable folder.", error);
             var executable = Path.Combine(AppContext.BaseDirectory, "Briefcase.ServerApp.exe");
             var start = new ProcessStartInfo(executable)
             {
@@ -115,7 +119,7 @@ public static class AppLauncherUpdate
         try { using var stream = File.Create(probe); }
         finally { if (File.Exists(probe)) File.Delete(probe); }
 
-        var mutexName = "Local\\Briefcase.Launcher.Update." +
+        var mutexName = (OperatingSystem.IsLinux() ? "Briefcase.Launcher.Update." : "Local\\Briefcase.Launcher.Update.") +
                         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(root))).Substring(0, 20);
         using var gate = new Mutex(false, mutexName);
         if (!gate.WaitOne(TimeSpan.FromSeconds(30))) throw new IOException("Another launcher update is running.");
@@ -132,13 +136,19 @@ public static class AppLauncherUpdate
             try
             {
                 // Replace the executable last. Each individual move is atomic on the installation volume.
-                foreach (var name in Files.Where(name => name != "Briefcase.exe")
-                             .Append("Briefcase.exe"))
+                var launcherName = OperatingSystem.IsLinux() ? "Briefcase" : "Briefcase.exe";
+                foreach (var name in Files.Where(name => name != launcherName)
+                             .Append(launcherName))
                 {
                     var temporary = Path.Combine(root, ".launcher-new-" + Guid.NewGuid().ToString("N"));
                     try
                     {
                         File.Copy(Path.Combine(stage, name), temporary);
+                        if (OperatingSystem.IsLinux() && name == launcherName)
+                            File.SetUnixFileMode(temporary,
+                                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
                         File.Move(temporary, Path.Combine(root, name), true);
                         replaced.Add(name);
                     }

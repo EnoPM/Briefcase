@@ -1,5 +1,7 @@
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Briefcase.ServerApp;
 
@@ -32,7 +34,8 @@ public sealed record ModRow(string Name, string State, string Configuration, str
     public bool HasVersion => Version.Length > 0;
     public bool HasConfiguration => Configuration == "Has configuration";
     public string VersionSummary => HasVersion ? "v" + Version : AppTranslations.Get("mod.version_unknown", "Version unknown");
-    public string NativeBinarySummary => AppTranslations.Get("mod.native_binary", "Native DLL");
+    public string NativeBinarySummary => OperatingSystem.IsLinux() ? "Native .so" :
+        AppTranslations.Get("mod.native_binary", "Native DLL");
     public string InstallSourceSummary => IsCatalogManaged
         ? AppTranslations.Get("mod.catalog_source", "Catalog")
         : IsCore ? AppTranslations.Get("mod.briefcase_source", "Briefcase")
@@ -50,6 +53,8 @@ public static class ModCatalog
     {
         var root = location.ModsRoot;
         if (!Directory.Exists(root)) return [];
+        var nativeSelection = OperatingSystem.IsLinux()
+            ? ReadNativeSelection(Path.Combine(location.BriefcaseRoot, "settings.json")) : null;
         var selection = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         var file = Path.Combine(root, "mods.txt");
         if (File.Exists(file) && new FileInfo(file).Length <= 65536)
@@ -67,12 +72,15 @@ public static class ModCatalog
         }
         return Directory.EnumerateDirectories(root)
             .Where(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0 &&
-                           !Path.GetFileName(path).Equals("shared", StringComparison.OrdinalIgnoreCase))
+                           !Path.GetFileName(path).Equals("shared", StringComparison.OrdinalIgnoreCase) &&
+                           (!OperatingSystem.IsLinux() || File.Exists(Path.Combine(path, "briefcase.mod.json"))))
             .Take(256)
             .Select(path =>
             {
                 var name = Path.GetFileName(path);
-                var state = selection.TryGetValue(name, out var enabled)
+                var state = OperatingSystem.IsLinux()
+                    ? nativeSelection is null || nativeSelection.Contains(name) ? "Enabled" : "Disabled"
+                    : selection.TryGetValue(name, out var enabled)
                     ? enabled ? "Enabled" : "Disabled"
                     : "Not selected";
                 var config = File.Exists(Path.Combine(path, "Data", "config.json"))
@@ -80,7 +88,9 @@ public static class ModCatalog
                 var metadata = ModMarketplace.InstalledMetadata(location, name);
                 return new ModRow(name, state, config, Path.Combine(path, "Data", "config.json"),
                     metadata?.Version ?? "",
-                    File.Exists(Path.Combine(path, "dlls", "main.dll")),
+                    OperatingSystem.IsLinux()
+                        ? Directory.EnumerateFiles(path, "*.so", SearchOption.TopDirectoryOnly).Any()
+                        : File.Exists(Path.Combine(path, "dlls", "main.dll")),
                     File.Exists(Path.Combine(path, ".serverapp-install.json")),
                     ModLogo.ForInstalledMod(path, metadata?.Catalog), metadata?.Name ?? "", metadata?.Author ?? "",
                     metadata?.Description ?? "", metadata?.DocumentationUrl, metadata?.DiscordUrl,
@@ -99,7 +109,7 @@ public static class ModCatalog
         {
             var candidate = mod.IsCatalogManaged && mod.Version.Length > 0 && mod.CatalogUrl.Length > 0
                 ? entries.FirstOrDefault(entry =>
-                    entry.Id.Equals(mod.Name, StringComparison.OrdinalIgnoreCase) &&
+                    entry.PlatformAvailable && entry.InstallId.Equals(mod.Name, StringComparison.OrdinalIgnoreCase) &&
                     entry.Catalog.Equals(mod.CatalogUrl, StringComparison.OrdinalIgnoreCase) &&
                     GitHubReleaseService.IsNewer(entry.Version, mod.Version))
                 : null;
@@ -126,6 +136,20 @@ public static class ModCatalog
     {
         var root = ValidateTarget(location, name, out var target);
         if (!Directory.Exists(target)) throw new DirectoryNotFoundException(target);
+        if (OperatingSystem.IsLinux())
+        {
+            if (!File.Exists(Path.Combine(target, "briefcase.mod.json")))
+                throw new InvalidDataException("The Linux mod manifest is missing.");
+            var nativeFile = Path.Combine(location.BriefcaseRoot, "settings.json");
+            var nativeSelected = ReadNativeSelection(nativeFile) ?? Directory.EnumerateDirectories(root)
+                .Where(path => File.Exists(Path.Combine(path, "briefcase.mod.json")))
+                .Select(Path.GetFileName).Where(id => id is not null)
+                .Select(id => id!).ToHashSet(StringComparer.Ordinal);
+            if (enabled) nativeSelected.Add(name);
+            else nativeSelected.Remove(name);
+            WriteNativeSelection(nativeFile, nativeSelected);
+            return;
+        }
         var file = Path.Combine(root, "mods.txt");
         var lines = ReadSelection(file);
         var selected = false;
@@ -155,8 +179,10 @@ public static class ModCatalog
             }
         }
         var file = Path.Combine(root, "mods.txt");
-        var lines = ReadSelection(file);
+        var lines = OperatingSystem.IsLinux() ? [] : ReadSelection(file);
         var retained = lines.Where(line => !IsSelectionFor(line, name)).ToList();
+        var nativeFile = Path.Combine(location.BriefcaseRoot, "settings.json");
+        var nativeSelection = OperatingSystem.IsLinux() ? ReadNativeSelection(nativeFile) : null;
         var dataRoot = location.IsInstance ? location.InstanceRoot : location.BriefcaseRoot;
         var updates = Path.Combine(dataRoot, "Updates");
         if (Directory.Exists(dataRoot) &&
@@ -167,7 +193,13 @@ public static class ModCatalog
         Directory.CreateDirectory(updates);
         var pending = Path.Combine(updates, "ServerAppRemovedMod-" + Guid.NewGuid().ToString("N"));
         Directory.Move(target, pending);
-        try { if (retained.Count != lines.Count) WriteSelection(file, retained); }
+        try
+        {
+            if (OperatingSystem.IsLinux() && nativeSelection is not null && nativeSelection.Remove(name))
+                WriteNativeSelection(nativeFile, nativeSelection);
+            else if (!OperatingSystem.IsLinux() && retained.Count != lines.Count)
+                WriteSelection(file, retained);
+        }
         catch
         {
             Directory.Move(pending, target);
@@ -188,7 +220,7 @@ public static class ModCatalog
         var root = location.ModsRoot;
         target = Path.Combine(root, name);
         foreach (var path in new[] { location.IsInstance ? location.InstanceRoot : location.Win64,
-                     location.Ue4ssRoot, root, target })
+                     OperatingSystem.IsLinux() ? location.BriefcaseRoot : location.Ue4ssRoot, root, target })
             if (Directory.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
                 throw new InvalidDataException("The mod path contains a directory link.");
         return root;
@@ -200,6 +232,39 @@ public static class ModCatalog
         if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint) || new FileInfo(file).Length > 65536)
             throw new InvalidDataException("UE4SS mod selection file is unsafe or too large.");
         return File.ReadAllLines(file).ToList();
+    }
+
+    private static HashSet<string>? ReadNativeSelection(string file)
+    {
+        if (!File.Exists(file)) return null;
+        if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint) || new FileInfo(file).Length > 65536)
+            throw new InvalidDataException("Linux mod selection file is unsafe or too large.");
+        using var document = JsonDocument.Parse(File.ReadAllBytes(file));
+        var entries = document.RootElement.GetProperty("enabledMods");
+        if (entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() > 128)
+            throw new InvalidDataException("Linux mod selection is invalid.");
+        var selected = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries.EnumerateArray())
+        {
+            var id = entry.GetString() ?? "";
+            if (id.Length is < 1 or > 128 || !selected.Add(id))
+                throw new InvalidDataException("Linux mod selection is invalid.");
+        }
+        return selected;
+    }
+
+    private static void WriteNativeSelection(string file, HashSet<string> selected)
+    {
+        if (File.Exists(file) && File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("Linux mod selection file is a link.");
+        var root = File.Exists(file) ? JsonNode.Parse(File.ReadAllBytes(file))?.AsObject() : new JsonObject();
+        if (root is null) throw new InvalidDataException("Linux mod selection is invalid.");
+        root["enabledMods"] = new JsonArray(selected.Order(StringComparer.Ordinal)
+            .Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        var temporary = file + ".serverapp-" + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.WriteAllText(temporary, root.ToJsonString()); File.Move(temporary, file, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     private static bool IsSelectionFor(string line, string name)

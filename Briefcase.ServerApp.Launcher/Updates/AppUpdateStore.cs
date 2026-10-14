@@ -7,7 +7,8 @@ namespace Briefcase.ServerApp.Launcher;
 
 public sealed record InstalledApp(string Version, string Directory)
 {
-    public string Executable => Path.Combine(Directory, "Briefcase.ServerApp.exe");
+    public string Executable => Path.Combine(Directory,
+        OperatingSystem.IsLinux() ? "Briefcase.ServerApp" : "Briefcase.ServerApp.exe");
 }
 
 /// <summary>Installs immutable app versions; the active pointer changes only after startup succeeds.</summary>
@@ -32,7 +33,7 @@ public static class AppUpdateStore
             if (File.Exists(installed.Executable)) return installed;
             throw new FileNotFoundException("The selected application version is missing.", installed.Executable);
         }
-        var legacy = Path.Combine(root, "Briefcase.ServerApp.exe");
+        var legacy = Path.Combine(root, OperatingSystem.IsLinux() ? "Briefcase.ServerApp" : "Briefcase.ServerApp.exe");
         return File.Exists(legacy) ? new InstalledApp("0.0.0", root) : null;
     }
 
@@ -66,9 +67,11 @@ public static class AppUpdateStore
             total += size;
             if (total > MaximumTotalSize) throw new InvalidDataException("Application release is too large.");
         }
-        if (!records.ContainsKey("Briefcase.ServerApp.exe") ||
-            !records.ContainsKey("Native/Briefcase.ServerInjector.exe") ||
-            !records.ContainsKey("Native/Briefcase.ServerBootstrap.dll"))
+        var required = OperatingSystem.IsLinux()
+            ? new[] { "Briefcase.ServerApp", "Native/Briefcase.ServerLauncher" }
+            : new[] { "Briefcase.ServerApp.exe", "Native/Briefcase.ServerInjector.exe",
+                "Native/Briefcase.ServerBootstrap.dll" };
+        if (required.Any(name => !records.ContainsKey(name)))
             throw new InvalidDataException("The application release is incomplete.");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (archive.Entries.Count > 520) throw new InvalidDataException("Too many release archive entries.");
@@ -115,6 +118,13 @@ public static class AppUpdateStore
                 if (copied != expected.Size ||
                     !Convert.ToHexString(sha.Hash!).Equals(expected.Hash, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Application file checksum mismatch: " + name);
+            }
+            if (OperatingSystem.IsLinux())
+            {
+                foreach (var name in new[] { "Briefcase.ServerApp", "Native/Briefcase.ServerLauncher" })
+                    File.SetUnixFileMode(Child(stage, name), UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                        UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                        UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
             }
             if (!Directory.Exists(destination)) Directory.Move(stage, destination);
             else if (!ManifestMatches(destination, records))

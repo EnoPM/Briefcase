@@ -131,6 +131,9 @@ public static class ServerSnapshotReader
         if (live is null)
         {
             var uptime = processUptime ?? TimeSpan.Zero;
+            if (OperatingSystem.IsLinux() && uptime >= StartupGrace)
+                return new(name, "Running", "—", mode, null, max, [],
+                    "Server running; live player data is not available", false);
             var (state, source) = uptime < StartupGrace
                 ? ("Starting", "Starting dedicated server process")
                 : channel switch

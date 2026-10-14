@@ -8,8 +8,9 @@ namespace Briefcase.ServerApp.Launcher;
 /// <summary>Stages the launcher from the verified release archive without touching the running executable.</summary>
 public static class LauncherUpdateStore
 {
-    private static readonly string[] Files =
-        ["Briefcase.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
+    private static readonly string[] Files = OperatingSystem.IsLinux()
+        ? ["Briefcase", "libSkiaSharp.so", "libHarfBuzzSharp.so"]
+        : ["Briefcase.exe", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"];
 
     public static bool IsPending(string root, string version)
     {
@@ -86,6 +87,11 @@ public static class LauncherUpdateStore
             }
             File.WriteAllBytes(Path.Combine(temporary, "manifest.json"), ReadEntry(manifestEntry));
             VerifyFiles(temporary, records);
+            if (OperatingSystem.IsLinux())
+                File.SetUnixFileMode(Path.Combine(temporary, "Briefcase"),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
             Directory.Move(temporary, destination);
             return destination;
         }

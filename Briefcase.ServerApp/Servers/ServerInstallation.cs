@@ -3,8 +3,8 @@ namespace Briefcase.ServerApp;
 /// <summary>A Steam branch installed once and shared by any number of server instances.</summary>
 public sealed record ServerInstallation(string Id, string Branch, string InstallRoot)
 {
-    public string Win64 => Path.Combine(InstallRoot, "DeceiveInc", "Binaries", "Win64");
-    public string Shipping => Path.Combine(Win64, "DeceiveIncServer-Win64-Shipping.exe");
+    public string Win64 => Path.Combine(InstallRoot, "DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64");
+    public string Shipping => Path.Combine(Win64, OperatingSystem.IsLinux() ? "DeceiveIncServer-Linux-Shipping" : "DeceiveIncServer-Win64-Shipping.exe");
     public string? BuildId => SteamCmdService.InstalledBuildIdAtRoot(InstallRoot);
     public string DisplayName => BuildId is { } build
         ? $"{Branch} · Build {build}" : $"{Branch} · {AppTranslations.Get("versions.build_unknown", "Build unknown")}";

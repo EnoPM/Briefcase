@@ -164,7 +164,7 @@ public sealed class ServerRegistry
             throw new InvalidOperationException("This Steam branch already has an installation. Update it instead.");
         if (Installations.Any(item => item.InstallRoot.Equals(root, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("This installation folder is already registered.");
-        if (!ServerLocation.TryCreate(Path.Combine(root, "DeceiveInc", "Binaries", "Win64"),
+        if (!ServerLocation.TryCreate(Path.Combine(root, "DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64"),
                 out _, out var error)) throw new InvalidDataException(error);
         var installation = new ServerInstallation(Guid.NewGuid().ToString("N"), branch, root);
         Installations.Add(installation);
@@ -302,7 +302,7 @@ public sealed class ServerRegistry
             if (schema < 3)
             {
                 var legacyRoot = Path.Combine(DataDirectory, "game", "dedicated");
-                if (ServerLocation.TryCreate(Path.Combine(legacyRoot, "DeceiveInc", "Binaries", "Win64"),
+                if (ServerLocation.TryCreate(Path.Combine(legacyRoot, "DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64"),
                         out _, out _))
                     Installations.Add(new ServerInstallation(Guid.NewGuid().ToString("N"), "public", legacyRoot));
             }

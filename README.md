@@ -1,6 +1,6 @@
 # Briefcase
 
-**Run and manage Deceive Inc. dedicated servers from one Windows app.** Install a server, choose its settings and map rotation, see connected players, and manage Briefcase mods without using a command line.
+**Run and manage Deceive Inc. dedicated servers from one desktop app.** Install a server, choose its settings and map rotation, see connected players, and manage Briefcase mods without using a command line.
 
 ## Download for Windows
 
@@ -12,7 +12,11 @@ On the release page, open **Assets** and choose **`Briefcase-Setup-…-win-x64.e
 2. On first launch, follow the welcome screen to download the dedicated server, then create your server. You can also import an existing installation.
 3. Use **Configuration** to choose your settings, then **Overview → Start server**.
 
-The initial game-server download requires an internet connection and enough disk space. Briefcase runs on Windows x64. The app checks for its own updates when it starts.
+The initial game-server download requires an internet connection and enough disk space. The Windows app checks for its own updates when it starts.
+
+## Download for Ubuntu 24.04
+
+On the [latest release page](https://github.com/EnoPM/Briefcase/releases/latest), open **Assets** and download **`Briefcase-…-linux-amd64.deb`**. Double-click the file to install it, then open **Briefcase** from the applications menu. The Linux release also has a portable `.zip` for users who prefer to extract it into their own folder. [Linux installation details and mod availability](docs/LinuxDirectApp.md).
 
 ## A look inside
 

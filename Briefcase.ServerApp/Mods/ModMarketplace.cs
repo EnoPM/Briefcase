@@ -20,6 +20,9 @@ public sealed record MarketplaceMod(string Id, string Name, string Description, 
 {
     public bool IsInstalled { get; init; }
     public bool CanApply { get; init; }
+    public bool PlatformAvailable { get; init; } = true;
+    public string? PlatformInstallId { get; init; }
+    public string InstallId => PlatformInstallId ?? Id;
     public string ActionLabel => AppTranslations.Get(IsInstalled ? "market.update" : "market.install");
     public bool HasLogo => Logo is not null;
     public bool MissingLogo => Logo is null;
@@ -57,7 +60,7 @@ public sealed class ModMarketplace
         using var doc = JsonDocument.Parse(bytes);
         var root = doc.RootElement;
         var schema = root.GetProperty("schemaVersion").GetInt32();
-        if (schema is not (1 or 2)) throw new InvalidDataException("Unsupported catalog schema.");
+        if (schema is not (1 or 2 or 3)) throw new InvalidDataException("Unsupported catalog schema.");
         var mods = new List<MarketplaceMod>();
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in root.GetProperty("mods").EnumerateArray())
@@ -67,25 +70,43 @@ public sealed class ModMarketplace
             var name = item.GetProperty("name").GetString() ?? "";
             var description = item.GetProperty("description").GetString() ?? "";
             var version = item.GetProperty("version").GetString() ?? "";
-            var download = item.GetProperty("downloadUrl").GetString() ?? "";
-            var hash = item.GetProperty(schema == 2 ? "archiveSha256" : "sha256").GetString() ?? "";
+            var platformAvailable = schema != 3 && !OperatingSystem.IsLinux();
+            var package = item;
+            if (schema == 3)
+            {
+                var packages = item.GetProperty("packages");
+                if (packages.ValueKind != JsonValueKind.Object)
+                    throw new InvalidDataException("Invalid platform packages.");
+                var platform = OperatingSystem.IsLinux() ? "linux-x64" : "windows-x64";
+                platformAvailable = packages.TryGetProperty(platform, out package);
+                if (!platformAvailable && !packages.TryGetProperty("windows-x64", out package) &&
+                    !packages.TryGetProperty("linux-x64", out package))
+                    throw new InvalidDataException("The mod has no package.");
+                if (package.ValueKind != JsonValueKind.Object)
+                    throw new InvalidDataException("Invalid platform package.");
+            }
+            var download = package.GetProperty("downloadUrl").GetString() ?? "";
+            var hash = package.GetProperty(schema == 1 ? "sha256" : "archiveSha256").GetString() ?? "";
+            var installId = schema == 3 && package.TryGetProperty("installId", out var installedId)
+                ? installedId.GetString() ?? "" : id;
             var logoUrl = item.TryGetProperty("logoUrl", out var logoProperty) ? logoProperty.GetString() : null;
-            var logoHash = schema == 2 ? RequiredOptionalString(item, "logoSha256") : null;
-            var author = schema == 2 ? item.GetProperty("author").GetString() ?? "" : "";
+            var logoHash = schema >= 2 ? RequiredOptionalString(item, "logoSha256") : null;
+            var author = schema >= 2 ? item.GetProperty("author").GetString() ?? "" : "";
             var documentation = OptionalUrl(item, "documentationUrl");
             var discord = OptionalUrl(item, "discordUrl");
             var homepage = OptionalUrl(item, "homepageUrl");
             var formUrl = OptionalUrl(item, "formSchemaOverrideUrl");
-            var formHash = schema == 2 ? RequiredOptionalString(item, "formSchemaOverrideSha256") : null;
+            var formHash = schema >= 2 ? RequiredOptionalString(item, "formSchemaOverrideSha256") : null;
             var configSchemaUrl = OptionalUrl(item, "configSchemaUrl");
             var configSchemaHash = RequiredOptionalString(item, "configSchemaSha256");
             var formTranslations = ReadFormTranslations(item);
-            if (!ids.Add(id) || !Regex.IsMatch(id, schema == 2 ? ModIdPattern : LegacyIdPattern) ||
+            if (!ids.Add(id) || !Regex.IsMatch(id, schema >= 2 ? ModIdPattern : LegacyIdPattern) ||
+                installId.Length is < 1 or > 64 || !Regex.IsMatch(installId, schema >= 2 ? ModIdPattern : LegacyIdPattern) ||
                 id.Length > 64 || name.Length is < 1 or > 128 ||
                 description.Length > 1024 || !Regex.IsMatch(version, "^\\d+\\.\\d+\\.\\d+$") ||
                 !Uri.TryCreate(download, UriKind.Absolute, out var asset) || asset.Scheme != Uri.UriSchemeHttps ||
                 !string.IsNullOrEmpty(asset.UserInfo) || !Regex.IsMatch(hash, "^[a-fA-F0-9]{64}$") ||
-                schema == 2 && (author.Length is < 1 or > 100 ||
+                schema >= 2 && (author.Length is < 1 or > 100 ||
                     (logoUrl is null) != (logoHash is null) ||
                     logoHash is not null && !Regex.IsMatch(logoHash, "^[a-fA-F0-9]{64}$") ||
                     (formUrl is null) != (formHash is null) ||
@@ -100,7 +121,8 @@ public sealed class ModMarketplace
                 DocumentationUrl: documentation, DiscordUrl: discord, HomepageUrl: homepage,
                 CatalogSchema: schema, FormSchemaOverrideUrl: formUrl,
                 FormSchemaOverrideSha256: formHash?.ToLowerInvariant(), FormTranslations: formTranslations,
-                ConfigSchemaUrl: configSchemaUrl, ConfigSchemaSha256: configSchemaHash?.ToLowerInvariant()));
+                ConfigSchemaUrl: configSchemaUrl, ConfigSchemaSha256: configSchemaHash?.ToLowerInvariant())
+                { PlatformAvailable = platformAvailable, PlatformInstallId = installId });
         }
         return mods;
     }
@@ -140,6 +162,8 @@ public sealed class ModMarketplace
     public async Task<string> DownloadAsync(MarketplaceMod mod, string folder, IProgress<string> progress,
         CancellationToken cancellationToken)
     {
+        if (!mod.PlatformAvailable)
+            throw new InvalidOperationException("The catalog does not provide a package for this platform.");
         Directory.CreateDirectory(folder);
         var file = Path.Combine(folder, "mod-" + Guid.NewGuid().ToString("N") + ".zip");
         try
@@ -271,11 +295,11 @@ public sealed class ModMarketplace
     public static async Task<bool> RestoreFormAssetsAsync(ServerLocation location, MarketplaceMod mod,
         CancellationToken cancellationToken)
     {
-        var installed = InstalledMetadata(location, mod.Id);
+        var installed = InstalledMetadata(location, mod.InstallId);
         if (installed is null || !installed.Catalog.Equals(mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
             !installed.Version.Equals(mod.Version, StringComparison.Ordinal) ||
             !installed.Sha256.Equals(mod.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
-        var modRoot = Path.Combine(location.ModsRoot, mod.Id);
+        var modRoot = Path.Combine(location.ModsRoot, mod.InstallId);
         var dataRoot = Path.Combine(modRoot, "Data");
         var formPath = Path.Combine(dataRoot, "server-configuration.override.json");
         var configSchemaPath = Path.Combine(dataRoot, "config.schema.json");
@@ -303,17 +327,19 @@ public sealed class ModMarketplace
     public static bool RestoreFormAssets(ServerLocation location, MarketplaceMod mod, byte[]? form,
         IReadOnlyDictionary<string, byte[]> translations, byte[]? configSchema = null)
     {
-        var installed = InstalledMetadata(location, mod.Id);
+        var installed = InstalledMetadata(location, mod.InstallId);
         if (installed is null || !installed.Catalog.Equals(mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
             !installed.Version.Equals(mod.Version, StringComparison.Ordinal) ||
             !installed.Sha256.Equals(mod.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
-        var modRoot = Path.Combine(location.ModsRoot, mod.Id);
+        var modRoot = Path.Combine(location.ModsRoot, mod.InstallId);
         var dataRoot = Path.Combine(modRoot, "Data");
         var translationsRoot = Path.Combine(dataRoot, "FormTranslations");
         foreach (var path in new[] { location.ModsRoot, modRoot, dataRoot, translationsRoot })
             if (Directory.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
                 throw new InvalidDataException("The mod form path contains a directory link.");
-        if (!File.Exists(Path.Combine(modRoot, "dlls", "main.dll"))) return false;
+        if (OperatingSystem.IsLinux()
+                ? !Directory.EnumerateFiles(modRoot, "*.so", SearchOption.TopDirectoryOnly).Any()
+                : !File.Exists(Path.Combine(modRoot, "dlls", "main.dll"))) return false;
         if (form is not null) FormSchema.LoadBase().ApplyOverride(form);
         if (form is not null && mod.FormSchemaOverrideSha256 is { Length: 64 } expectedHash &&
             !Convert.ToHexString(SHA256.HashData(form)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
@@ -392,12 +418,19 @@ public sealed class ModMarketplace
     }
 
     public static bool BriefcaseRuntimeInstalled(ServerLocation location) =>
-        File.Exists(Path.Combine(location.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll"));
+        File.Exists(Path.Combine(location.BriefcaseRoot, "Core", OperatingSystem.IsLinux()
+            ? "libBriefcase.NativeHost.so" : "Briefcase.NativeHost.dll"));
 
     public static void Install(ServerLocation location, MarketplaceMod mod, string archiveFile, byte[]? logoBytes = null,
         byte[]? formOverrideBytes = null, IReadOnlyDictionary<string, byte[]>? formTranslations = null,
         byte[]? configSchemaBytes = null)
     {
+        if (OperatingSystem.IsLinux())
+        {
+            LinuxModPackageInstaller.Install(location, mod, archiveFile, logoBytes, formOverrideBytes,
+                formTranslations, configSchemaBytes);
+            return;
+        }
         using (var running = ServerProcess.Find(location))
             if (running is not null) throw new InvalidOperationException("Stop the server before installing or updating a mod.");
         if (!BriefcaseRuntimeInstalled(location))

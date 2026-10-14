@@ -51,6 +51,13 @@ public static class ServerInstanceFiles
         if (!instance.IsInstance) return;
         if (!Directory.Exists(instance.InstanceRoot))
             throw new DirectoryNotFoundException("The server instance directory is missing.");
+        if (OperatingSystem.IsLinux())
+        {
+            if (!File.Exists(Path.Combine(instance.BriefcaseRoot, "Core", "libBriefcase.NativeHost.so")) ||
+                !File.Exists(Path.Combine(instance.BriefcaseRoot, "Core", "libBriefcase.ServerBootstrap.so")))
+                throw new InvalidOperationException("Install Briefcase for this Linux server instance before starting it.");
+            return;
+        }
         MigrateLegacyRuntime(instance);
         var target = instance.Ue4ssRoot;
         var bridge = "BriefcaseServerBridge";
@@ -83,6 +90,7 @@ public static class ServerInstanceFiles
     /// <summary>Copies an old shared runtime once, without changing or removing files in the Steam build.</summary>
     public static void MigrateLegacyRuntime(ServerLocation instance)
     {
+        if (OperatingSystem.IsLinux()) return;
         if (!instance.IsInstance || !Directory.Exists(instance.InstanceRoot) ||
             File.Exists(Path.Combine(instance.InstanceRoot, FreshInstanceMarker))) return;
         var installedHost = Path.Combine(instance.BriefcaseRoot, "Core", "Briefcase.NativeHost.dll");

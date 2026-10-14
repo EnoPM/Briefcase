@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Win32.SafeHandles;
 
 namespace Briefcase.ServerApp;
 
@@ -19,9 +21,14 @@ public static partial class ServerNetworkStatusReader
 {
     private const int MaximumLogBytes = 8 * 1024 * 1024;
 
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenReadOnly(string path, int flags);
+
     public static ServerNetworkStatus Read(ServerLocation location, DateTime processStartedUtc)
     {
-        var logs = Path.Combine(location.InstallRoot, "DeceiveInc", "Saved", "Logs");
+        var logs = OperatingSystem.IsLinux() && location.IsInstance
+            ? Path.Combine(location.InstanceRoot, "GameView", "DeceiveInc", "Saved", "Logs")
+            : Path.Combine(location.InstallRoot, "DeceiveInc", "Saved", "Logs");
         var (gamePort, queryPort) = ServerProcess.ReadPorts(location.ConfigFile);
         return ReadFromDirectory(logs, processStartedUtc, gamePort, queryPort,
             location.IsInstance ? location.ConfigFile : null);
@@ -81,6 +88,7 @@ public static partial class ServerNetworkStatusReader
                 upnp = value.StartsWith("Mapped", StringComparison.OrdinalIgnoreCase)
                     ? NetworkCheck.Ready : value.StartsWith("disabled", StringComparison.OrdinalIgnoreCase)
                         ? NetworkCheck.Disabled : value.StartsWith("Failed", StringComparison.OrdinalIgnoreCase)
+                            || value.StartsWith("Not Available", StringComparison.OrdinalIgnoreCase)
                             ? NetworkCheck.Failed : NetworkCheck.Unknown;
             }
             if (line.Contains("OnCreateSessionComplete: SessionName:GameSession Success:",
@@ -122,8 +130,8 @@ public static partial class ServerNetworkStatusReader
 
     private static string ReadBounded(string path, long length)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
+        using var stream = OperatingSystem.IsLinux() ? OpenLinuxLog(path) :
+            new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         if (length <= MaximumLogBytes)
             using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
                 return reader.ReadToEnd();
@@ -133,6 +141,16 @@ public static partial class ServerNetworkStatusReader
         stream.Seek(-2 * 1024 * 1024, SeekOrigin.End);
         using var tailReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
         return Encoding.UTF8.GetString(head, 0, headLength) + "\n" + tailReader.ReadToEnd();
+    }
+
+    private static FileStream OpenLinuxLog(string path)
+    {
+        // Unreal holds the active log with a sharing mode that .NET's FileStream
+        // enforces even though a plain POSIX read is safe and does not lock it.
+        var descriptor = OpenReadOnly(path, 0);
+        if (descriptor < 0)
+            throw new IOException($"Unable to read the server log (errno {Marshal.GetLastPInvokeError()}).");
+        return new FileStream(new SafeFileHandle((nint)descriptor, ownsHandle: true), FileAccess.Read);
     }
 
     [GeneratedRegex(@"(?<ip>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})")]

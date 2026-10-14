@@ -21,6 +21,9 @@ internal static class LauncherElevation
 
     private static async Task RunAsync(string[] arguments, CancellationToken cancellationToken)
     {
+        if (OperatingSystem.IsLinux())
+            throw new UnauthorizedAccessException(
+                "Briefcase cannot update files in this folder. Move the installation to a folder you can write to.");
         var executable = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Briefcase.exe");
         if (!File.Exists(executable))
             throw new FileNotFoundException("The launcher executable is unavailable.", executable);

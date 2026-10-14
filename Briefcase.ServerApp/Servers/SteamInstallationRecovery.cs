@@ -17,7 +17,8 @@ public static class SteamInstallationRecovery
         ValidateStage(root, stage);
         if (!Directory.Exists(root) || !Directory.Exists(stage) ||
             SteamCmdService.InstalledBuildIdAtRoot(stage) is null ||
-            !File.Exists(Path.Combine(stage, "DeceiveInc", "Binaries", "Win64", "DeceiveIncServer-Win64-Shipping.exe")))
+            !File.Exists(Path.Combine(stage, "DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64",
+                OperatingSystem.IsLinux() ? "DeceiveIncServer-Linux-Shipping" : "DeceiveIncServer-Win64-Shipping.exe")))
             throw new InvalidDataException("The clean Steam download is incomplete; the old server was left intact.");
         if (new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint) ||
             new DirectoryInfo(stage).Attributes.HasFlag(FileAttributes.ReparsePoint))
@@ -27,16 +28,32 @@ public static class SteamInstallationRecovery
         ValidateSibling(root, backup, BackupSuffix);
         CopyLocalData(root, stage);
         File.WriteAllText(Path.Combine(stage, ".briefcase-steam-branch"), branch);
-        Directory.Move(root, backup);
-        try { Directory.Move(stage, root); }
+        MoveWithRetry(root, backup);
+        try { MoveWithRetry(stage, root); }
         catch
         {
-            Directory.Move(backup, root);
+            MoveWithRetry(backup, root);
             throw;
         }
         // The new installation is active. A locked backup may remain for manual cleanup.
         try { Directory.Delete(backup, recursive: true); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static void MoveWithRetry(string source, string target)
+    {
+        var wait = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            try { Directory.Move(source, target); return; }
+            catch (IOException error) when (OperatingSystem.IsWindows() &&
+                                            (error.HResult & 0xffff) is 5 or 32 or 33 &&
+                                            wait.Elapsed < TimeSpan.FromSeconds(5))
+            { Thread.Sleep(100); }
+            catch (UnauthorizedAccessException) when (OperatingSystem.IsWindows() &&
+                                                      wait.Elapsed < TimeSpan.FromSeconds(5))
+            { Thread.Sleep(100); }
+        }
     }
 
     public static void DeleteStageIfPresent(string installRoot, string stageRoot)
@@ -65,8 +82,8 @@ public static class SteamInstallationRecovery
         foreach (var relative in new[]
         {
             Path.Combine("DeceiveInc", "Saved"),
-            Path.Combine("DeceiveInc", "Binaries", "Win64", "Briefcase"),
-            Path.Combine("DeceiveInc", "Binaries", "Win64", "ue4ss")
+            Path.Combine("DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64", "Briefcase"),
+            Path.Combine("DeceiveInc", "Binaries", OperatingSystem.IsLinux() ? "Linux" : "Win64", "ue4ss")
         }) CopyTreeIfPresent(Path.Combine(root, relative), Path.Combine(stage, relative));
         foreach (var relative in new[]
         {

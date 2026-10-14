@@ -46,10 +46,11 @@ public sealed class LauncherUpdateService
         if (!Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+$"))
             throw new InvalidDataException("Invalid application release version.");
         var version = tag[1..];
-        var name = $"Briefcase.ServerApp-win-x64-{version}.zip";
+        var platform = OperatingSystem.IsLinux() ? "linux-x64" : "win-x64";
+        var name = $"Briefcase.ServerApp-{platform}-{version}.zip";
         var matches = root.GetProperty("assets").EnumerateArray()
             .Where(asset => asset.GetProperty("name").GetString() == name).ToArray();
-        if (matches.Length != 1) throw new InvalidDataException("The latest release has no unique Windows application archive.");
+        if (matches.Length != 1) throw new InvalidDataException($"The latest release has no unique {platform} application archive.");
         var asset = matches[0];
         var browser = new Uri(asset.GetProperty("browser_download_url").GetString()!);
         var expected = $"https://github.com/{repository}/releases/download/{tag}/{name}";

@@ -39,6 +39,7 @@ public sealed record PlayerTeamSlot(int Team, int Position, PlayerRow? Player)
 
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
+    public bool IsWindows => OperatingSystem.IsWindows();
     private readonly IReadOnlyList<DemoServerProfile> _demoProfiles = [];
     public bool IsDemo { get; }
     private readonly Dictionary<string, ServerLiveClient> _connections = new(StringComparer.OrdinalIgnoreCase);
@@ -78,7 +79,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             if (pid is { } processId && !_connections.ContainsKey(location.LiveKey))
                 _connections.Add(location.LiveKey,
-                    new ServerLiveClient(processId, _serverTransport, OnLiveStateChanged,
+                    new ServerLiveClient(processId,
+                        OperatingSystem.IsLinux()
+                            ? new UnixServerSocketTransport(location.BriefcaseRoot)
+                            : _serverTransport, OnLiveStateChanged,
                         location.IsInstance ? location.InstanceId : null));
             var live = _connections.TryGetValue(location.LiveKey, out var connection)
                 ? connection.Latest : null;
@@ -335,7 +339,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
     public string NetworkAddress => CanCopyNetworkAddress ? NetworkStatus.Address : "—";
     public bool CanCopyNetworkAddress => NetworkStatus.Address.Length > 0;
-    public string NetworkFirewall => NetworkLabel(NetworkStatus.Firewall, "network.allowed", "network.blocked");
+    public string NetworkFirewall => OperatingSystem.IsLinux() && IsRunning &&
+        NetworkStatus.Firewall == NetworkCheck.Unknown
+        ? AppTranslations.Get("network.not_checked", "Not checked")
+        : NetworkLabel(NetworkStatus.Firewall, "network.allowed", "network.blocked");
     public string NetworkUpnp => NetworkLabel(NetworkStatus.Upnp, "network.mapped", "network.failed");
     public string NetworkEos => NetworkLabel(NetworkStatus.Eos, "network.connected", "network.failed");
     public IBrush NetworkFirewallColor => NetworkColor(NetworkStatus.Firewall);
@@ -364,7 +371,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _isRunning;
         private set
         {
-            if (Set(ref _isRunning, value)) UpdateActions();
+            if (Set(ref _isRunning, value))
+            {
+                UpdateActions();
+                OnPropertyChanged(nameof(NetworkFirewall));
+            }
         }
     }
     public bool IsBusy
@@ -721,8 +732,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             if (serverName is not null) serverName = AppDataStore.ValidateServerName(serverName);
-            var existingShipping = Path.Combine(Path.GetFullPath(folder), "DeceiveInc", "Binaries", "Win64",
-                "DeceiveIncServer-Win64-Shipping.exe");
+            var existingShipping = Path.Combine(Path.GetFullPath(folder), "DeceiveInc", "Binaries",
+                OperatingSystem.IsLinux() ? "Linux" : "Win64",
+                OperatingSystem.IsLinux() ? "DeceiveIncServer-Linux-Shipping" : "DeceiveIncServer-Win64-Shipping.exe");
             if (File.Exists(existingShipping) && File.Exists(Path.Combine(folder, "steamapps", "appmanifest_5007710.acf")))
             {
                 AddServer(existingShipping, managed: true, serverName: serverName);
@@ -870,8 +882,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private static MarketplaceMod WithMarketplaceStatus(ServerLocation location, MarketplaceMod mod)
     {
-        var version = ModMarketplace.InstalledVersion(location, mod.Id);
-        var exists = Directory.Exists(Path.Combine(location.ModsRoot, mod.Id));
+        if (!mod.PlatformAvailable)
+            return mod with { Status = AppTranslations.Get("market.linux_unavailable", "Linux package not yet available"), CanApply = false,
+                IsInstalled = Directory.Exists(Path.Combine(location.ModsRoot, mod.InstallId)) };
+        var version = ModMarketplace.InstalledVersion(location, mod.InstallId);
+        var exists = Directory.Exists(Path.Combine(location.ModsRoot, mod.InstallId));
         var updateAvailable = exists && (version.Length == 0 || GitHubReleaseService.IsNewer(mod.Version, version));
         var status = !exists ? AppTranslations.Get("market.not_installed") : version.Length == 0
             ? AppTranslations.Get("market.installed_unknown")
@@ -894,6 +909,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task InstallMarketplaceModAsync(MarketplaceMod mod) => await RunBusyAsync(async progress =>
     {
+        if (!mod.PlatformAvailable)
+            throw new InvalidOperationException(AppTranslations.Get("market.linux_unavailable", "Linux package not yet available"));
         if (!ServerLocation.TryCreate(SelectedServer, out var location, out var error)) throw new InvalidDataException(error);
         using (var running = ServerProcess.Find(location!))
             if (running is not null) throw new InvalidOperationException("Stop the server before installing or updating a mod.");
@@ -920,7 +937,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         async Task InstallElevatedAsync() => await ElevatedUpdateService.RunAsync("mod", location!.Win64,
             progress, CancellationToken.None, mod.Catalog, mod.Id, mod.Sha256,
             location.InstanceRoot, location.InstanceId, Registry.DataDirectory);
-        if (ElevatedUpdateService.NeedsElevation(location!.Win64) ||
+        if (OperatingSystem.IsLinux())
+        {
+            if (ElevatedUpdateService.NeedsElevation(location!.ModsRoot))
+                throw new UnauthorizedAccessException("The Linux mod directory is not writable by this user.");
+            await InstallNormallyAsync();
+        }
+        else if (ElevatedUpdateService.NeedsElevation(location!.Win64) ||
             ElevatedUpdateService.NeedsElevation(location.ModsRoot))
             await InstallElevatedAsync();
         else
@@ -1245,6 +1268,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (!Registry.BriefcaseUpdatesEnabled &&
             GitHubReleaseService.InstalledBriefcaseVersion(location!) is not null)
             throw new InvalidOperationException(AppTranslations.Get("updates.briefcase_disabled"));
+        if (OperatingSystem.IsLinux())
+        {
+            if (ElevatedUpdateService.NeedsElevation(location!.BriefcaseRoot))
+                throw new UnauthorizedAccessException("The Linux Briefcase directory is not writable by this user.");
+            return await new BriefcaseInstallService().InstallOrUpdateAsync(location, progress, CancellationToken.None);
+        }
         if (ElevatedUpdateService.NeedsElevation(location!.Win64) ||
             ElevatedUpdateService.NeedsElevation(location.BriefcaseRoot))
         {
@@ -1491,7 +1520,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             GitHubReleaseService.InstalledBriefcaseVersion(location) is not null)
         {
             Message = AppTranslations.Get("status.updating_briefcase_before_start", "Updating Briefcase before server startup…");
-            if (ElevatedUpdateService.NeedsElevation(location.Win64) ||
+            if (OperatingSystem.IsLinux())
+            {
+                if (ElevatedUpdateService.NeedsElevation(location.BriefcaseRoot))
+                    throw new UnauthorizedAccessException("The Linux Briefcase directory is not writable by this user.");
+                await new BriefcaseInstallService().InstallOrUpdateAsync(location, progress, CancellationToken.None);
+            }
+            else if (ElevatedUpdateService.NeedsElevation(location.Win64) ||
                 ElevatedUpdateService.NeedsElevation(location.BriefcaseRoot))
                 await ElevatedUpdateService.RunAsync("briefcase", location.Win64, progress, CancellationToken.None);
             else
@@ -1504,7 +1539,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var marketplace = new ModMarketplace();
         foreach (var mod in MarketplaceMods.ToArray())
         {
-            var installed = ModMarketplace.InstalledMetadata(location, mod.Id);
+            if (!mod.PlatformAvailable) continue;
+            var installed = ModMarketplace.InstalledMetadata(location, mod.InstallId);
             if (installed is null || !string.Equals(installed.Catalog, mod.Catalog, StringComparison.OrdinalIgnoreCase) ||
                 !GitHubReleaseService.IsNewer(mod.Version, installed.Version)) continue;
             Message = AppTranslations.Format("status.updating_mod_before_start", "Updating {0} before server startup…", mod.Name);
@@ -1528,7 +1564,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             async Task InstallElevatedAsync() => await ElevatedUpdateService.RunAsync("mod", location.Win64,
                 progress, CancellationToken.None, mod.Catalog, mod.Id, mod.Sha256,
                 location.InstanceRoot, location.InstanceId);
-            if (ElevatedUpdateService.NeedsElevation(location.Win64) ||
+            if (OperatingSystem.IsLinux())
+            {
+                if (ElevatedUpdateService.NeedsElevation(location.ModsRoot))
+                    throw new UnauthorizedAccessException("The Linux mod directory is not writable by this user.");
+                await InstallNormallyAsync();
+            }
+            else if (ElevatedUpdateService.NeedsElevation(location.Win64) ||
                 ElevatedUpdateService.NeedsElevation(location.ModsRoot))
                 await InstallElevatedAsync();
             else

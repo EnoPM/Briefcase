@@ -140,6 +140,7 @@ public static class ServerIniEditor
         if (content is null) return (values, Maps.Select(x => x.Id).ToList());
         var activeSection = "";
         var rotationSpecified = false;
+        var explicitRotation = false;
         foreach (var line in content.Split('\n'))
         {
             var raw = line.Trim();
@@ -153,7 +154,12 @@ public static class ServerIniEditor
                 key.TrimStart('!', '+', '-', '.').Equals("MapRotation", StringComparison.OrdinalIgnoreCase))
             {
                 rotationSpecified = true;
-                if (key[0] == '!') { maps.Clear(); continue; }
+                if (key[0] == '!') { maps.Clear(); explicitRotation = false; continue; }
+                // Unreal can append bare MapRotation entries when it saves its settings.
+                // Once an explicit array has been written, those entries are a copy of
+                // the chosen rotation, not additional maps selected by the user.
+                if (key[0] is '+' or '.') explicitRotation = true;
+                else if (explicitRotation) continue;
                 foreach (var map in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
                 {
                     var id = map.Trim('"');
@@ -249,6 +255,45 @@ public static class ServerIniEditor
         File.WriteAllText(temporary, updated, new UTF8Encoding(false));
         if (File.Exists(file)) File.Copy(file, backup, true);
         File.Move(temporary, file, true);
+    }
+
+    public static bool RepairServerWrittenMapRotation(string file)
+    {
+        if (!File.Exists(file)) return false;
+        var original = File.ReadAllText(file);
+        var active = false;
+        var explicitRotation = false;
+        var appended = false;
+        foreach (var line in original.Split('\n'))
+        {
+            var raw = line.Trim();
+            if (raw.StartsWith('['))
+            {
+                active = raw.Equals("[" + Section + "]", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+            if (!active || raw.StartsWith(';') || raw.StartsWith('#')) continue;
+            var equals = raw.IndexOf('=');
+            if (equals < 1) continue;
+            var key = raw[..equals].Trim();
+            if (!key.TrimStart('!', '+', '-', '.').Equals("MapRotation", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (key[0] is '+' or '.') explicitRotation = true;
+            else if (explicitRotation) appended = true;
+        }
+        if (!appended) return false;
+        var (_, maps) = ReadText(original);
+        if (maps.Count == 0) return false;
+        var updated = RenderMapRotationText(original, maps);
+        var temporary = file + ".briefcase-tmp";
+        try
+        {
+            File.WriteAllText(temporary, updated, new UTF8Encoding(false));
+            File.Copy(file, file + ".briefcase-backup", true);
+            File.Move(temporary, file, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return true;
     }
 
     public static string RenderMapRotationText(string original, IReadOnlyList<string> maps)

@@ -11,7 +11,8 @@ public sealed class ServerLocation
     public bool IsInstance => InstanceId.Length > 0;
     public string LiveKey => IsInstance ? InstanceId : Win64;
     public string Ue4ssRoot => Path.Combine(IsInstance ? InstanceRoot : Win64, "ue4ss");
-    public string ModsRoot => Path.Combine(Ue4ssRoot, "Mods");
+    public string ModsRoot => OperatingSystem.IsLinux()
+        ? Path.Combine(BriefcaseRoot, "Mods") : Path.Combine(Ue4ssRoot, "Mods");
     public string ConfigFile { get; private set; }
     public string BalanceProfileFile { get; private set; }
     public string BalanceTemplateFile { get; }
@@ -19,10 +20,10 @@ public sealed class ServerLocation
     private ServerLocation(string win64)
     {
         Win64 = win64;
-        Shipping = Path.Combine(win64, "DeceiveIncServer-Win64-Shipping.exe");
+        Shipping = Path.Combine(win64, OperatingSystem.IsLinux() ? "DeceiveIncServer-Linux-Shipping" : "DeceiveIncServer-Win64-Shipping.exe");
         var gameRoot = Directory.GetParent(Directory.GetParent(win64)!.FullName)!.FullName;
         InstallRoot = Directory.GetParent(gameRoot)!.FullName;
-        ConfigFile = Path.Combine(gameRoot, "Saved", "Config", "WindowsServer", "TripwireServer.ini");
+        ConfigFile = Path.Combine(gameRoot, "Saved", "Config", OperatingSystem.IsLinux() ? "LinuxServer" : "WindowsServer", "TripwireServer.ini");
         BalanceProfileFile = Path.Combine(gameRoot, "CommunityBalanceProfile.json");
         BalanceTemplateFile = Path.Combine(gameRoot, "Community Balance Template", "CommunityBalanceProfile.default.json");
     }
@@ -48,7 +49,9 @@ public sealed class ServerLocation
     public static bool TryCreateFromExecutable(string? executable, out ServerLocation? location, out string error)
     {
         location = null;
-        error = "Select DeceiveIncServer.exe or DeceiveIncServer-Win64-Shipping.exe from a dedicated server installation.";
+        error = OperatingSystem.IsLinux()
+            ? "Select DeceiveIncServer-Linux-Shipping from a dedicated server installation."
+            : "Select DeceiveIncServer.exe or DeceiveIncServer-Win64-Shipping.exe from a dedicated server installation.";
         if (string.IsNullOrWhiteSpace(executable)) return false;
 
         string full;
@@ -65,6 +68,8 @@ public sealed class ServerLocation
                 out location, out error);
         if (name.Equals("DeceiveIncServer-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase))
             return TryCreate(Path.GetDirectoryName(full), out location, out error);
+        if (OperatingSystem.IsLinux() && name == "DeceiveIncServer-Linux-Shipping")
+            return TryCreate(Path.GetDirectoryName(full), out location, out error);
         return false;
     }
 
@@ -74,7 +79,9 @@ public sealed class ServerLocation
         error = "";
         if (string.IsNullOrWhiteSpace(path))
         {
-            error = "Choose the dedicated server's Win64 directory.";
+            error = OperatingSystem.IsLinux()
+                ? "Choose the dedicated server's Linux binaries directory."
+                : "Choose the dedicated server's Win64 directory.";
             return false;
         }
         try
@@ -82,17 +89,21 @@ public sealed class ServerLocation
             var full = Path.GetFullPath(path.Trim());
             var win64 = new DirectoryInfo(full);
             if (!win64.Exists ||
-                !win64.Name.Equals("Win64", StringComparison.OrdinalIgnoreCase) ||
+                !win64.Name.Equals(OperatingSystem.IsLinux() ? "Linux" : "Win64", StringComparison.OrdinalIgnoreCase) ||
                 win64.Parent?.Name.Equals("Binaries", StringComparison.OrdinalIgnoreCase) != true ||
                 win64.Parent.Parent?.Name.Equals("DeceiveInc", StringComparison.OrdinalIgnoreCase) != true)
             {
-                error = "Select DeceiveInc\\Binaries\\Win64 from the dedicated server installation.";
+                error = OperatingSystem.IsLinux()
+                    ? "Select DeceiveInc/Binaries/Linux from the dedicated server installation."
+                    : "Select DeceiveInc\\Binaries\\Win64 from the dedicated server installation.";
                 return false;
             }
             var candidate = new ServerLocation(win64.FullName);
             if (!File.Exists(candidate.Shipping))
             {
-                error = "The dedicated server Shipping executable was not found in Win64.";
+                error = OperatingSystem.IsLinux()
+                    ? "The Linux dedicated server executable was not found."
+                    : "The dedicated server Shipping executable was not found in Win64.";
                 return false;
             }
             location = candidate;
