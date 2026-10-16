@@ -13,11 +13,11 @@ portable installation. Extract it to a folder owned by your user and run
 `./Briefcase` there. The portable copy can update itself through the launcher.
 Do not mix the contents of the ZIP into an installation managed by `apt`.
 
-Linux mods need separate `.so` packages. A Windows mod archive containing a
-`.dll` cannot be installed on Ubuntu; the marketplace shows such packages as
-unavailable until a Linux build is published for that mod.
+The built-in marketplace includes Linux packages for PlayerCap, PregameTimer,
+SuspicionControl and Spectator Mode. Install or update them on a stopped server;
+Briefcase verifies each archive and preserves existing mod configuration.
 
-This branch starts from the published ServerApp 0.1.5 source, before the client/agent split. It keeps server management inside the Avalonia application on Ubuntu. It does not change the shared SteamCMD game files: each server keeps its INI, balance profile, Briefcase runtime and mods in its own instance directory. On Linux, the game ignores `-TripwireServerIni`; the app therefore creates `GameView` in each instance. The view copies the roughly 110 MB Shipping executable, links immutable Steam assets, and keeps the project's INI, balance profile and `Saved` logs private. A separate executable inode is required by the native launcher's safety checks. SteamCMD updates are blocked while an instance using that shared installation runs.
+The Linux release uses the standalone ServerApp, before the client/agent split. It keeps server management inside the Avalonia application on Ubuntu. It does not change the shared SteamCMD game files: each server keeps its INI, balance profile, Briefcase runtime and mods in its own instance directory. On Linux, the game ignores `-TripwireServerIni`; the app therefore creates `GameView` in each instance. The view copies the roughly 110 MB Shipping executable, links immutable Steam assets, and keeps the project's INI, balance profile and `Saved` logs private. A separate executable inode is required by the native launcher's safety checks. SteamCMD updates are blocked while an instance using that shared installation runs.
 
 ## Local AOT test build
 
@@ -25,7 +25,7 @@ On Ubuntu, with .NET 10, Clang, and zlib development headers installed:
 
 ```sh
 ./scripts/Publish-LinuxLocal.sh \
-  --native-package /path/to/BriefcaseNative-Server-linux-x64-0.8.7.zip \
+  --native-package /path/to/BriefcaseNative-Server-linux-x64-0.8.8.zip \
   --output "$HOME/Briefcase-linux-test"
 "$HOME/Briefcase-linux-test/Briefcase"
 ```
@@ -38,7 +38,7 @@ The app uses the bundled native package as an offline fallback. If a newer verif
 
 ## Linux mods
 
-Catalog schema 3 supports `packages.windows-x64` and `packages.linux-x64`, each with `downloadUrl`, `archiveSha256`, and optional `installId`. `installId` identifies the actual Briefcase/Mods directory and can differ from the catalog's stable ID. Schema 1 and 2 catalogs remain readable; their Windows archives are visible but cannot be installed on Linux.
+The official `marketplace/catalog-v3.json` uses schema 3, which supports `packages.windows-x64` and `packages.linux-x64`, each with `downloadUrl`, `archiveSha256`, and optional `installId`. `installId` identifies the actual Briefcase/Mods directory and can differ from the catalog's stable ID. Schema 1 and 2 catalogs remain readable; their Windows archives are visible but cannot be installed on Linux.
 
 Linux mod ZIPs require `ModPackage.json` with an exact file inventory and SHA-256 per file, plus `Briefcase/Mods/<installId>/briefcase.mod.json` and the declared `.so`. The app rejects unexpected files, links, traversal, mismatched IDs or versions, and changed hashes. Installation stages a new directory, keeps the existing `Data/config.json`, swaps the directory while the server is stopped, and records catalog metadata. Installed native mods can be enabled, disabled and removed through `Briefcase/settings.json`.
 

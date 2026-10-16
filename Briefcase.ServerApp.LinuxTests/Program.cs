@@ -165,7 +165,7 @@ try
           parsed.DownloadUrl.AbsoluteUri == "https://example.org/linux.zip", "Linux package selected from catalog");
     var defaultCatalog = ModMarketplace.ParseCatalog(
         File.ReadAllBytes(Path.Combine(Directory.GetCurrentDirectory(), "marketplace", "catalog.json")),
-        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
+        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog-v3.json");
     Check(defaultCatalog.Count == 4 && defaultCatalog.All(entry => entry.PlatformAvailable &&
           entry.InstallId.StartsWith("briefcase.", StringComparison.Ordinal)),
         "default catalog exposes four native Linux mods");

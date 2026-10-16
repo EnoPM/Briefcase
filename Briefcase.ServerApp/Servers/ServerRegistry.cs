@@ -86,8 +86,10 @@ public sealed class ServerRegistry
 {
     private readonly bool _inMemory;
     public const int SchemaVersion = 4;
-    public const string OfficialCatalogUrl =
+    private const string LegacyOfficialCatalogUrl =
         "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json";
+    public const string OfficialCatalogUrl =
+        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog-v3.json";
     public string FilePath { get; private set; }
     public string DataDirectory => Path.GetDirectoryName(FilePath)!;
     public string LoadError { get; private set; } = "";
@@ -306,17 +308,27 @@ public sealed class ServerRegistry
                         out _, out _))
                     Installations.Add(new ServerInstallation(Guid.NewGuid().ToString("N"), "public", legacyRoot));
             }
+            var upgradedDefaultCatalog = false;
             if (root.TryGetProperty("catalogUrls", out var urls))
                 foreach (var value in urls.EnumerateArray())
                     if (value.GetString() is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
                         uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo))
-                        CatalogUrls.Add(uri.AbsoluteUri);
+                    {
+                        var officialUrl = uri.AbsoluteUri.Equals(LegacyOfficialCatalogUrl,
+                            StringComparison.OrdinalIgnoreCase) ? OfficialCatalogUrl : uri.AbsoluteUri;
+                        upgradedDefaultCatalog |= !officialUrl.Equals(uri.AbsoluteUri, StringComparison.Ordinal);
+                        if (!CatalogUrls.Contains(officialUrl, StringComparer.OrdinalIgnoreCase))
+                            CatalogUrls.Add(officialUrl);
+                    }
             if (schema < 4 && !CatalogUrls.Contains(OfficialCatalogUrl, StringComparer.OrdinalIgnoreCase))
                 CatalogUrls.Add(OfficialCatalogUrl);
-            if (schema < SchemaVersion && !_inMemory)
+            if ((schema < SchemaVersion || upgradedDefaultCatalog) && !_inMemory)
             {
-                var backup = FilePath + $".v{schema}-backup";
-                if (!File.Exists(backup)) File.Copy(FilePath, backup);
+                if (schema < SchemaVersion)
+                {
+                    var backup = FilePath + $".v{schema}-backup";
+                    if (!File.Exists(backup)) File.Copy(FilePath, backup);
+                }
                 doc.Dispose();
                 stream.Dispose();
                 Save();

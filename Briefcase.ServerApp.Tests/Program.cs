@@ -10,7 +10,7 @@ using Briefcase.ServerApp.Launcher;
 if (args is ["--verify-catalog", var catalogPath])
 {
     var mods = ModMarketplace.ParseCatalog(File.ReadAllBytes(catalogPath),
-        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
+        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog-v3.json");
     Check(mods.Count == 4 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 4,
         "published mod catalog contains four distinct installable entries");
     Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
@@ -965,6 +965,14 @@ try
     var defaultCatalogRegistry = new ServerRegistry(defaultCatalogSettings);
     Check(defaultCatalogRegistry.CatalogUrls.SequenceEqual([ServerRegistry.OfficialCatalogUrl]),
         "new installations include the official marketplace catalog");
+    var legacyCatalogSettings = Path.Combine(temp, "legacy-catalog-settings.json");
+    var legacyCatalogRegistry = new ServerRegistry(legacyCatalogSettings);
+    legacyCatalogRegistry.RemoveCatalog(ServerRegistry.OfficialCatalogUrl);
+    legacyCatalogRegistry.AddCatalog("https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
+    var migratedCatalogRegistry = new ServerRegistry(legacyCatalogSettings);
+    Check(migratedCatalogRegistry.CatalogUrls.SequenceEqual([ServerRegistry.OfficialCatalogUrl]) &&
+          new ServerRegistry(legacyCatalogSettings).CatalogUrls.SequenceEqual([ServerRegistry.OfficialCatalogUrl]),
+        "existing profiles migrate the official catalog without losing the choice");
     defaultCatalogRegistry.RemoveCatalog(ServerRegistry.OfficialCatalogUrl);
     Check(new ServerRegistry(defaultCatalogSettings).CatalogUrls.Count == 0,
         "removing the default catalog is preserved across launches");

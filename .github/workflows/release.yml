@@ -91,7 +91,7 @@ jobs:
         run: |
           dotnet run --project Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj -c Release
           if ($LASTEXITCODE) { throw 'ServerApp contracts failed.' }
-          dotnet run --project Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj -c Release -- --verify-catalog marketplace/catalog.json
+          dotnet run --project Briefcase.ServerApp.Tests/Briefcase.ServerApp.Tests.csproj -c Release -- --verify-catalog marketplace/catalog-v3.json
           if ($LASTEXITCODE) { throw 'Marketplace catalog verification failed.' }
 
       - name: Publish launcher and application AOT archive
@@ -203,7 +203,8 @@ jobs:
             '- Supports dedicated-server build 25777350, including the new player limits, minimum deployment count and tournament CSV option.',
             '- Retries a failed SteamCMD update with a clean download while retaining local server settings.',
             '- Corrects map rotation saving and restores the LootControl configuration editor and its item images.',
-            '- Updates BriefcaseNative and keeps PlayerCap, PregameTimer and SuspicionControl available through the marketplace.'
+            '- Adds Linux packages for PlayerCap, PregameTimer, SuspicionControl and Spectator Mode to the marketplace.',
+            '- Includes BriefcaseNative 0.8.8 with Linux Spectator Mode support and per-instance server runtime.'
           ) | Set-Content -LiteralPath $notes -Encoding utf8
           gh release create "v$version" $archive $installer --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Briefcase $version" --notes-file $notes --draft
           if ($LASTEXITCODE) { throw 'Failed to create the draft release.' }
