@@ -11,12 +11,18 @@ if (args is ["--verify-catalog", var catalogPath])
 {
     var mods = ModMarketplace.ParseCatalog(File.ReadAllBytes(catalogPath),
         "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
-    Check(mods.Count == 3 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 3,
-        "published mod catalog contains three distinct installable entries");
+    Check(mods.Count == 4 && mods.Select(mod => mod.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 4,
+        "published mod catalog contains four distinct installable entries");
     Check(mods.All(mod => mod.LogoUrl is not null && mod.LogoSha256 is not null) &&
           mods.Single(mod => mod.Id == "briefcaseplayercap") is { FormSchemaOverrideUrl: not null,
               FormSchemaOverrideSha256: not null, FormTranslations.Count: 2 },
         "official mods have verified logos and PlayerCap declares a translated form override");
+    using var platformCatalog = JsonDocument.Parse(File.ReadAllBytes(catalogPath));
+    Check(platformCatalog.RootElement.GetProperty("schemaVersion").GetInt32() == 3 &&
+          platformCatalog.RootElement.GetProperty("mods").EnumerateArray().All(item =>
+              item.GetProperty("packages").TryGetProperty("windows-x64", out _) &&
+              item.GetProperty("packages").TryGetProperty("linux-x64", out _)),
+        "published catalog provides both platform packages");
     var playerCap = mods.Single(mod => mod.Id == "briefcaseplayercap");
     byte[] Asset(string url) => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(catalogPath)!, "assets",
         Path.GetFileName(new Uri(url).AbsolutePath)));

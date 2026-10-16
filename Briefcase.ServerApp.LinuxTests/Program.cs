@@ -163,9 +163,19 @@ try
     var parsed = ModMarketplace.ParseCatalog(v3, catalogUrl).Single();
     Check(parsed.PlatformAvailable && parsed.InstallId == "fixture.mod" &&
           parsed.DownloadUrl.AbsoluteUri == "https://example.org/linux.zip", "Linux package selected from catalog");
+    var defaultCatalog = ModMarketplace.ParseCatalog(
+        File.ReadAllBytes(Path.Combine(Directory.GetCurrentDirectory(), "marketplace", "catalog.json")),
+        "https://raw.githubusercontent.com/EnoPM/Briefcase/main/marketplace/catalog.json");
+    Check(defaultCatalog.Count == 4 && defaultCatalog.All(entry => entry.PlatformAvailable &&
+          entry.InstallId.StartsWith("briefcase.", StringComparison.Ordinal)),
+        "default catalog exposes four native Linux mods");
     if (args.Length >= 1)
     {
-        var real = new MarketplaceMod("briefcasepregametimer", "Pregame Timer", "", "0.3.7",
+        using var realArchive = ZipFile.OpenRead(args[0]);
+        using var manifestStream = realArchive.GetEntry("ModPackage.json")!.Open();
+        using var packageManifest = JsonDocument.Parse(manifestStream);
+        var packageVersion = packageManifest.RootElement.GetProperty("version").GetString()!;
+        var real = new MarketplaceMod("briefcasepregametimer", "Pregame Timer", "", packageVersion,
             new Uri("https://example.org/pregame.zip"), new string('b', 64), catalogUrl,
             Author: "Test", CatalogSchema: 3)
         { PlatformInstallId = "briefcase.pregame-timer", PlatformAvailable = true };
